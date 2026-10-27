@@ -11,6 +11,7 @@ import (
 
 	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/lipgloss"
+	lgtable "github.com/charmbracelet/lipgloss/table"
 	"github.com/mattn/go-runewidth"
 	"github.com/muesli/termenv"
 	"golang.org/x/term"
@@ -36,6 +37,8 @@ func SetPlain(plain bool) {
 	plainMode = plain
 	if plain {
 		lipgloss.SetColorProfile(termenv.Ascii)
+		// Plain output is read by machines: it keeps the one stable shape.
+		_ = theme.UseLook(theme.Classic)
 	}
 }
 
@@ -131,18 +134,26 @@ func StatusBadge(status string) string {
 	upper := strings.ToUpper(status)
 	switch upper {
 	case "UP", "DONE", "PASS", "COMPLETED", "ENABLED":
-		return SuccessStyle.Bold(true).Render(Glyphs().Bullet + " " + upper)
+		return badge(SuccessStyle.Bold(true), Glyphs().Bullet+" "+upper)
 	case "RUNNING", "PENDING":
-		return AccentStyle.Bold(true).Render(Glyphs().DotOn + " " + upper)
+		return badge(AccentStyle.Bold(true), Glyphs().DotOn+" "+upper)
 	case "DEGRADED", "STOPPING":
-		return WarningStyle.Bold(true).Render(Glyphs().Diamond + " " + upper)
+		return badge(WarningStyle.Bold(true), Glyphs().Diamond+" "+upper)
 	case "DOWN", "FAILED", "ERROR", "FAIL":
-		return ErrorStyle.Render(Glyphs().Cross + " " + upper)
+		return badge(ErrorStyle, Glyphs().Cross+" "+upper)
 	case "DISABLED":
-		return DimStyle.Render(Glyphs().Ring + " " + upper)
+		return badge(DimStyle, Glyphs().Ring+" "+upper)
 	default:
-		return DimStyle.Render(Glyphs().Ring + " " + status)
+		return badge(DimStyle, Glyphs().Ring+" "+status)
 	}
+}
+
+// badge draws a status in its style, or as a pill of its color in Chips.
+func badge(style lipgloss.Style, text string) string {
+	if theme.CurrentLook().Name == theme.Chips {
+		return theme.Pill(style.GetForeground(), text)
+	}
+	return style.Render(text)
 }
 
 // ClearFrame starts a new frame of a refreshing display. When clear is true
@@ -160,6 +171,11 @@ func ClearFrame(clear bool) {
 }
 
 func Header(text string) {
+	if !theme.CurrentLook().Classic() {
+		fmt.Fprintln(Out)
+		fmt.Fprintln(Out, theme.TitleBar(text, "", 44))
+		return
+	}
 	bar := lipgloss.NewStyle().Foreground(Purple).Render(strings.Repeat(Glyphs().HeavyRule, 42))
 	title := lipgloss.NewStyle().Bold(true).Foreground(HeaderColor).Render("  " + text)
 	fmt.Fprintln(Out)
@@ -244,6 +260,12 @@ func table(headers []string, rows [][]string, notes []string) {
 		Hint("No data to display.")
 		return
 	}
+	// shortcut: a table with notes keeps the Classic layout in every look;
+	// lipgloss tables have no room for a line under a row.
+	if l := theme.CurrentLook(); !l.Classic() && notes == nil {
+		lookTable(l, headers, rows)
+		return
+	}
 
 	widths := make([]int, len(headers))
 	for i, h := range headers {
@@ -286,27 +308,11 @@ func table(headers []string, rows [][]string, notes []string) {
 				continue
 			}
 			pure := stripAnsi(cell)
-			upper := strings.ToUpper(pure)
 			padded := PadRight(pure, widths[i])
 
-			var rendered string
-			switch upper {
-			case "UP", "DONE", "PASS", "ENABLED":
-				rendered = SuccessStyle.Bold(true).Render(pure) + padded[len(pure):]
-			case "RUNNING", "PENDING":
-				rendered = AccentStyle.Bold(true).Render(pure) + padded[len(pure):]
-			case "FAILED", "ERROR", "DOWN", "DISABLED", "FAIL":
-				rendered = ErrorStyle.Render(pure) + padded[len(pure):]
-			case "DEGRADED", "STOPPING":
-				rendered = WarningStyle.Render(pure) + padded[len(pure):]
-			case "▲":
-				rendered = ErrorStyle.Render("▲") + padded[len("▲"):]
-			case "▼":
-				rendered = SuccessStyle.Render("▼") + padded[len("▼"):]
-			case "→":
-				rendered = SuccessStyle.Bold(true).Render("→") + padded[len("→"):]
-			default:
-				rendered = cellFg.Render(padded)
+			rendered := cellFg.Render(padded)
+			if st, ok := statusStyle(pure); ok {
+				rendered = st.Render(pure) + padded[len(pure):]
 			}
 			line += "  " + rendered
 		}
@@ -314,6 +320,61 @@ func table(headers []string, rows [][]string, notes []string) {
 		if r < len(notes) {
 			printNote(notes[r], indent)
 		}
+	}
+	fmt.Fprintln(Out)
+}
+
+// statusStyle is the style of a table cell that names a status or a trend.
+func statusStyle(cell string) (lipgloss.Style, bool) {
+	switch strings.ToUpper(cell) {
+	case "UP", "DONE", "PASS", "ENABLED", "→":
+		return SuccessStyle.Bold(true), true
+	case "RUNNING", "PENDING":
+		return AccentStyle.Bold(true), true
+	case "FAILED", "ERROR", "DOWN", "DISABLED", "FAIL", "▲":
+		return ErrorStyle, true
+	case "DEGRADED", "STOPPING":
+		return WarningStyle, true
+	case "▼":
+		return SuccessStyle, true
+	}
+	return lipgloss.Style{}, false
+}
+
+// lookTable draws a table in a look other than Classic: its frame, column
+// lines and striped rows (Grid), status pills (Chips).
+func lookTable(l *theme.Look, headers []string, rows [][]string) {
+	cells := make([][]string, len(rows))
+	for r, row := range rows {
+		for _, cell := range row[:min(len(row), len(headers))] {
+			pure := stripAnsi(cell)
+			if st, ok := statusStyle(pure); ok {
+				pure = badge(st, pure)
+			}
+			cells[r] = append(cells[r], pure)
+		}
+	}
+	head := lipgloss.NewStyle().Bold(true).Foreground(KeyColor).Padding(0, 1)
+	cell := lipgloss.NewStyle().Padding(0, 1)
+	t := lgtable.New().Headers(headers...).Rows(cells...).
+		Border(*l.Border).BorderStyle(lipgloss.NewStyle().Foreground(l.Edge)).
+		BorderColumn(l.Name == theme.Grid).BorderRow(false)
+	switch l.Name {
+	case theme.Minimal, theme.Chips:
+		head = head.UnsetBold().Foreground(Gray)
+		t = t.BorderTop(false).BorderBottom(false).BorderLeft(false).BorderRight(false).BorderHeader(false)
+	}
+	t = t.StyleFunc(func(row, _ int) lipgloss.Style {
+		switch {
+		case row == lgtable.HeaderRow:
+			return head
+		case l.Name == theme.Grid && row%2 == 1:
+			return cell.Background(Surface)
+		}
+		return cell
+	})
+	for _, line := range strings.Split(t.Render(), "\n") {
+		fmt.Fprintln(Out, " "+line)
 	}
 	fmt.Fprintln(Out)
 }
@@ -354,7 +415,7 @@ func Banner(title, subtitle string) {
 
 	content := titleStyle.Render(title) + "\n" + subStyle.Render(subtitle)
 	fmt.Fprintln(Out)
-	fmt.Fprintln(Out, box.Render(content))
+	fmt.Fprintln(Out, theme.Box(box, true, content))
 }
 
 // MetricBar renders a consumption-style bar where approaching max is BAD —
@@ -485,7 +546,7 @@ func Panel(title, content string, width int) string {
 		BorderForeground(BorderColor).
 		Width(width).
 		Padding(0, 1)
-	return box.Render(titleStyled + "\n" + content)
+	return theme.TitledBox(box, false, titleStyled, content)
 }
 
 type ConfigEntry struct {

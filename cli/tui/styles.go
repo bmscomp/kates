@@ -77,3 +77,26 @@ var (
 				Foreground(amber).
 				Bold(true)
 )
+
+// tabStyles are the active tab, an inactive one and the bar's gap in the
+// current look.
+func tabStyles() (active, inactive, gap lipgloss.Style) {
+	tab := lipgloss.NewStyle().Padding(0, 2)
+	switch theme.CurrentLook().Name {
+	case theme.Panels:
+		return tab.Bold(true).Foreground(theme.OnColor).Background(theme.Accent),
+			tab.Foreground(theme.Muted).Background(theme.Surface), lipgloss.NewStyle().Background(theme.Surface)
+	case theme.Minimal:
+		return tab.Bold(true).Underline(true).Foreground(theme.Text), tab.Foreground(theme.Muted), lipgloss.NewStyle()
+	case theme.Grid:
+		sep := tab.Border(lipgloss.NormalBorder(), false, true, false, false).BorderForeground(theme.Subtle)
+		return sep.Bold(true).Foreground(theme.OnColor).Background(theme.Info), sep.Foreground(theme.Text), lipgloss.NewStyle()
+	case theme.Commander:
+		return tab.Bold(true).Foreground(theme.CommanderKey).Background(theme.CommanderInk),
+			tab.Foreground(theme.CommanderInk).Background(theme.CommanderBar), lipgloss.NewStyle().Background(theme.CommanderBar)
+	case theme.Chips:
+		chip := lipgloss.NewStyle().Padding(0, 1).Margin(0, 1, 0, 0)
+		return chip.Bold(true).Foreground(theme.OnColor).Background(theme.Accent), chip.Foreground(theme.Text).Background(theme.Surface), lipgloss.NewStyle()
+	}
+	return activeTabStyle, inactiveTabStyle, tabGapStyle
+}

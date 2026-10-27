@@ -362,6 +362,9 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.status = healthyStyle.Render("✓ Session saved to " + path)
 			}
+		case "T":
+			name := theme.NextLook()
+			m.status = dimStyle.Render("Look: " + name + "  ·  T for the next  ·  kates look set " + name + " keeps it")
 		case "L":
 			if path, ok := m.loadSession(); ok {
 				m.status = healthyStyle.Render("✓ Session loaded from " + path)
@@ -521,14 +524,21 @@ func (m LabModel) View() string {
 		w = 40
 	}
 
-	headerText := "  Kates Lab"
+	rest := ""
 	if w >= 60 {
-		headerText += "  ·  Interactive Performance Tuning"
+		rest += "  ·  Interactive Performance Tuning"
 	}
 	if w >= 100 && m.apiURL != "" {
-		headerText += "  →  " + m.apiURL
+		rest += "  →  " + m.apiURL
 	}
-	header := labHeaderStyle.Width(w - 2).Render(headerText)
+	header := labHeaderStyle.Width(w - 2).Render("  Kates Lab" + rest)
+	if l := theme.CurrentLook(); !l.Classic() {
+		headerW := w - 2
+		if l.FrameAll && w >= 80 {
+			headerW = w // as wide as the framed panes below it
+		}
+		header = theme.TitleBar("Kates Lab", rest, headerW)
+	}
 
 	var body string
 
@@ -537,9 +547,7 @@ func (m LabModel) View() string {
 		contentW := w - 4
 		leftContent := m.viewParams(contentW)
 		rightContent := m.viewResults(contentW - 4)
-		rightPane := detailBorderStyle.
-			Width(contentW).
-			Render(rightContent)
+		rightPane := theme.Box(detailBorderStyle.Width(contentW), false, rightContent)
 		body = leftContent + "\n" + rightPane
 	} else {
 		// Side-by-side: normal (35/65 at 80-119) or wide (50/50 at ≥120)
@@ -557,14 +565,14 @@ func (m LabModel) View() string {
 		leftContent := m.viewParams(leftW)
 		rightContent := m.viewResults(rightW - 6)
 
-		leftPane := lipgloss.NewStyle().
-			Width(leftW).
-			Padding(1, 2).
-			Render(leftContent)
-
-		rightPane := detailBorderStyle.
-			Width(rightW).
-			Render(rightContent)
+		left := lipgloss.NewStyle().Width(leftW).Padding(1, 2)
+		if theme.OpenPaneInset() > 0 {
+			// The frame takes the two columns the screen leaves spare and one
+			// of the padding, so the parameters keep all their room.
+			left = left.Width(leftW+theme.OpenPaneInset()-1).Padding(1, 1)
+		}
+		leftPane := theme.OpenPane(left, true, leftContent)
+		rightPane := theme.Box(detailBorderStyle.Width(rightW), false, rightContent)
 
 		body = lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
 	}
@@ -583,10 +591,17 @@ func (m LabModel) View() string {
 
 	help := m.renderHelp(m.helpKeys(), w)
 
-	return header + "\n\n" + body + statusBar + help
+	return theme.Screen(header+"\n\n"+body+statusBar+help, m.width, m.height)
 }
 
 func (m LabModel) renderHelp(keys []string, maxWidth int) string {
+	if !theme.CurrentLook().Classic() {
+		var sb strings.Builder
+		for _, l := range theme.KeyHints(keys, maxWidth-4) {
+			sb.WriteString("\n  " + l)
+		}
+		return sb.String()
+	}
 	sep := "  ·  "
 	avail := maxWidth - 4
 	var lines []string
@@ -632,7 +647,7 @@ func (m LabModel) helpKeys() []string {
 	if m.lastError != nil {
 		keys = append(keys, "r retry")
 	}
-	keys = append(keys, "q quit")
+	keys = append(keys, "T look", "q quit")
 	return keys
 }
 
@@ -707,7 +722,7 @@ func (m LabModel) viewParams(width int) string {
 				padded := fmt.Sprintf(" %-*s", valPad, v)
 				actualIdx := startIdx + vi
 				if actualIdx == p.Current {
-					b.WriteString(selectedValueStyle.Render(padded))
+					b.WriteString(theme.Pick(selectedValueStyle, padded))
 				} else {
 					b.WriteString(dimStyle.Render(padded))
 				}

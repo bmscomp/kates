@@ -378,6 +378,10 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusedPane = (m.focusedPane + 1) % 2
 			return m, nil
 		}
+		if msg.String() == "T" {
+			theme.NextLook()
+			return m, nil
+		}
 
 		var cmd tea.Cmd
 		if m.focusedPane == 0 {
@@ -615,7 +619,7 @@ func (m deployDashboardModel) View() string {
 		Width(m.width - 4)
 
 	headerContent := fmt.Sprintf("📦 Kates Cluster Deployment: %s %.0f%% (%d/%d Steps) │ Helm: %s", bar, pct*100, m.currentStep, m.totalSteps, m.helmVersion)
-	out.WriteString(headerStyle.Render(headerContent) + "\n")
+	out.WriteString(theme.Box(headerStyle, true, headerContent) + "\n")
 
 	compBorderStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
 	if m.focusedPane == 0 {
@@ -632,13 +636,13 @@ func (m deployDashboardModel) View() string {
 	}
 
 	split := lipgloss.JoinHorizontal(lipgloss.Top,
-		compBorderStyle.Render(m.componentsViewport.View()),
-		logBorderStyle.Render(m.logsViewport.View()),
+		theme.Box(compBorderStyle, m.focusedPane == 0, m.componentsViewport.View()),
+		theme.Box(logBorderStyle, m.focusedPane == 1, m.logsViewport.View()),
 	)
 	out.WriteString(split)
 	out.WriteString("\n")
 
-	return out.String()
+	return theme.Screen(out.String(), m.width, m.height)
 }
 
 // extend workloadStat to support phase

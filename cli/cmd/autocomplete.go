@@ -113,6 +113,13 @@ func completeThemeNames(cmd *cobra.Command, args []string, toComplete string) ([
 	return theme.Names(), cobra.ShellCompDirectiveNoFileComp
 }
 
+func completeLookNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return theme.LookNames(), cobra.ShellCompDirectiveNoFileComp
+}
+
 func completeTestTypes(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	types, err := apiClient.TestTypes(context.Background())
 	if err == nil && len(types) > 0 {
@@ -216,6 +223,11 @@ func registerSnapshotCompletions() {
 func registerThemeCompletions() {
 	themePreviewCmd.ValidArgsFunction = completeThemeNames
 	themeSetCmd.ValidArgsFunction = completeThemeNames
+	lookPreviewCmd.ValidArgsFunction = completeLookNames
+	lookSetCmd.ValidArgsFunction = completeLookNames
+	_ = rootCmd.RegisterFlagCompletionFunc("look", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return theme.LookNames(), cobra.ShellCompDirectiveNoFileComp
+	})
 }
 
 func registerCostCompletions() {

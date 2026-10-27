@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -107,6 +108,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
+		case "T":
+			theme.NextLook()
+			return m, nil
 		case "tab":
 			m.active = tab((int(m.active) + 1) % len(m.tabs))
 			return m, nil
@@ -250,19 +254,20 @@ func (m Model) View() string {
 	}
 	content += "\n" + help
 
-	return content
+	return theme.Screen(content, m.width, m.height)
 }
 
 func (m Model) renderTabs() string {
+	active, inactive, gapStyle := tabStyles()
 	var tabs []string
 	for i, t := range m.tabs {
 		if tab(i) == m.active {
-			tabs = append(tabs, activeTabStyle.Render(t))
+			tabs = append(tabs, active.Render(t))
 		} else {
-			tabs = append(tabs, inactiveTabStyle.Render(t))
+			tabs = append(tabs, inactive.Render(t))
 		}
 	}
 	row := lipgloss.JoinHorizontal(lipgloss.Bottom, tabs...)
-	gap := tabGapStyle.Width(m.width - lipgloss.Width(row)).Render("")
+	gap := gapStyle.Width(m.width - lipgloss.Width(row)).Render("")
 	return lipgloss.JoinHorizontal(lipgloss.Bottom, row, gap)
 }

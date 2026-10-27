@@ -6,9 +6,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/bmscomp/kates/cli/client"
 )
 
 type brokersModel struct {
@@ -122,13 +123,13 @@ func (m brokersModel) View() string {
 		}
 		label := fmt.Sprintf("Broker %v · %s%s", b.ID, rack, badge)
 		if i == m.cursor {
-			list.WriteString(selectedItemStyle.Render("▸ "+label) + "\n")
+			list.WriteString(theme.Pick(selectedItemStyle, "▸ "+label) + "\n")
 		} else {
 			list.WriteString(listItemStyle.Render("  "+label) + "\n")
 		}
 	}
 
-	listPane := lipgloss.NewStyle().Width(listWidth).Render(list.String())
+	listPane := theme.OpenPane(lipgloss.NewStyle().Width(listWidth), true, list.String())
 
 	b := m.info.Brokers[m.cursor]
 	isCtrl := fmt.Sprintf("%v", b.ID) == controllerID
@@ -157,7 +158,7 @@ func (m brokersModel) View() string {
 	if detailWidth < 20 {
 		detailWidth = 40
 	}
-	detailPane := detailBorderStyle.Width(detailWidth).Render(detail)
+	detailPane := theme.Box(detailBorderStyle.Width(detailWidth), false, detail)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane)
 }

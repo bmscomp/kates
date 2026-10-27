@@ -1,6 +1,11 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/bmscomp/kates/cli/pkg/theme"
+	"github.com/charmbracelet/lipgloss"
+)
 
 type helpContext int
 
@@ -13,32 +18,25 @@ const (
 )
 
 func renderHelp(ctx helpContext) string {
-	style := lipgloss.NewStyle().Foreground(gray)
-	sep := dimStyle.Render(" · ")
-
-	var keys string
+	var items []string
 	switch ctx {
 	case helpFilter:
-		keys = style.Render("Type to filter") + sep +
-			style.Render("Enter: apply") + sep +
-			style.Render("Esc: cancel")
+		items = []string{"Type to filter", "Enter: apply", "Esc: cancel"}
 	case helpDetail:
-		keys = style.Render("Esc/Backspace: back") + sep +
-			style.Render("c: consume (topics)") + sep +
-			style.Render("q: quit")
+		items = []string{"Esc/Backspace: back", "c: consume (topics)", "q: quit"}
 	case helpConsumer:
-		keys = style.Render("Esc: stop tailing") + sep +
-			style.Render("q: quit")
+		items = []string{"Esc: stop tailing", "q: quit"}
 	case helpProduce:
-		keys = style.Render("Tab: switch field") + sep +
-			style.Render("Enter: send") + sep +
-			style.Render("Esc: back to topic list")
+		items = []string{"Tab: switch field", "Enter: send", "Esc: back to topic list"}
 	default:
-		keys = style.Render("Tab/1-4: switch tab") + sep +
-			style.Render("↑/↓ j/k: navigate") + sep +
-			style.Render("Enter: detail") + sep +
-			style.Render("/: filter") + sep +
-			style.Render("q: quit")
+		items = []string{"Tab/1-4: switch tab", "↑/↓ j/k: navigate", "Enter: detail", "/: filter", "T: look", "q: quit"}
 	}
-	return statusBarStyle.Render(keys)
+	if !theme.CurrentLook().Classic() {
+		return " " + strings.Join(theme.KeyHints(items, 0), "")
+	}
+	style := lipgloss.NewStyle().Foreground(gray)
+	for i, it := range items {
+		items[i] = style.Render(it)
+	}
+	return statusBarStyle.Render(strings.Join(items, dimStyle.Render(" · ")))
 }

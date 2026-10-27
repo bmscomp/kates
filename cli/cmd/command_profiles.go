@@ -72,6 +72,7 @@ var commandProfiles = map[string][]string{
 	"status":        nil,
 	"test":          {"performance", "integrity", "chaos"},
 	"theme":         nil,
+	"look":          nil,
 	"tldr":          nil,
 	"top":           {"performance", "integrity"},
 	"trend":         {"performance"},

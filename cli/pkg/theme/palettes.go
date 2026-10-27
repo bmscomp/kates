@@ -2,12 +2,9 @@ package theme
 
 import (
 	"os"
-	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"gopkg.in/yaml.v3"
 )
 
 // Palette is one complete set of design tokens. Every role has a light and a
@@ -116,25 +113,7 @@ func Names() []string {
 
 // Requested is the theme asked for, before checking it exists: KATES_THEME,
 // else `theme:` in ~/.kates.yaml, else "".
-func Requested() string {
-	if v := strings.TrimSpace(os.Getenv("KATES_THEME")); v != "" {
-		return strings.ToLower(v)
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	data, err := os.ReadFile(filepath.Join(home, ".kates.yaml"))
-	if err != nil {
-		return ""
-	}
-	var cfg struct {
-		Theme string `yaml:"theme"`
-	}
-	// A config that does not parse is the CLI's to report, not the theme's.
-	_ = yaml.Unmarshal(data, &cfg)
-	return strings.ToLower(strings.TrimSpace(cfg.Theme))
-}
+func Requested() string { return pick(os.Getenv("KATES_THEME"), readUserConfig().Theme) }
 
 // Selected is the theme this process uses: the requested one when it exists,
 // else the default.

@@ -15,7 +15,10 @@ var themeCmd = &cobra.Command{
 	Use:   "theme",
 	Short: "List, preview and choose the CLI color theme",
 	Long: `Kates renders with one color theme, chosen when it starts:
-KATES_THEME if set, else "theme:" in ~/.kates.yaml, else "default".`,
+KATES_THEME if set, else "theme:" in ~/.kates.yaml, else "default".
+
+The theme sets the colors; the shapes (frames, tables, key hints) are the
+look: see kates look.`,
 }
 
 var themeListCmd = &cobra.Command{

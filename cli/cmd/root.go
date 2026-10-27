@@ -15,6 +15,7 @@ import (
 
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -25,6 +26,7 @@ var (
 	contextFlag      string
 	apiKeyFlag       string
 	plainOutput      bool
+	lookFlag         string
 	apiClient        *client.Client
 	activeContext    string
 	apiURLOverridden bool
@@ -53,6 +55,8 @@ type Config struct {
 	Contexts       map[string]Context `yaml:"contexts"`
 	// Theme names the palette pkg/theme renders with; empty is the default.
 	Theme string `yaml:"theme,omitempty"`
+	// Look names the look pkg/theme draws with; empty is Classic.
+	Look string `yaml:"look,omitempty"`
 }
 
 func configPath() string {
@@ -411,6 +415,7 @@ Toolbox:
   tldr           Quick command reference cheatsheet
   docs           Man-style documentation for all commands
   theme          Manage CLI color themes
+  look           Choose the CLI look: frames, tables, key hints
   mcp            Serve Kates to AI agents over MCP
   upgrade        Build and install a new version of the CLI
 
@@ -552,6 +557,11 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
+		if lookFlag != "" {
+			if err := theme.UseLook(lookFlag); err != nil {
+				return cmdErr(err.Error())
+			}
+		}
 		output.SetPlain(plainOutput)
 
 		if complete {
@@ -678,6 +688,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&contextFlag, "context", "", "Use a specific context instead of current")
 	rootCmd.PersistentFlags().StringVar(&apiKeyFlag, "api-key", "", "API key for authenticating with the server")
 	rootCmd.PersistentFlags().BoolVar(&plainOutput, "plain", false, "Disable interactive prompts and fancy UI formatting")
+	rootCmd.PersistentFlags().StringVar(&lookFlag, "look", "", "Draw this command in a look: "+strings.Join(theme.LookNames(), ", "))
 	rootCmd.AddCommand(docsCmd)
 
 	defaultHelp := rootCmd.HelpFunc()

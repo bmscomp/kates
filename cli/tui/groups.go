@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/bmscomp/kates/cli/client"
 )
 
 type groupsView int
@@ -175,13 +176,13 @@ func (m groupsModel) viewList() string {
 		}
 		label := fmt.Sprintf("%s %s", stateIcon, g.GroupID)
 		if i == m.cursor {
-			list.WriteString(selectedItemStyle.Render("▸ "+label) + "\n")
+			list.WriteString(theme.Pick(selectedItemStyle, "▸ "+label) + "\n")
 		} else {
 			list.WriteString(listItemStyle.Render("  "+label) + "\n")
 		}
 	}
 
-	listPane := lipgloss.NewStyle().Width(listWidth).Render(list.String())
+	listPane := theme.OpenPane(lipgloss.NewStyle().Width(listWidth), true, list.String())
 
 	var detailStr string
 	if m.cursor < len(m.groups) {
@@ -207,7 +208,7 @@ func (m groupsModel) viewList() string {
 	if detailWidth < 20 {
 		detailWidth = 40
 	}
-	detailPane := detailBorderStyle.Width(detailWidth).Render(detailStr)
+	detailPane := theme.Box(detailBorderStyle.Width(detailWidth), false, detailStr)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane)
 }
@@ -265,7 +266,7 @@ func (m groupsModel) viewDetail() string {
 
 	b.WriteString("\n" + dimStyle.Render("Esc: back"))
 
-	return detailBorderStyle.Width(m.width - 4).Render(b.String())
+	return theme.Box(detailBorderStyle.Width(m.width-4), true, b.String())
 }
 
 func (m groupsModel) helpCtx() helpContext {

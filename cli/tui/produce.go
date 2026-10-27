@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -236,13 +237,13 @@ func (m produceModel) viewTopicSelect() string {
 			label += dimStyle.Render(" (internal)")
 		}
 		if vi == m.cursor {
-			list.WriteString(selectedItemStyle.Render("▸ "+label) + "\n")
+			list.WriteString(theme.Pick(selectedItemStyle, "▸ "+label) + "\n")
 		} else {
 			list.WriteString(listItemStyle.Render("  "+label) + "\n")
 		}
 	}
 
-	listPane := lipgloss.NewStyle().Width(listWidth).Render(list.String())
+	listPane := theme.OpenPane(lipgloss.NewStyle().Width(listWidth), true, list.String())
 
 	var detailStr string
 	if m.cursor < len(m.topics) {
@@ -270,7 +271,7 @@ func (m produceModel) viewTopicSelect() string {
 	if detailWidth < 20 {
 		detailWidth = 40
 	}
-	detailPane := detailBorderStyle.Width(detailWidth).Render(detailStr)
+	detailPane := theme.Box(detailBorderStyle.Width(detailWidth), false, detailStr)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane)
 }
@@ -302,7 +303,7 @@ func (m produceModel) viewInput() string {
 
 	b.WriteString(dimStyle.Render("Tab: switch field · Enter: send · Esc: back"))
 
-	return detailBorderStyle.Width(m.width - 4).Render(b.String())
+	return theme.Box(detailBorderStyle.Width(m.width-4), true, b.String())
 }
 
 func (m produceModel) helpCtx() helpContext {
