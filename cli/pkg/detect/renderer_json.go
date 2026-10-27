@@ -11,9 +11,10 @@ func RenderJSON(report *DetectReport) {
 	output.JSON(report)
 }
 
-// RenderJSONTo writes the report as JSON to the given writer.
-func RenderJSONTo(report *DetectReport, w io.Writer) {
+// RenderJSONTo writes the report as JSON to the given writer, and returns
+// the write's error.
+func RenderJSONTo(report *DetectReport, w io.Writer) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	enc.Encode(report)
+	return enc.Encode(report)
 }

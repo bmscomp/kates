@@ -72,36 +72,60 @@ func (a *Analyzer) calculateBudget(report *DetectReport, reqs ParsedReqs) {
 }
 
 func (a *Analyzer) calculateVerdict(report *DetectReport) {
-	v := Verdict{}
+	b := &verdictBuilder{}
+	b.checkPlatform(report)
+	b.checkCapacity(report)
+	b.check("RBAC permissions", a.hasKafkaNamespaceRBAC(), "kafka namespace")
+	b.checkMonitoringAndDNS(report)
+	b.checkAZLatency(report)
+	b.checkSecretCapability(report)
+	b.checkStrimziOperator(report)
+	b.checkAdmission(report)
+	b.checkExistingInstalls(report)
+	b.checkSecurity(report)
+	b.checkEcosystem(report)
 
-	addCheck := func(desc string, pass bool, detail string) {
-		if !pass {
-			v.Fails++
-		}
-		v.Checks = append(v.Checks, CheckResult{
-			Description: desc,
-			Status:      pass,
-			Detail:      detail,
-		})
-	}
-	// addWarn is a passing row that counts as a warning: every warning has a
-	// row, so --fail-on-warning never exits 1 over something no report shows.
-	addWarn := func(desc, detail string) {
-		v.Warns++
-		v.Checks = append(v.Checks, CheckResult{Description: desc, Status: true, Warn: true, Detail: detail})
-	}
+	b.v.Compatible = b.v.Fails == 0
+	report.Verdict = b.v
+}
 
-	addCheck("Kubernetes version ≥ 1.25", report.K8sMinor >= 25, report.K8sVersion)
-	addCheck("Helm version ≥ 3.12", report.HelmMajor >= 3, report.HelmVersion)
+// verdictBuilder accumulates the verdict's rows; each check family below
+// appends its rows in the order the report lists them.
+type verdictBuilder struct {
+	v Verdict
+}
+
+func (b *verdictBuilder) check(desc string, pass bool, detail string) {
+	if !pass {
+		b.v.Fails++
+	}
+	b.v.Checks = append(b.v.Checks, CheckResult{
+		Description: desc,
+		Status:      pass,
+		Detail:      detail,
+	})
+}
+
+// warn is a passing row that counts as a warning: every warning has a
+// row, so --fail-on-warning never exits 1 over something no report shows.
+func (b *verdictBuilder) warn(desc, detail string) {
+	b.v.Warns++
+	b.v.Checks = append(b.v.Checks, CheckResult{Description: desc, Status: true, Warn: true, Detail: detail})
+}
+
+// checkPlatform covers versions, Strimzi CRDs, zones, and storage.
+func (b *verdictBuilder) checkPlatform(report *DetectReport) {
+	b.check("Kubernetes version ≥ 1.25", report.K8sMinor >= 25, report.K8sVersion)
+	b.check("Helm version ≥ 3.12", report.HelmMajor >= 3, report.HelmVersion)
 
 	// Treat absence of Strimzi CRDs as a warning rather than a fatal failure since they are deployed automatically by Kates.
 	if !report.Strimzi.CRDsPresent {
-		addWarn("Strimzi CRDs installed", "not present (will be installed by Kates)")
+		b.warn("Strimzi CRDs installed", "not present (will be installed by Kates)")
 	} else {
-		addCheck("Strimzi CRDs installed", true, "present")
+		b.check("Strimzi CRDs installed", true, "present")
 	}
 
-	addCheck("≥ 3 availability zones", len(report.Zones) >= 3, fmt.Sprintf("%d zone(s)", len(report.Zones)))
+	b.check("≥ 3 availability zones", len(report.Zones) >= 3, fmt.Sprintf("%d zone(s)", len(report.Zones)))
 
 	min1Node := true
 	for _, z := range report.Zones {
@@ -109,215 +133,247 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 			min1Node = false
 		}
 	}
-	addCheck("≥ 1 node per zone", min1Node, fmt.Sprintf("%d nodes across %d zones", len(report.Nodes), len(report.Zones)))
-	addCheck("StorageClass available", len(report.Storage) > 0, fmt.Sprintf("%d class(es)", len(report.Storage)))
+	b.check("≥ 1 node per zone", min1Node, fmt.Sprintf("%d nodes across %d zones", len(report.Nodes), len(report.Zones)))
+	b.check("StorageClass available", len(report.Storage) > 0, fmt.Sprintf("%d class(es)", len(report.Storage)))
+	b.checkDiskIOPS(report)
+}
 
-	// Disk IOPS of the class the pools will use — the default one — and not
-	// the best class on the cluster, which may be one nothing provisions
-	// from. The number is an estimate from the class's name unless the live
-	// bench measured it, and the row says which.
+// checkDiskIOPS judges the IOPS of the class the pools will use — the
+// default one — and not the best class on the cluster, which may be one
+// nothing provisions from. The number is an estimate from the class's name
+// unless the live bench measured it, and the row says which.
+func (b *verdictBuilder) checkDiskIOPS(report *DetectReport) {
 	const minIOPS = 1000
-	if sc, isDefault := defaultStorageClass(report.Storage); sc != nil {
-		basis := "estimated from the provisioner"
-		if sc.IOPSMeasured {
-			basis = "measured"
-		}
-		which := "default class"
-		if !isDefault {
-			which = "no default class; judging"
-		}
-		addCheck("Disk IOPS sufficient (≥ 1000)", sc.ProbedIOPS >= minIOPS,
-			fmt.Sprintf("%s %s: %d IOPS %s", which, sc.Name, sc.ProbedIOPS, basis))
+	sc, isDefault := defaultStorageClass(report.Storage)
+	if sc == nil {
+		return
 	}
+	basis := "estimated from the provisioner"
+	if sc.IOPSMeasured {
+		basis = "measured"
+	}
+	which := "default class"
+	if !isDefault {
+		which = "no default class; judging"
+	}
+	b.check("Disk IOPS sufficient (≥ 1000)", sc.ProbedIOPS >= minIOPS,
+		fmt.Sprintf("%s %s: %d IOPS %s", which, sc.Name, sc.ProbedIOPS, basis))
+}
 
-	addCheck("Controller resources fit", report.Budget.TotalCPU >= report.Budget.CtrlCPU && report.Budget.TotalMem >= report.Budget.CtrlMem, fmt.Sprintf("%dm needed", report.Budget.CtrlCPU))
-	addCheck("Broker resources fit (all zones)", report.Budget.TotalCPU >= report.Budget.NeedCPU && report.Budget.TotalMem >= report.Budget.NeedMem, fmt.Sprintf("%dm total needed", report.Budget.NeedCPU))
+// checkCapacity covers the resource budget and the replication guarantees
+// the zone count allows.
+func (b *verdictBuilder) checkCapacity(report *DetectReport) {
+	bud := report.Budget
+	b.check("Controller resources fit", bud.TotalCPU >= bud.CtrlCPU && bud.TotalMem >= bud.CtrlMem, fmt.Sprintf("%dm needed", bud.CtrlCPU))
+	b.check("Broker resources fit (all zones)", bud.TotalCPU >= bud.NeedCPU && bud.TotalMem >= bud.NeedMem, fmt.Sprintf("%dm total needed", bud.NeedCPU))
 
-	addCheck("Replication factor 3 achievable", len(report.Zones) >= 3, fmt.Sprintf("%d zones", len(report.Zones)))
-	addCheck("min.insync.replicas=2 safe", len(report.Zones) >= 3, "can lose 1 zone")
+	b.check("Replication factor 3 achievable", len(report.Zones) >= 3, fmt.Sprintf("%d zones", len(report.Zones)))
+	b.check("min.insync.replicas=2 safe", len(report.Zones) >= 3, "can lose 1 zone")
+}
 
-	hasRbac := true
+// hasKafkaNamespaceRBAC asks the API server whether the caller may create
+// every kind of object the chart installs in the kafka namespace.
+func (a *Analyzer) hasKafkaNamespaceRBAC() bool {
 	for _, res := range []string{"deployments", "statefulsets", "configmaps", "secrets", "services", "persistentvolumeclaims"} {
 		if check, _ := a.exec.Exec("kubectl", "auth", "can-i", "create", res, "-n", "kafka"); !strings.Contains(check, "yes") {
-			hasRbac = false
-			break
+			return false
 		}
 	}
-	addCheck("RBAC permissions", hasRbac, "kafka namespace")
+	return true
+}
 
+func (b *verdictBuilder) checkMonitoringAndDNS(report *DetectReport) {
 	// Treat absence of Prometheus monitoring CRD as a warning rather than a fatal failure since they are deployed automatically by Kates.
 	if !report.Monitoring.PodMonitorCRD {
-		addWarn("Prometheus monitoring", "PodMonitor CRD not present (will be installed by Kates)")
+		b.warn("Prometheus monitoring", "PodMonitor CRD not present (will be installed by Kates)")
 	} else {
-		addCheck("Prometheus monitoring", true, "PodMonitor CRD present")
+		b.check("Prometheus monitoring", true, "PodMonitor CRD present")
 	}
 
-	addCheck("DNS resolution", report.Network.CoreDNSRunning > 0, fmt.Sprintf("%d CoreDNS pod(s)", report.Network.CoreDNSRunning))
+	b.check("DNS resolution", report.Network.CoreDNSRunning > 0, fmt.Sprintf("%d CoreDNS pod(s)", report.Network.CoreDNSRunning))
+}
 
-	// Active AZ network latency check
-	if len(report.Network.LatencyMatrix) > 0 {
-		maxCrossAzAvg := 0.0
-		hasFailure := false
-		for _, r := range report.Network.LatencyMatrix {
-			if r.SourceZone != r.TargetZone {
-				if !r.Success {
-					hasFailure = true
-				}
-				if r.AvgMs > maxCrossAzAvg {
-					maxCrossAzAvg = r.AvgMs
-				}
+// checkAZLatency judges the worst measured cross-zone average.
+func (b *verdictBuilder) checkAZLatency(report *DetectReport) {
+	if len(report.Network.LatencyMatrix) == 0 {
+		return
+	}
+	maxCrossAzAvg := 0.0
+	hasFailure := false
+	for _, r := range report.Network.LatencyMatrix {
+		if r.SourceZone != r.TargetZone {
+			if !r.Success {
+				hasFailure = true
+			}
+			if r.AvgMs > maxCrossAzAvg {
+				maxCrossAzAvg = r.AvgMs
 			}
 		}
-
-		if hasFailure {
-			addWarn("AZ network latency (cross-zone)", "some zone probes failed")
-		} else if maxCrossAzAvg == 0.0 {
-			addCheck("AZ network latency (cross-zone)", true, "no cross-zone routes")
-		} else if maxCrossAzAvg > 15.0 {
-			addCheck("AZ network latency (cross-zone)", false, fmt.Sprintf("incompatible: max %.2fms (>15ms)", maxCrossAzAvg))
-		} else if maxCrossAzAvg > 5.0 {
-			addWarn("AZ network latency (cross-zone)", fmt.Sprintf("warning: max %.2fms (5-15ms)", maxCrossAzAvg))
-		} else {
-			addCheck("AZ network latency (cross-zone)", true, fmt.Sprintf("optimal: max %.2fms (<5ms)", maxCrossAzAvg))
-		}
 	}
 
-	// Secret creation check
-	if report.SecretAudit.NamespaceCreated {
-		if report.SecretAudit.SecretCreated {
-			addCheck("Kubernetes Secret capability", true, "verified (functional)")
-		} else if report.SecretAudit.BlockedByPolicy {
-			policyName := report.SecretAudit.PolicyName
-			if policyName == "" {
-				policyName = "unknown policy"
-			}
-			addCheck("Kubernetes Secret capability", false, fmt.Sprintf("blocked by admission policy: %s", policyName))
-		} else {
-			addCheck("Kubernetes Secret capability", false, fmt.Sprintf("failed: %s", report.SecretAudit.ErrorMsg))
-		}
-	} else if report.SecretAudit.ErrorMsg != "" {
-		addCheck("Kubernetes Secret capability", false, fmt.Sprintf("namespace blocked: %s", report.SecretAudit.ErrorMsg))
+	const desc = "AZ network latency (cross-zone)"
+	switch {
+	case hasFailure:
+		b.warn(desc, "some zone probes failed")
+	case maxCrossAzAvg == 0.0:
+		b.check(desc, true, "no cross-zone routes")
+	case maxCrossAzAvg > 15.0:
+		b.check(desc, false, fmt.Sprintf("incompatible: max %.2fms (>15ms)", maxCrossAzAvg))
+	case maxCrossAzAvg > 5.0:
+		b.warn(desc, fmt.Sprintf("warning: max %.2fms (5-15ms)", maxCrossAzAvg))
+	default:
+		b.check(desc, true, fmt.Sprintf("optimal: max %.2fms (<5ms)", maxCrossAzAvg))
 	}
+}
 
-	// Strimzi Operator health diagnostics
+func (b *verdictBuilder) checkSecretCapability(report *DetectReport) {
+	const desc = "Kubernetes Secret capability"
+	audit := report.SecretAudit
+	switch {
+	case audit.NamespaceCreated && audit.SecretCreated:
+		b.check(desc, true, "verified (functional)")
+	case audit.NamespaceCreated && audit.BlockedByPolicy:
+		policyName := audit.PolicyName
+		if policyName == "" {
+			policyName = "unknown policy"
+		}
+		b.check(desc, false, fmt.Sprintf("blocked by admission policy: %s", policyName))
+	case audit.NamespaceCreated:
+		b.check(desc, false, fmt.Sprintf("failed: %s", audit.ErrorMsg))
+	case audit.ErrorMsg != "":
+		b.check(desc, false, fmt.Sprintf("namespace blocked: %s", audit.ErrorMsg))
+	}
+}
+
+// checkStrimziOperator covers the operator's health and the capacity
+// status it reports.
+func (b *verdictBuilder) checkStrimziOperator(report *DetectReport) {
 	if report.Strimzi.Running {
-		healthStatus := report.Strimzi.Health.Status
-		if healthStatus == "Healthy" {
-			addCheck("Strimzi Operator health", true, "healthy")
-		} else if healthStatus == "Degraded" {
-			addWarn("Strimzi Operator health", "warning: operator degraded")
-		} else {
-			addWarn("Strimzi Operator health", "warning: operator unhealthy")
+		switch report.Strimzi.Health.Status {
+		case "Healthy":
+			b.check("Strimzi Operator health", true, "healthy")
+		case "Degraded":
+			b.warn("Strimzi Operator health", "warning: operator degraded")
+		default:
+			b.warn("Strimzi Operator health", "warning: operator unhealthy")
 		}
 	}
 
-	// Capacity budget audit
-	if report.Strimzi.CapacityStatus != "" && report.Strimzi.CapacityStatus != "Sufficient" {
-		addWarn("Strimzi Kafka capacity", report.Strimzi.CapacityStatus)
-	} else if report.Strimzi.CapacityStatus == "Sufficient" {
-		addCheck("Strimzi Kafka capacity", true, "sufficient resources allocated")
+	switch report.Strimzi.CapacityStatus {
+	case "":
+	case "Sufficient":
+		b.check("Strimzi Kafka capacity", true, "sufficient resources allocated")
+	default:
+		b.warn("Strimzi Kafka capacity", report.Strimzi.CapacityStatus)
 	}
+}
 
-	// Admission controller compatibility
-	if report.Admission.Kyverno.Installed {
-		enforced := 0
-		for _, p := range report.Admission.Kyverno.KafkaRelevant {
-			if strings.ToLower(p.Action) == "enforce" {
-				enforced++
-			}
-		}
-		kyvernoSafe := !report.Admission.Kyverno.Constraints.EmptyPodSelectorBlocked
-		if !kyvernoSafe {
-			// It's a warning, not a fail — the chart has Kyverno-safe selectors
-			v.Warns++
-		}
-		addCheck("Kyverno NetworkPolicy safe", true, fmt.Sprintf("%d enforced policies, explicit selectors used", enforced))
-
-		if report.Admission.Kyverno.Constraints.ResourceLimitsRequired {
-			addWarn("Resource limits required", "Kyverno enforces — verify values.yaml limits")
+// checkAdmission covers admission-controller compatibility.
+func (b *verdictBuilder) checkAdmission(report *DetectReport) {
+	kyverno := report.Admission.Kyverno
+	if !kyverno.Installed {
+		return
+	}
+	enforced := 0
+	for _, p := range kyverno.KafkaRelevant {
+		if strings.ToLower(p.Action) == "enforce" {
+			enforced++
 		}
 	}
+	if kyverno.Constraints.EmptyPodSelectorBlocked {
+		// It's a warning, not a fail — the chart has Kyverno-safe selectors
+		b.v.Warns++
+	}
+	b.check("Kyverno NetworkPolicy safe", true, fmt.Sprintf("%d enforced policies, explicit selectors used", enforced))
 
+	if kyverno.Constraints.ResourceLimitsRequired {
+		b.warn("Resource limits required", "Kyverno enforces — verify values.yaml limits")
+	}
+}
+
+// checkExistingInstalls warns about Kafka already on the cluster and about
+// Strimzi CRDs nothing reconciles.
+func (b *verdictBuilder) checkExistingInstalls(report *DetectReport) {
 	if n := report.ExistingKafka.KafkaClusters; n > 0 {
-		addWarn("Existing Kafka clusters", fmt.Sprintf("%d Kafka CR(s) already on the cluster — kates deploy adds another", n))
+		b.warn("Existing Kafka clusters", fmt.Sprintf("%d Kafka CR(s) already on the cluster — kates deploy adds another", n))
 	}
 	if !report.Strimzi.Running && report.Strimzi.CRDsPresent {
-		addWarn("Strimzi operator running", "CRDs present but no operator reconciles them — a Kafka CR would never become Ready")
+		b.warn("Strimzi operator running", "CRDs present but no operator reconciles them — a Kafka CR would never become Ready")
 	}
+}
 
-	// New pre-flight security audit check
-	psaPass := true
+// checkSecurity covers pod security, sizing, wildcard RBAC, and TLS
+// certificate expiry.
+func (b *verdictBuilder) checkSecurity(report *DetectReport) {
 	psaDetail := "none enforced"
 	if report.Security.PSALabelEnforced != "" && report.Security.PSALabelEnforced != "none" {
 		psaDetail = fmt.Sprintf("%s enforced (fully supported)", report.Security.PSALabelEnforced)
 	}
-	addCheck("Pod Security Standards compatible", psaPass, psaDetail)
+	b.check("Pod Security Standards compatible", true, psaDetail)
 
-	// New sizing advisor profile check
-	sizingPass := report.Budget.RecommendedProfile != "insufficient"
-	sizingDetail := fmt.Sprintf("profile: %s", report.Budget.RecommendedProfile)
-	addCheck("Sizing recommendation available", sizingPass, sizingDetail)
+	b.check("Sizing recommendation available", report.Budget.RecommendedProfile != "insufficient",
+		fmt.Sprintf("profile: %s", report.Budget.RecommendedProfile))
 
-	// Wildcard RBAC roles audit check
 	rbacPass := !report.Security.HasExcessivePrivileges
 	rbacDetail := "no wildcard rules"
 	if !rbacPass {
 		rbacDetail = "wildcard rules detected"
-		v.Warns++
+		b.v.Warns++
 	}
-	addCheck("Wildcard RBAC roles avoided", rbacPass, rbacDetail)
+	b.check("Wildcard RBAC roles avoided", rbacPass, rbacDetail)
 
-	// TLS Certificate validity audit check
 	certPass := true
 	certDetail := "all certificates valid"
-	expiringSoon := len(expiringCerts(report.Security.ExpiringCerts))
-	if expiringSoon > 0 {
+	if expiringSoon := len(expiringCerts(report.Security.ExpiringCerts)); expiringSoon > 0 {
 		certPass = false
 		certDetail = fmt.Sprintf("%d certificate(s) expiring in < 30 days", expiringSoon)
-		v.Warns++
+		b.v.Warns++
 	}
-	addCheck("TLS certificate validity", certPass, certDetail)
+	b.check("TLS certificate validity", certPass, certDetail)
+}
 
-	// Ecosystem / CDC Checks
-	if report.Ecosystem.KafkaConnect.Installed {
+// checkEcosystem covers Kafka Connect and the CDC pieces it depends on.
+func (b *verdictBuilder) checkEcosystem(report *DetectReport) {
+	eco := report.Ecosystem
+	if !eco.KafkaConnect.Installed {
+		return
+	}
+	b.checkConnectHeap(eco.KafkaConnect)
 
-		// Connect JVM health check
-		if report.Ecosystem.KafkaConnect.HeapXmx != "" && report.Ecosystem.KafkaConnect.MemLimitMi > 0 {
-			heapMi := parseJVMHeapMiB(report.Ecosystem.KafkaConnect.HeapXmx)
-			limitMi := report.Ecosystem.KafkaConnect.MemLimitMi
-			ratio := float64(heapMi) / float64(limitMi) * 100
-			if ratio > 75 {
-				addCheck("Connect JVM heap ratio", false, fmt.Sprintf("%.0f%% of limit — risks OOMKill, reduce -Xmx", ratio))
-			} else if ratio > 50 {
-				addWarn("Connect JVM heap ratio", fmt.Sprintf("%.0f%% of limit — limited off-heap space", ratio))
-			} else {
-				addCheck("Connect JVM heap ratio", true, fmt.Sprintf("%.0f%% of limit — healthy", ratio))
-			}
-		}
-
-		if !report.Ecosystem.KafkaConnect.TLSEnabled {
-			addWarn("Connect TLS", "disabled — traffic is plaintext")
-		}
-
-		if !report.Ecosystem.KafkaConnect.PDBConfigured {
-			addWarn("Connect PDB", "not configured — upgrades may cause downtime")
-		}
-
-		if !report.Ecosystem.SchemaRegistry.Installed {
-			addWarn("Schema Registry for CDC", "warning: not found (Debezium Avro requires it)")
-		} else {
-			addCheck("Schema Registry for CDC", report.Ecosystem.SchemaRegistry.Available, "available")
-		}
-
-		if report.Ecosystem.Database.Installed {
-			addCheck("Database CDC source", report.Ecosystem.Database.Accessible, "available in "+report.Ecosystem.Database.Namespace)
-		} else {
-			addWarn("Database CDC source", "warning: PostgreSQL not detected in cluster")
-		}
+	if !eco.KafkaConnect.TLSEnabled {
+		b.warn("Connect TLS", "disabled — traffic is plaintext")
+	}
+	if !eco.KafkaConnect.PDBConfigured {
+		b.warn("Connect PDB", "not configured — upgrades may cause downtime")
 	}
 
-	v.Compatible = v.Fails == 0
-	report.Verdict = v
+	if !eco.SchemaRegistry.Installed {
+		b.warn("Schema Registry for CDC", "warning: not found (Debezium Avro requires it)")
+	} else {
+		b.check("Schema Registry for CDC", eco.SchemaRegistry.Available, "available")
+	}
+
+	if eco.Database.Installed {
+		b.check("Database CDC source", eco.Database.Accessible, "available in "+eco.Database.Namespace)
+	} else {
+		b.warn("Database CDC source", "warning: PostgreSQL not detected in cluster")
+	}
+}
+
+// checkConnectHeap judges the Connect JVM's -Xmx against its memory limit.
+func (b *verdictBuilder) checkConnectHeap(kc KafkaConnectStatus) {
+	if kc.HeapXmx == "" || kc.MemLimitMi <= 0 {
+		return
+	}
+	ratio := float64(parseJVMHeapMiB(kc.HeapXmx)) / float64(kc.MemLimitMi) * 100
+	switch {
+	case ratio > 75:
+		b.check("Connect JVM heap ratio", false, fmt.Sprintf("%.0f%% of limit — risks OOMKill, reduce -Xmx", ratio))
+	case ratio > 50:
+		b.warn("Connect JVM heap ratio", fmt.Sprintf("%.0f%% of limit — limited off-heap space", ratio))
+	default:
+		b.check("Connect JVM heap ratio", true, fmt.Sprintf("%.0f%% of limit — healthy", ratio))
+	}
 }
 
 // defaultStorageClass is the class marked default, or, when none is, the

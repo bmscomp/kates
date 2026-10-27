@@ -115,7 +115,7 @@ func (c *Collector) PreflightContext(ctx context.Context) error {
 		return fmt.Errorf("helm is not installed or not in PATH")
 	}
 	if _, err := c.run(ctx, "kubectl", "cluster-info"); err != nil {
-		return fmt.Errorf("Kubernetes cluster is unreachable")
+		return fmt.Errorf("the Kubernetes cluster is unreachable")
 	}
 	return nil
 }
@@ -362,7 +362,9 @@ func (c *Collector) getK8sVersion(ctx context.Context) (version string, minor in
 			GitVersion string `json:"gitVersion"`
 		} `json:"serverVersion"`
 	}
-	json.Unmarshal([]byte(out), &data)
+	if err := json.Unmarshal([]byte(out), &data); err != nil {
+		return "unknown", 0, ""
+	}
 	minorStr := strings.TrimRight(data.ServerVersion.Minor, "+")
 	minor, _ = strconv.Atoi(minorStr)
 	return fmt.Sprintf("%s.%s", data.ServerVersion.Major, data.ServerVersion.Minor), minor, data.ServerVersion.GitVersion
@@ -494,7 +496,9 @@ func (c *Collector) getStorageClasses(ctx context.Context) []SCInfo {
 			AllowVolumeExpansion *bool  `json:"allowVolumeExpansion"`
 		} `json:"items"`
 	}
-	json.Unmarshal([]byte(out), &data)
+	if err := json.Unmarshal([]byte(out), &data); err != nil {
+		return nil
+	}
 	var scs []SCInfo
 	for _, sc := range data.Items {
 		isDefault := sc.Metadata.Annotations["storageclass.kubernetes.io/is-default-class"] == "true" ||
@@ -542,9 +546,10 @@ func (c *Collector) getStorageAudit(ctx context.Context) StorageAudit {
 		audit.PVCount = len(pvData.Items)
 		totalGi := 0
 		for _, pv := range pvData.Items {
-			if pv.Status.Phase == "Bound" {
+			switch pv.Status.Phase {
+			case "Bound":
 				audit.PVBoundCount++
-			} else if pv.Status.Phase == "Available" {
+			case "Available":
 				audit.PVAvailable++
 			}
 			cap := pv.Spec.Capacity.Storage
@@ -658,6 +663,24 @@ func (c *Collector) getExistingKafkaResources(ctx context.Context) KafkaResource
 func (c *Collector) getStrimziStatus(ctx context.Context) StrimziInfo {
 	info := StrimziInfo{}
 
+	missingCRDs := c.missingStrimziCRDs(ctx)
+	info.CRDsPresent = len(missingCRDs) == 0
+	info.Health.MissingCRDs = missingCRDs
+
+	c.findStrimziOperator(ctx, &info)
+
+	// Auditing Strimzi Operator pods and warning logs
+	if info.Running {
+		c.auditStrimziOperatorPod(ctx, &info)
+	} else {
+		info.Health.Status = "Unhealthy"
+	}
+
+	return info
+}
+
+// missingStrimziCRDs lists the required Strimzi CRDs the cluster lacks.
+func (c *Collector) missingStrimziCRDs(ctx context.Context) []string {
 	// Check CRDs - split into required core CRDs and optional helper CRDs
 	requiredCRDs := []string{
 		"kafkas.kafka.strimzi.io",
@@ -680,10 +703,12 @@ func (c *Collector) getStrimziStatus(ctx context.Context) StrimziInfo {
 	for _, crd := range optionalCRDs {
 		_, _ = c.run(ctx, "kubectl", "get", "crd", crd, "--no-headers")
 	}
+	return missingCRDs
+}
 
-	info.CRDsPresent = len(missingCRDs) == 0
-	info.Health.MissingCRDs = missingCRDs
-
+// findStrimziOperator fills the operator's deployment fields of info from
+// the first strimzi-cluster-operator deployment found.
+func (c *Collector) findStrimziOperator(ctx context.Context, info *StrimziInfo) {
 	// Find the deployment for strimzi operator (with permission-friendly namespace fallback).
 	// A refusal is an error from kubectl; the JSON of every deployment in the
 	// cluster may say "error" anywhere, a --log-level=error argument included.
@@ -714,304 +739,321 @@ func (c *Collector) getStrimziStatus(ctx context.Context) StrimziInfo {
 			} `json:"status"`
 		} `json:"items"`
 	}
-
-	if json.Unmarshal([]byte(depOut), &depData) == nil {
-		for _, dep := range depData.Items {
-			if strings.Contains(dep.Metadata.Name, "strimzi-cluster-operator") {
-				info.Running = true
-				info.Namespace = dep.Metadata.Namespace
-				if len(dep.Spec.Template.Spec.Containers) > 0 {
-					info.Image = dep.Spec.Template.Spec.Containers[0].Image
-				}
-				info.ReadyReplicas = dep.Status.ReadyReplicas
-				info.TotalReplicas = dep.Status.Replicas
-				break
+	if json.Unmarshal([]byte(depOut), &depData) != nil {
+		return
+	}
+	for _, dep := range depData.Items {
+		if strings.Contains(dep.Metadata.Name, "strimzi-cluster-operator") {
+			info.Running = true
+			info.Namespace = dep.Metadata.Namespace
+			if len(dep.Spec.Template.Spec.Containers) > 0 {
+				info.Image = dep.Spec.Template.Spec.Containers[0].Image
 			}
+			info.ReadyReplicas = dep.Status.ReadyReplicas
+			info.TotalReplicas = dep.Status.Replicas
+			return
 		}
 	}
+}
 
-	// Auditing Strimzi Operator pods and warning logs
-	if info.Running {
-		podOut, _ := c.run(ctx, "kubectl", "get", "pods", "-n", info.Namespace, "-l", "name=strimzi-cluster-operator", "-o", "json")
-		var podData struct {
-			Items []struct {
-				Metadata struct {
-					Name string `json:"name"`
-				} `json:"metadata"`
-				Status struct {
-					Phase             string `json:"phase"`
-					ContainerStatuses []struct {
-						Ready bool `json:"ready"`
-					} `json:"containerStatuses"`
-				} `json:"status"`
-			} `json:"items"`
+// auditStrimziOperatorPod sets the operator's health from its first pod
+// and collects the pod's recent warning log lines.
+func (c *Collector) auditStrimziOperatorPod(ctx context.Context, info *StrimziInfo) {
+	podOut, _ := c.run(ctx, "kubectl", "get", "pods", "-n", info.Namespace, "-l", "name=strimzi-cluster-operator", "-o", "json")
+	var podData struct {
+		Items []struct {
+			Metadata struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+			Status struct {
+				Phase             string `json:"phase"`
+				ContainerStatuses []struct {
+					Ready bool `json:"ready"`
+				} `json:"containerStatuses"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if json.Unmarshal([]byte(podOut), &podData) != nil || len(podData.Items) == 0 {
+		info.Health.Status = "Unhealthy"
+		return
+	}
+
+	pod := podData.Items[0]
+	podReady := pod.Status.Phase == "Running"
+	for _, cs := range pod.Status.ContainerStatuses {
+		if !cs.Ready {
+			podReady = false
 		}
+	}
+	info.Health.PodsReady = podReady
 
-		if json.Unmarshal([]byte(podOut), &podData) == nil && len(podData.Items) > 0 {
-			pod := podData.Items[0]
-			podReady := pod.Status.Phase == "Running"
-			for _, cs := range pod.Status.ContainerStatuses {
-				if !cs.Ready {
-					podReady = false
-				}
-			}
-			info.Health.PodsReady = podReady
-
-			// Set health status based on replicas and CRDs
-			if info.ReadyReplicas == info.TotalReplicas && podReady && info.CRDsPresent {
-				info.Health.Status = "Healthy"
-			} else if info.ReadyReplicas > 0 {
-				info.Health.Status = "Degraded"
-			} else {
-				info.Health.Status = "Unhealthy"
-			}
-
-			// Fetch logs
-			logs, _ := c.run(ctx, "kubectl", "logs", "-n", info.Namespace, pod.Metadata.Name, "--tail=100", "--since=15m")
-			var warningLogs []string
-			for _, line := range strings.Split(logs, "\n") {
-				lineLower := strings.ToLower(line)
-				if strings.Contains(lineLower, "warn") || strings.Contains(lineLower, "error") ||
-					strings.Contains(lineLower, "exception") || strings.Contains(lineLower, "denied") ||
-					strings.Contains(lineLower, "leader election") || strings.Contains(lineLower, "permission") {
-
-					// Ignore known harmless Strimzi warnings
-					if strings.Contains(lineLower, "platformfeaturesavailability") ||
-						strings.Contains(lineLower, "meterregistry") ||
-						strings.Contains(lineLower, "route.openshift.io") ||
-						strings.Contains(lineLower, "build.openshift.io") ||
-						strings.Contains(lineLower, "image.openshift.io") ||
-						strings.Contains(lineLower, "the gauge registration will be ignored") {
-						continue
-					}
-
-					warningLogs = append(warningLogs, line)
-					if len(warningLogs) >= 10 {
-						break
-					}
-				}
-			}
-			info.Health.WarningLogs = warningLogs
-		} else {
-			info.Health.Status = "Unhealthy"
-		}
-	} else {
+	// Set health status based on replicas and CRDs
+	switch {
+	case info.ReadyReplicas == info.TotalReplicas && podReady && info.CRDsPresent:
+		info.Health.Status = "Healthy"
+	case info.ReadyReplicas > 0:
+		info.Health.Status = "Degraded"
+	default:
 		info.Health.Status = "Unhealthy"
 	}
 
-	return info
+	logs, _ := c.run(ctx, "kubectl", "logs", "-n", info.Namespace, pod.Metadata.Name, "--tail=100", "--since=15m")
+	info.Health.WarningLogs = strimziWarningLogs(logs)
+}
+
+// strimziWarningLogs picks at most ten lines of operator log that look like
+// trouble, leaving out the warnings Strimzi logs on every healthy start.
+func strimziWarningLogs(logs string) []string {
+	var warningLogs []string
+	for _, line := range strings.Split(logs, "\n") {
+		lineLower := strings.ToLower(line)
+		if !containsAny(lineLower, "warn", "error", "exception", "denied", "leader election", "permission") {
+			continue
+		}
+		// Ignore known harmless Strimzi warnings
+		if containsAny(lineLower,
+			"platformfeaturesavailability",
+			"meterregistry",
+			"route.openshift.io",
+			"build.openshift.io",
+			"image.openshift.io",
+			"the gauge registration will be ignored") {
+			continue
+		}
+
+		warningLogs = append(warningLogs, line)
+		if len(warningLogs) >= 10 {
+			break
+		}
+	}
+	return warningLogs
+}
+
+// containsAny reports whether s contains any of subs.
+func containsAny(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Collector) getEcosystemStatus(ctx context.Context) EcosystemInfo {
-	info := EcosystemInfo{}
+	return EcosystemInfo{
+		KafkaConnect:   c.getKafkaConnectStatus(ctx),
+		SchemaRegistry: c.getSchemaRegistryStatus(ctx),
+		Database:       c.getDatabaseCDCStatus(ctx),
+	}
+}
 
-	// Kafka Connect Status
+// kafkaConnectItem is one KafkaConnect resource as kubectl prints it.
+type kafkaConnectItem struct {
+	Metadata struct {
+		Name      string `json:"name"`
+		Namespace string `json:"namespace"`
+	} `json:"metadata"`
+	Spec struct {
+		Replicas int    `json:"replicas"`
+		Image    string `json:"image"`
+		Build    *struct {
+			Output struct {
+				Image string `json:"image"`
+				Type  string `json:"type"`
+			} `json:"output"`
+		} `json:"build"`
+		Rack *struct {
+			TopologyKey string `json:"topologyKey"`
+		} `json:"rack"`
+		Tracing *struct {
+			Type string `json:"type"`
+		} `json:"tracing"`
+		JVMOptions *struct {
+			Xms string `json:"-Xms"`
+			Xmx string `json:"-Xmx"`
+		} `json:"jvmOptions"`
+		Resources *struct {
+			Requests *struct {
+				CPU    string `json:"cpu"`
+				Memory string `json:"memory"`
+			} `json:"requests"`
+			Limits *struct {
+				CPU    string `json:"cpu"`
+				Memory string `json:"memory"`
+			} `json:"limits"`
+		} `json:"resources"`
+		TLS *struct {
+			TrustedCertificates []struct {
+				SecretName string `json:"secretName"`
+			} `json:"trustedCertificates"`
+		} `json:"tls"`
+		Template *struct {
+			PDB *struct {
+				MaxUnavailable int `json:"maxUnavailable"`
+			} `json:"podDisruptionBudget"`
+		} `json:"template"`
+	} `json:"spec"`
+	Status struct {
+		Conditions []struct {
+			Type   string `json:"type"`
+			Status string `json:"status"`
+		} `json:"conditions"`
+		LabelSelector    string `json:"labelSelector"`
+		ConnectorPlugins []struct {
+			Class   string `json:"class"`
+			Type    string `json:"type"`
+			Version string `json:"version"`
+		} `json:"connectorPlugins"`
+	} `json:"status"`
+}
+
+// getKafkaConnectStatus describes the first KafkaConnect on the cluster,
+// its deployment's ready replicas, and the connectors in its namespace.
+func (c *Collector) getKafkaConnectStatus(ctx context.Context) KafkaConnectStatus {
 	kcOut, _ := c.run(ctx, "kubectl", "get", "kafkaconnect", "-A", "-o", "json")
 	var kcData struct {
+		Items []kafkaConnectItem `json:"items"`
+	}
+	if json.Unmarshal([]byte(kcOut), &kcData) != nil || len(kcData.Items) == 0 {
+		return KafkaConnectStatus{}
+	}
+	kc := kafkaConnectFromSpec(kcData.Items[0])
+
+	// Check deployment for ready replicas
+	depOut, _ := c.run(ctx, "kubectl", "get", "deployment", fmt.Sprintf("%s-connect", kc.Name), "-n", kc.Namespace, "-o", "jsonpath={.status.readyReplicas}")
+	if depOut != "" {
+		kc.ReadyReplicas, _ = strconv.Atoi(depOut)
+	}
+
+	kc.Connectors = c.getKafkaConnectors(ctx, kc.Namespace)
+	return kc
+}
+
+// kafkaConnectFromSpec reads what the KafkaConnect resource itself says.
+func kafkaConnectFromSpec(item kafkaConnectItem) KafkaConnectStatus {
+	spec := item.Spec
+	kc := KafkaConnectStatus{
+		Installed:      true,
+		Name:           item.Metadata.Name,
+		Namespace:      item.Metadata.Namespace,
+		TotalReplicas:  spec.Replicas,
+		Image:          spec.Image,
+		HasBuild:       spec.Build != nil,
+		RackAware:      spec.Rack != nil,
+		TracingEnabled: spec.Tracing != nil,
+		TLSEnabled:     spec.TLS != nil,
+		PDBConfigured:  spec.Template != nil && spec.Template.PDB != nil,
+	}
+	if spec.JVMOptions != nil {
+		kc.HeapXms = spec.JVMOptions.Xms
+		kc.HeapXmx = spec.JVMOptions.Xmx
+	}
+	if spec.Resources != nil {
+		if spec.Resources.Limits != nil {
+			kc.MemLimitMi = int(parseMemoryMiB(spec.Resources.Limits.Memory))
+			kc.CPULimitM = parseCPUMilli(spec.Resources.Limits.CPU)
+		}
+		if spec.Resources.Requests != nil {
+			kc.CPURequestM = parseCPUMilli(spec.Resources.Requests.CPU)
+		}
+	}
+	// Installed plugins from status
+	for _, p := range item.Status.ConnectorPlugins {
+		kc.Plugins = append(kc.Plugins, p.Class)
+	}
+	return kc
+}
+
+// getKafkaConnectors lists the KafkaConnectors in ns with their readiness.
+func (c *Collector) getKafkaConnectors(ctx context.Context, ns string) []ConnectorStatus {
+	kctorOut, _ := c.run(ctx, "kubectl", "get", "kafkaconnectors", "-n", ns, "-o", "json")
+	var kctorData struct {
 		Items []struct {
 			Metadata struct {
-				Name      string `json:"name"`
-				Namespace string `json:"namespace"`
+				Name string `json:"name"`
 			} `json:"metadata"`
 			Spec struct {
-				Replicas int    `json:"replicas"`
-				Image    string `json:"image"`
-				Build    *struct {
-					Output struct {
-						Image string `json:"image"`
-						Type  string `json:"type"`
-					} `json:"output"`
-				} `json:"build"`
-				Rack *struct {
-					TopologyKey string `json:"topologyKey"`
-				} `json:"rack"`
-				Tracing *struct {
-					Type string `json:"type"`
-				} `json:"tracing"`
-				JVMOptions *struct {
-					Xms string `json:"-Xms"`
-					Xmx string `json:"-Xmx"`
-				} `json:"jvmOptions"`
-				Resources *struct {
-					Requests *struct {
-						CPU    string `json:"cpu"`
-						Memory string `json:"memory"`
-					} `json:"requests"`
-					Limits *struct {
-						CPU    string `json:"cpu"`
-						Memory string `json:"memory"`
-					} `json:"limits"`
-				} `json:"resources"`
-				TLS *struct {
-					TrustedCertificates []struct {
-						SecretName string `json:"secretName"`
-					} `json:"trustedCertificates"`
-				} `json:"tls"`
-				Template *struct {
-					PDB *struct {
-						MaxUnavailable int `json:"maxUnavailable"`
-					} `json:"podDisruptionBudget"`
-				} `json:"template"`
+				Class    string `json:"class"`
+				TasksMax int    `json:"tasksMax"`
 			} `json:"spec"`
 			Status struct {
 				Conditions []struct {
 					Type   string `json:"type"`
 					Status string `json:"status"`
 				} `json:"conditions"`
-				LabelSelector    string `json:"labelSelector"`
-				ConnectorPlugins []struct {
-					Class   string `json:"class"`
-					Type    string `json:"type"`
-					Version string `json:"version"`
-				} `json:"connectorPlugins"`
 			} `json:"status"`
 		} `json:"items"`
 	}
-
-	if json.Unmarshal([]byte(kcOut), &kcData) == nil && len(kcData.Items) > 0 {
-		kc := kcData.Items[0]
-		info.KafkaConnect.Installed = true
-		info.KafkaConnect.Name = kc.Metadata.Name
-		info.KafkaConnect.Namespace = kc.Metadata.Namespace
-		info.KafkaConnect.TotalReplicas = kc.Spec.Replicas
-		info.KafkaConnect.Image = kc.Spec.Image
-
-		// Build status
-		if kc.Spec.Build != nil {
-			info.KafkaConnect.HasBuild = true
-		}
-
-		// Rack awareness
-		if kc.Spec.Rack != nil {
-			info.KafkaConnect.RackAware = true
-		}
-
-		// Tracing
-		if kc.Spec.Tracing != nil {
-			info.KafkaConnect.TracingEnabled = true
-		}
-
-		// JVM options
-		if kc.Spec.JVMOptions != nil {
-			info.KafkaConnect.HeapXms = kc.Spec.JVMOptions.Xms
-			info.KafkaConnect.HeapXmx = kc.Spec.JVMOptions.Xmx
-		}
-
-		// Resource limits/requests
-		if kc.Spec.Resources != nil {
-			if kc.Spec.Resources.Limits != nil {
-				info.KafkaConnect.MemLimitMi = int(parseMemoryMiB(kc.Spec.Resources.Limits.Memory))
-				info.KafkaConnect.CPULimitM = parseCPUMilli(kc.Spec.Resources.Limits.CPU)
-			}
-			if kc.Spec.Resources.Requests != nil {
-				info.KafkaConnect.CPURequestM = parseCPUMilli(kc.Spec.Resources.Requests.CPU)
-			}
-		}
-
-		// TLS
-		if kc.Spec.TLS != nil {
-			info.KafkaConnect.TLSEnabled = true
-		}
-
-		// PDB
-		if kc.Spec.Template != nil && kc.Spec.Template.PDB != nil {
-			info.KafkaConnect.PDBConfigured = true
-		}
-
-		// Installed plugins from status
-		for _, p := range kc.Status.ConnectorPlugins {
-			info.KafkaConnect.Plugins = append(info.KafkaConnect.Plugins, p.Class)
-		}
-
-		// Check deployment for ready replicas
-		depOut, _ := c.run(ctx, "kubectl", "get", "deployment", fmt.Sprintf("%s-connect", info.KafkaConnect.Name), "-n", info.KafkaConnect.Namespace, "-o", "jsonpath={.status.readyReplicas}")
-		if depOut != "" {
-			info.KafkaConnect.ReadyReplicas, _ = strconv.Atoi(depOut)
-		}
-
-		// Connectors
-		kctorOut, _ := c.run(ctx, "kubectl", "get", "kafkaconnectors", "-n", info.KafkaConnect.Namespace, "-o", "json")
-		var kctorData struct {
-			Items []struct {
-				Metadata struct {
-					Name string `json:"name"`
-				} `json:"metadata"`
-				Spec struct {
-					Class    string `json:"class"`
-					TasksMax int    `json:"tasksMax"`
-				} `json:"spec"`
-				Status struct {
-					Conditions []struct {
-						Type   string `json:"type"`
-						Status string `json:"status"`
-					} `json:"conditions"`
-				} `json:"status"`
-			} `json:"items"`
-		}
-		if json.Unmarshal([]byte(kctorOut), &kctorData) == nil {
-			for _, kctor := range kctorData.Items {
-				status := "Unknown"
-				for _, cond := range kctor.Status.Conditions {
-					if cond.Type == "Ready" {
-						if cond.Status == "True" {
-							status = "Ready"
-						} else {
-							status = "NotReady"
-						}
-					}
+	if json.Unmarshal([]byte(kctorOut), &kctorData) != nil {
+		return nil
+	}
+	var connectors []ConnectorStatus
+	for _, kctor := range kctorData.Items {
+		status := "Unknown"
+		for _, cond := range kctor.Status.Conditions {
+			if cond.Type == "Ready" {
+				if cond.Status == "True" {
+					status = "Ready"
+				} else {
+					status = "NotReady"
 				}
-				info.KafkaConnect.Connectors = append(info.KafkaConnect.Connectors, ConnectorStatus{
-					Name:     kctor.Metadata.Name,
-					Class:    kctor.Spec.Class,
-					TasksMax: kctor.Spec.TasksMax,
-					Status:   status,
-				})
 			}
 		}
+		connectors = append(connectors, ConnectorStatus{
+			Name:     kctor.Metadata.Name,
+			Class:    kctor.Spec.Class,
+			TasksMax: kctor.Spec.TasksMax,
+			Status:   status,
+		})
 	}
+	return connectors
+}
 
-	// Schema Registry Status
+// namedReadyItems is the part of a deployment or statefulset list the
+// schema-registry and database probes read.
+type namedReadyItems struct {
+	Items []struct {
+		Metadata struct {
+			Name      string `json:"name"`
+			Namespace string `json:"namespace"`
+		} `json:"metadata"`
+		Status struct {
+			ReadyReplicas int `json:"readyReplicas"`
+		} `json:"status"`
+	} `json:"items"`
+}
+
+// getSchemaRegistryStatus looks for an Apicurio registry deployment.
+func (c *Collector) getSchemaRegistryStatus(ctx context.Context) SchemaRegistryStatus {
 	srOut, _ := c.run(ctx, "kubectl", "get", "deployment", "-A", "-l", "app.kubernetes.io/name=apicurio-registry", "-o", "json")
-	var srData struct {
-		Items []struct {
-			Metadata struct {
-				Name      string `json:"name"`
-				Namespace string `json:"namespace"`
-			} `json:"metadata"`
-			Status struct {
-				ReadyReplicas int `json:"readyReplicas"`
-			} `json:"status"`
-		} `json:"items"`
+	var srData namedReadyItems
+	if json.Unmarshal([]byte(srOut), &srData) != nil || len(srData.Items) == 0 {
+		return SchemaRegistryStatus{}
 	}
-	if json.Unmarshal([]byte(srOut), &srData) == nil && len(srData.Items) > 0 {
-		info.SchemaRegistry.Installed = true
-		info.SchemaRegistry.Name = srData.Items[0].Metadata.Name
-		info.SchemaRegistry.Namespace = srData.Items[0].Metadata.Namespace
-		info.SchemaRegistry.Available = srData.Items[0].Status.ReadyReplicas > 0
+	first := srData.Items[0]
+	return SchemaRegistryStatus{
+		Installed: true,
+		Name:      first.Metadata.Name,
+		Namespace: first.Metadata.Namespace,
+		Available: first.Status.ReadyReplicas > 0,
 	}
+}
 
-	// Database CDC Status
+// getDatabaseCDCStatus looks for a PostgreSQL statefulset or deployment.
+func (c *Collector) getDatabaseCDCStatus(ctx context.Context) DatabaseCDCStatus {
 	dbOut, _ := c.run(ctx, "kubectl", "get", "statefulset,deployment", "-A", "-l", "app.kubernetes.io/name=postgresql", "-o", "json")
-	var dbData struct {
-		Items []struct {
-			Metadata struct {
-				Name      string `json:"name"`
-				Namespace string `json:"namespace"`
-			} `json:"metadata"`
-			Status struct {
-				ReadyReplicas int `json:"readyReplicas"`
-			} `json:"status"`
-		} `json:"items"`
+	var dbData namedReadyItems
+	if json.Unmarshal([]byte(dbOut), &dbData) != nil || len(dbData.Items) == 0 {
+		return DatabaseCDCStatus{}
 	}
-	if json.Unmarshal([]byte(dbOut), &dbData) == nil && len(dbData.Items) > 0 {
-		info.Database.Installed = true
-		info.Database.Name = dbData.Items[0].Metadata.Name
-		info.Database.Namespace = dbData.Items[0].Metadata.Namespace
-		info.Database.Port = 5432
-		info.Database.Accessible = dbData.Items[0].Status.ReadyReplicas > 0
+	first := dbData.Items[0]
+	return DatabaseCDCStatus{
+		Installed:  true,
+		Name:       first.Metadata.Name,
+		Namespace:  first.Metadata.Namespace,
+		Port:       5432,
+		Accessible: first.Status.ReadyReplicas > 0,
 	}
-
-	return info
 }
 
 func (c *Collector) checkKafkaCapacity(ctx context.Context, report *DetectReport, reservePct float64) string {
@@ -1210,19 +1252,7 @@ func (c *Collector) checkSecretCreation(ctx context.Context) SecretCreationAudit
 }
 
 func (c *Collector) getAZLatency(ctx context.Context, nodes []NodeInfo) []LatencyResult {
-	var results []LatencyResult
-
-	// Group nodes by zone
-	zoneToNode := make(map[string]string)
-	for _, n := range nodes {
-		if n.Zone == "" || n.Zone == "-" {
-			continue
-		}
-		// Pick the first node in each zone
-		if _, exists := zoneToNode[n.Zone]; !exists {
-			zoneToNode[n.Zone] = n.Name
-		}
-	}
+	zoneToNode := firstNodePerZone(nodes)
 
 	// If zero or only one zone is detected, cross-AZ latency doesn't apply
 	if len(zoneToNode) <= 1 {
@@ -1244,75 +1274,63 @@ func (c *Collector) getAZLatency(ctx context.Context, nodes []NodeInfo) []Latenc
 		c.cleanup(ctx, ns)
 	}()
 
-	c.progress("Auditing inter-AZ network latency: creating prober pods...")
-
-	// Spin up a prober pod in each zone
-	g, ctx2 := errgroup.WithContext(ctx)
-	for zone, nodeName := range zoneToNode {
-		zone := zone
-		nodeName := nodeName
-		podName := fmt.Sprintf("prober-%s", sanitizeDNSLabel(zone))
-
-		g.Go(func() error {
-			overrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","containers":[{"name":"busybox","image":"`+probeImage("busybox:1.37")+`","command":["sleep","3600"]}]}}`, nodeName)
-			_, runErr := c.run(ctx, "kubectl", "run", podName, "--image="+probeImage("busybox:1.37"), "-n", ns,
-				"--labels", fmt.Sprintf("kates-detect-experimental=true,kates-detect-run=%s", runID),
-				"--overrides", overrides, "--restart=Never")
-			return runErr
-		})
-	}
-
-	if err := g.Wait(); err != nil {
-		// Failed to create one or more pods
+	podIPs, ok := c.startLatencyProbers(ctx, ns, runID, zoneToNode)
+	if !ok {
 		return nil
-	}
-
-	c.progress("Auditing inter-AZ network latency: waiting for prober pods to be Ready...")
-	// Wait for all pods to be ready
-	_, waitErr := c.runFor(ctx, 45*time.Second, "kubectl", "wait", "--for=condition=Ready", "pod", "-n", ns, "-l", "kates-detect-experimental=true", "--timeout=30s")
-	if waitErr != nil {
-		// Pods failed to become ready (e.g. image pull backoff)
-		return nil
-	}
-
-	// Fetch Pod IPs
-	podListOut, err := c.run(ctx, "kubectl", "get", "pods", "-n", ns, "-l", "kates-detect-experimental=true", "-o", "json")
-	if err != nil {
-		return nil
-	}
-
-	var podData struct {
-		Items []struct {
-			Metadata struct {
-				Name string `json:"name"`
-			} `json:"metadata"`
-			Status struct {
-				PodIP string `json:"podIP"`
-			} `json:"status"`
-		} `json:"items"`
-	}
-	if json.Unmarshal([]byte(podListOut), &podData) != nil {
-		return nil
-	}
-
-	podIPs := make(map[string]string)
-	for _, item := range podData.Items {
-		podIPs[item.Metadata.Name] = item.Status.PodIP
 	}
 
 	c.progress("Auditing inter-AZ network latency: running cross-AZ ping sweeps...")
-	// Ping sweeps between all pairs of zones (matrix size: len(zoneToNode) x len(zoneToNode))
+	return c.pingZonePairs(ctx, ns, zoneToNode, podIPs)
+}
+
+// firstNodePerZone maps each labelled zone to the first of its nodes.
+func firstNodePerZone(nodes []NodeInfo) map[string]string {
+	zoneToNode := make(map[string]string)
+	for _, n := range nodes {
+		if n.Zone == "" || n.Zone == "-" {
+			continue
+		}
+		if _, exists := zoneToNode[n.Zone]; !exists {
+			zoneToNode[n.Zone] = n.Name
+		}
+	}
+	return zoneToNode
+}
+
+// zoneProberPod names the prober pod pinned in zone.
+func zoneProberPod(zone string) string {
+	return fmt.Sprintf("prober-%s", sanitizeDNSLabel(zone))
+}
+
+// startLatencyProbers runs one busybox pod per zone in ns, waits for them
+// to be Ready, and returns their IPs by pod name; ok is false when any
+// step fails.
+func (c *Collector) startLatencyProbers(ctx context.Context, ns, runID string, zoneToNode map[string]string) (podIPs map[string]string, ok bool) {
+	c.progress("Auditing inter-AZ network latency: creating prober pods...")
+	if err := c.createZoneProbers(ctx, ns, runID, probeImage("busybox:1.37"), "busybox", zoneToNode); err != nil {
+		// Failed to create one or more pods
+		return nil, false
+	}
+
+	c.progress("Auditing inter-AZ network latency: waiting for prober pods to be Ready...")
+	if err := c.waitZoneProbers(ctx, ns); err != nil {
+		// Pods failed to become ready (e.g. image pull backoff)
+		return nil, false
+	}
+
+	return c.zoneProberIPs(ctx, ns)
+}
+
+// pingZonePairs pings from every zone's prober to every zone's prober
+// (itself included) and returns one result per pair whose target has an IP.
+func (c *Collector) pingZonePairs(ctx context.Context, ns string, zoneToNode, podIPs map[string]string) []LatencyResult {
 	resultsChan := make(chan LatencyResult, len(zoneToNode)*len(zoneToNode))
-	pingGroup, _ := errgroup.WithContext(ctx2)
+	var pingGroup errgroup.Group
 
 	for srcZone := range zoneToNode {
 		for dstZone := range zoneToNode {
-			srcZone := srcZone
-			dstZone := dstZone
-			srcPod := fmt.Sprintf("prober-%s", sanitizeDNSLabel(srcZone))
-			dstPod := fmt.Sprintf("prober-%s", sanitizeDNSLabel(dstZone))
-			dstIP := podIPs[dstPod]
-
+			srcPod := zoneProberPod(srcZone)
+			dstIP := podIPs[zoneProberPod(dstZone)]
 			if dstIP == "" {
 				continue
 			}
@@ -1338,10 +1356,10 @@ func (c *Collector) getAZLatency(ctx context.Context, nodes []NodeInfo) []Latenc
 	_ = pingGroup.Wait()
 	close(resultsChan)
 
+	var results []LatencyResult
 	for res := range resultsChan {
 		results = append(results, res)
 	}
-
 	return results
 }
 
@@ -1614,116 +1632,141 @@ func (c *Collector) parseKyvernoPolicies(ctx context.Context, info *AdmissionInf
 	}
 
 	for _, raw := range polData.Items {
-		var pol struct {
-			Metadata struct {
-				Name        string            `json:"name"`
-				Annotations map[string]string `json:"annotations"`
-			} `json:"metadata"`
-			Spec struct {
-				ValidationFailureAction string `json:"validationFailureAction"`
-				Rules                   []struct {
-					Name  string `json:"name"`
-					Match struct {
-						Any []struct {
-							Resources struct {
-								Kinds      []string `json:"kinds"`
-								Namespaces []string `json:"namespaces"`
-							} `json:"resources"`
-						} `json:"any"`
-						Resources struct {
-							Kinds      []string `json:"kinds"`
-							Namespaces []string `json:"namespaces"`
-						} `json:"resources"`
-					} `json:"match"`
-				} `json:"rules"`
-			} `json:"spec"`
-		}
-		if json.Unmarshal(raw, &pol) != nil {
+		policyInfo, ok := kyvernoPolicyFromJSON(raw)
+		if !ok {
 			continue
 		}
 
-		action := strings.ToLower(pol.Spec.ValidationFailureAction)
-		if action == "" {
-			action = "audit"
-		}
-
-		category := pol.Metadata.Annotations["policies.kyverno.io/category"]
-		if category == "" {
-			category = pol.Metadata.Annotations["kyverno.io/category"]
-		}
-
-		description := pol.Metadata.Annotations["policies.kyverno.io/description"]
-
-		var ruleNames []string
-		affectsKafka := false
-		for _, r := range pol.Spec.Rules {
-			ruleNames = append(ruleNames, r.Name)
-			// Check if rule targets kafka namespace or all namespaces
-			if len(r.Match.Resources.Namespaces) == 0 && len(r.Match.Any) == 0 {
-				// No namespace filter = applies to all namespaces including kafka
-				affectsKafka = true
-			}
-			for _, ns := range r.Match.Resources.Namespaces {
-				if strings.ToLower(ns) == "kafka" || ns == "*" {
-					affectsKafka = true
-				}
-			}
-			for _, any := range r.Match.Any {
-				if len(any.Resources.Namespaces) == 0 {
-					affectsKafka = true
-				}
-				for _, ns := range any.Resources.Namespaces {
-					if strings.ToLower(ns) == "kafka" || ns == "*" {
-						affectsKafka = true
-					}
-				}
-			}
-		}
-
-		policyInfo := KyvernoPolicyInfo{
-			Name:         pol.Metadata.Name,
-			Action:       action,
-			Category:     category,
-			AffectsKafka: affectsKafka,
-			Rules:        ruleNames,
-			Description:  description,
-		}
-
 		info.Kyverno.ClusterPolicies = append(info.Kyverno.ClusterPolicies, policyInfo)
-		if affectsKafka {
+		if policyInfo.AffectsKafka {
 			info.Kyverno.KafkaRelevant = append(info.Kyverno.KafkaRelevant, policyInfo)
 		}
 
-		// Detect constraint categories from policy name and rule names
-		nameLower := strings.ToLower(pol.Metadata.Name)
-		allNames := nameLower
-		for _, rn := range ruleNames {
-			allNames += " " + strings.ToLower(rn)
+		if policyInfo.Action == "enforce" {
+			applyKyvernoConstraints(&info.Kyverno.Constraints, policyInfo)
 		}
+	}
+}
 
-		if action == "enforce" {
-			if strings.Contains(allNames, "empty") && strings.Contains(allNames, "podselector") {
-				info.Kyverno.Constraints.EmptyPodSelectorBlocked = true
-			}
-			if strings.Contains(allNames, "netpol") && strings.Contains(allNames, "podselector") {
-				info.Kyverno.Constraints.EmptyPodSelectorBlocked = true
-			}
-			if strings.Contains(allNames, "host") && strings.Contains(allNames, "network") {
-				info.Kyverno.Constraints.HostNetworkBlocked = true
-			}
-			if strings.Contains(allNames, "privileged") || strings.Contains(allNames, "privilege") {
-				info.Kyverno.Constraints.PrivilegedBlocked = true
-			}
-			if strings.Contains(allNames, "run-as-root") || strings.Contains(allNames, "runasnonroot") || strings.Contains(allNames, "run-as-non-root") {
-				info.Kyverno.Constraints.RunAsRootBlocked = true
-			}
-			if strings.Contains(allNames, "latest") && strings.Contains(allNames, "tag") {
-				info.Kyverno.Constraints.LatestTagBlocked = true
-			}
-			if strings.Contains(allNames, "resource") && (strings.Contains(allNames, "limit") || strings.Contains(allNames, "request")) {
-				info.Kyverno.Constraints.ResourceLimitsRequired = true
-			}
+// kyvernoMatchResources is the resources block of a Kyverno rule's match.
+type kyvernoMatchResources struct {
+	Kinds      []string `json:"kinds"`
+	Namespaces []string `json:"namespaces"`
+}
+
+// kyvernoRule is the part of a Kyverno rule the admission audit reads.
+type kyvernoRule struct {
+	Name  string `json:"name"`
+	Match struct {
+		Any []struct {
+			Resources kyvernoMatchResources `json:"resources"`
+		} `json:"any"`
+		Resources kyvernoMatchResources `json:"resources"`
+	} `json:"match"`
+}
+
+// kyvernoPolicyFromJSON reads one ClusterPolicy; ok is false when raw is
+// not one.
+func kyvernoPolicyFromJSON(raw json.RawMessage) (KyvernoPolicyInfo, bool) {
+	var pol struct {
+		Metadata struct {
+			Name        string            `json:"name"`
+			Annotations map[string]string `json:"annotations"`
+		} `json:"metadata"`
+		Spec struct {
+			ValidationFailureAction string        `json:"validationFailureAction"`
+			Rules                   []kyvernoRule `json:"rules"`
+		} `json:"spec"`
+	}
+	if json.Unmarshal(raw, &pol) != nil {
+		return KyvernoPolicyInfo{}, false
+	}
+
+	action := strings.ToLower(pol.Spec.ValidationFailureAction)
+	if action == "" {
+		action = "audit"
+	}
+
+	category := pol.Metadata.Annotations["policies.kyverno.io/category"]
+	if category == "" {
+		category = pol.Metadata.Annotations["kyverno.io/category"]
+	}
+
+	var ruleNames []string
+	affectsKafka := false
+	for _, r := range pol.Spec.Rules {
+		ruleNames = append(ruleNames, r.Name)
+		if kyvernoRuleAffectsKafka(r) {
+			affectsKafka = true
 		}
+	}
+
+	return KyvernoPolicyInfo{
+		Name:         pol.Metadata.Name,
+		Action:       action,
+		Category:     category,
+		AffectsKafka: affectsKafka,
+		Rules:        ruleNames,
+		Description:  pol.Metadata.Annotations["policies.kyverno.io/description"],
+	}, true
+}
+
+// kyvernoRuleAffectsKafka reports whether a rule matches the kafka
+// namespace: no namespace filter at all, or a filter naming kafka or *.
+func kyvernoRuleAffectsKafka(r kyvernoRule) bool {
+	if len(r.Match.Resources.Namespaces) == 0 && len(r.Match.Any) == 0 {
+		// No namespace filter = applies to all namespaces including kafka
+		return true
+	}
+	if namespacesIncludeKafka(r.Match.Resources.Namespaces) {
+		return true
+	}
+	for _, anyMatch := range r.Match.Any {
+		if len(anyMatch.Resources.Namespaces) == 0 || namespacesIncludeKafka(anyMatch.Resources.Namespaces) {
+			return true
+		}
+	}
+	return false
+}
+
+func namespacesIncludeKafka(namespaces []string) bool {
+	for _, ns := range namespaces {
+		if strings.ToLower(ns) == "kafka" || ns == "*" {
+			return true
+		}
+	}
+	return false
+}
+
+// applyKyvernoConstraints marks the constraint categories an enforced
+// policy's name and rule names suggest.
+func applyKyvernoConstraints(con *PolicyConstraints, pol KyvernoPolicyInfo) {
+	allNames := strings.ToLower(pol.Name)
+	for _, rn := range pol.Rules {
+		allNames += " " + strings.ToLower(rn)
+	}
+	has := func(sub string) bool { return strings.Contains(allNames, sub) }
+
+	if has("empty") && has("podselector") {
+		con.EmptyPodSelectorBlocked = true
+	}
+	if has("netpol") && has("podselector") {
+		con.EmptyPodSelectorBlocked = true
+	}
+	if has("host") && has("network") {
+		con.HostNetworkBlocked = true
+	}
+	if has("privileged") || has("privilege") {
+		con.PrivilegedBlocked = true
+	}
+	if has("run-as-root") || has("runasnonroot") || has("run-as-non-root") {
+		con.RunAsRootBlocked = true
+	}
+	if has("latest") && has("tag") {
+		con.LatestTagBlocked = true
+	}
+	if has("resource") && (has("limit") || has("request")) {
+		con.ResourceLimitsRequired = true
 	}
 }
 
@@ -1966,20 +2009,21 @@ func hydrateWorkloadPressure(nodes []NodeInfo, wp WorkloadPressure) WorkloadPres
 }
 
 type fioOutput struct {
-	Jobs []struct {
-		Read struct {
-			IOPS float64 `json:"iops"`
-			Lat  struct {
-				Mean float64 `json:"mean"`
-			} `json:"lat_ns"`
-		} `json:"read"`
-		Write struct {
-			IOPS float64 `json:"iops"`
-			Lat  struct {
-				Mean float64 `json:"mean"`
-			} `json:"lat_ns"`
-		} `json:"write"`
-	} `json:"jobs"`
+	Jobs []fioJob `json:"jobs"`
+}
+
+// fioJob is one job of fio's JSON output.
+type fioJob struct {
+	Read  fioDirection `json:"read"`
+	Write fioDirection `json:"write"`
+}
+
+// fioDirection is a fio job's read or write side; latency is in ns.
+type fioDirection struct {
+	IOPS float64 `json:"iops"`
+	Lat  struct {
+		Mean float64 `json:"mean"`
+	} `json:"lat_ns"`
 }
 
 const (
@@ -2051,97 +2095,117 @@ func (c *Collector) runLiveStorageBench(ctx context.Context, report *DetectRepor
 	}
 
 	// Benchmark each StorageClass sequentially to avoid disk self-contention
-	for idx, sc := range report.Storage {
-		scName := sc.Name
-		pvcName := fmt.Sprintf("kates-detect-bench-pvc-%d", idx)
-		podName := fmt.Sprintf("kates-detect-bench-pod-%d", idx)
-
-		c.progress(fmt.Sprintf("Storage benchmarking: provisioning ephemeral PVC on StorageClass %q...", scName))
-		// 1. Create Dynamic PVC inside temporary namespace, from a manifest file
-		pvcPath, err := writeProbeFile("kates-detect-bench-pvc-*.yaml", storageBenchPVCManifest(pvcName, ns, scName))
-		if err != nil {
+	for idx := range report.Storage {
+		if !c.benchStorageClass(ctx, ns, nodeName, idx, &report.Storage[idx]) {
 			return
 		}
-		_, pvcErr := c.run(ctx, "kubectl", "apply", "-f", pvcPath)
-		os.Remove(pvcPath)
-		if pvcErr != nil {
-			c.progress(fmt.Sprintf("Storage benchmarking: failed to provision PVC on %q, falling back to heuristics...", scName))
-			continue // fallback remains unchanged
-		}
-
-		c.progress(fmt.Sprintf("Storage benchmarking: launching ephemeral FIO pod for %q...", scName))
-		// 2. Create the Benchmark Pod pinned to target node to resolve WaitForFirstConsumer immediately
-		podOverrides := fmt.Sprintf(`{"spec":{"nodeName":%q,"volumes":[{"name":"bench-volume","persistentVolumeClaim":{"claimName":%q}},{"name":"bench-script","configMap":{"name":%q}}],"containers":[{"name":"fio-bench","image":%q,"volumeMounts":[{"name":"bench-volume","mountPath":"/data"},{"name":"bench-script","mountPath":"/scripts"}],"command":["sh","/scripts/bench.sh"]}]}}`,
-			nodeName, pvcName, storageBenchScriptName, probeImage("alpine:3.19"))
-
-		_, runErr := c.run(ctx, "kubectl", "run", podName,
-			"--image="+probeImage("alpine:3.19"), "-n", ns,
-			"--overrides", podOverrides,
-			"--restart=Never")
-		if runErr != nil {
-			c.progress(fmt.Sprintf("Storage benchmarking: failed to launch pod on %q, falling back to heuristics...", scName))
-			continue // fallback remains unchanged
-		}
-
-		c.progress(fmt.Sprintf("Storage benchmarking: waiting for FIO pod to be ready on %q...", scName))
-		// 3. Wait for the pod to become Ready (timeout 60s)
-		_, waitErr := c.runFor(ctx, 90*time.Second, "kubectl", "wait", "--for=condition=Ready", "pod/"+podName, "-n", ns, "--timeout=60s")
-		if waitErr != nil {
-			c.progress(fmt.Sprintf("Storage benchmarking: pod failed to become ready on %q, falling back to heuristics...", scName))
-			continue // fallback remains unchanged
-		}
-
-		c.progress(fmt.Sprintf("Storage benchmarking: executing 15s random I/O benchmark on %q...", scName))
-		// 4. Wait for the run to end, bounded (the fio run is 15 s plus the
-		// package install), then read the logs once: `logs -f` had no bound.
-		if _, doneErr := c.runFor(ctx, 150*time.Second, "kubectl", "wait", "--for=jsonpath={.status.phase}=Succeeded", "pod/"+podName, "-n", ns, "--timeout="+storageBenchTimeout); doneErr != nil {
-			c.progress(fmt.Sprintf("Storage benchmarking: benchmark did not finish within %s on %q, falling back to heuristics...", storageBenchTimeout, scName))
-			continue // fallback remains unchanged
-		}
-		logOut, logErr := c.run(ctx, "kubectl", "logs", podName, "-n", ns)
-		if logErr != nil {
-			c.progress(fmt.Sprintf("Storage benchmarking: failed to capture benchmark logs on %q, falling back to heuristics...", scName))
-			continue // fallback remains unchanged
-		}
-
-		// 5. Parse the FIO JSON block from logs
-		firstBrace := strings.Index(logOut, "{")
-		if firstBrace == -1 {
-			c.progress(fmt.Sprintf("Storage benchmarking: FIO output format unexpected on %q, falling back to heuristics...", scName))
-			continue // fallback remains unchanged
-		}
-		jsonStr := logOut[firstBrace:]
-
-		var fioData fioOutput
-		if jsonUnmarshalErr := json.Unmarshal([]byte(jsonStr), &fioData); jsonUnmarshalErr != nil {
-			c.progress(fmt.Sprintf("Storage benchmarking: FIO JSON parse error on %q, falling back to heuristics...", scName))
-			continue // fallback remains unchanged
-		}
-
-		if len(fioData.Jobs) > 0 {
-			job := fioData.Jobs[0]
-			totalIOPS := int(job.Read.IOPS + job.Write.IOPS)
-
-			var meanLat float64
-			if job.Read.IOPS > 0 && job.Write.IOPS > 0 {
-				meanLat = (job.Read.Lat.Mean + job.Write.Lat.Mean) / 2.0 / 1000000.0
-			} else if job.Read.IOPS > 0 {
-				meanLat = job.Read.Lat.Mean / 1000000.0
-			} else if job.Write.IOPS > 0 {
-				meanLat = job.Write.Lat.Mean / 1000000.0
-			}
-
-			if totalIOPS > 0 {
-				c.progress(fmt.Sprintf("Storage benchmarking: successfully measured %q (%d IOPS, %.2fms latency)!", scName, totalIOPS, meanLat))
-				// Overwrite with actual dynamic measurements
-				report.Storage[idx].ProbedIOPS = totalIOPS
-				report.Storage[idx].ProbeLatencyMs = meanLat
-				report.Storage[idx].IOPSMeasured = true
-			} else {
-				c.progress(fmt.Sprintf("Storage benchmarking: measured 0 IOPS on %q, falling back to heuristics...", scName))
-			}
-		}
 	}
+}
+
+// benchStorageClass runs the fio pod against a fresh PVC of class sc and,
+// when it measures any IOPS, overwrites the estimate in sc. A step that
+// fails leaves the estimate alone; it returns false only when the bench
+// cannot go on to the next class either.
+func (c *Collector) benchStorageClass(ctx context.Context, ns, nodeName string, idx int, sc *SCInfo) bool {
+	scName := sc.Name
+	logOut, ok, cont := c.runStorageBenchPod(ctx, ns, nodeName, idx, scName)
+	if !ok {
+		return cont
+	}
+
+	// Parse the FIO JSON block from logs
+	firstBrace := strings.Index(logOut, "{")
+	if firstBrace == -1 {
+		c.progress(fmt.Sprintf("Storage benchmarking: FIO output format unexpected on %q, falling back to heuristics...", scName))
+		return true
+	}
+	var fioData fioOutput
+	if err := json.Unmarshal([]byte(logOut[firstBrace:]), &fioData); err != nil {
+		c.progress(fmt.Sprintf("Storage benchmarking: FIO JSON parse error on %q, falling back to heuristics...", scName))
+		return true
+	}
+	if len(fioData.Jobs) == 0 {
+		return true
+	}
+
+	totalIOPS, meanLat := fioJobMeasurement(fioData.Jobs[0])
+	if totalIOPS > 0 {
+		c.progress(fmt.Sprintf("Storage benchmarking: successfully measured %q (%d IOPS, %.2fms latency)!", scName, totalIOPS, meanLat))
+		// Overwrite with actual dynamic measurements
+		sc.ProbedIOPS = totalIOPS
+		sc.ProbeLatencyMs = meanLat
+		sc.IOPSMeasured = true
+	} else {
+		c.progress(fmt.Sprintf("Storage benchmarking: measured 0 IOPS on %q, falling back to heuristics...", scName))
+	}
+	return true
+}
+
+// fioJobMeasurement is a fio job's total IOPS and its mean latency in
+// milliseconds, averaged over the directions that did any I/O.
+func fioJobMeasurement(job fioJob) (iops int, meanLatMs float64) {
+	iops = int(job.Read.IOPS + job.Write.IOPS)
+	switch {
+	case job.Read.IOPS > 0 && job.Write.IOPS > 0:
+		meanLatMs = (job.Read.Lat.Mean + job.Write.Lat.Mean) / 2.0 / 1000000.0
+	case job.Read.IOPS > 0:
+		meanLatMs = job.Read.Lat.Mean / 1000000.0
+	case job.Write.IOPS > 0:
+		meanLatMs = job.Write.Lat.Mean / 1000000.0
+	}
+	return iops, meanLatMs
+}
+
+// runStorageBenchPod provisions the PVC, runs the bench pod pinned to
+// nodeName so WaitForFirstConsumer binds at once, waits for it to finish,
+// and returns its log. When ok is false the step that failed has said so;
+// cont then says whether the next class may still be tried.
+func (c *Collector) runStorageBenchPod(ctx context.Context, ns, nodeName string, idx int, scName string) (logOut string, ok, cont bool) {
+	pvcName := fmt.Sprintf("kates-detect-bench-pvc-%d", idx)
+	podName := fmt.Sprintf("kates-detect-bench-pod-%d", idx)
+	fallback := func(format string) (string, bool, bool) {
+		c.progress(fmt.Sprintf(format, scName))
+		return "", false, true // fallback remains unchanged
+	}
+
+	c.progress(fmt.Sprintf("Storage benchmarking: provisioning ephemeral PVC on StorageClass %q...", scName))
+	pvcPath, err := writeProbeFile("kates-detect-bench-pvc-*.yaml", storageBenchPVCManifest(pvcName, ns, scName))
+	if err != nil {
+		return "", false, false
+	}
+	_, pvcErr := c.run(ctx, "kubectl", "apply", "-f", pvcPath)
+	os.Remove(pvcPath)
+	if pvcErr != nil {
+		return fallback("Storage benchmarking: failed to provision PVC on %q, falling back to heuristics...")
+	}
+
+	c.progress(fmt.Sprintf("Storage benchmarking: launching ephemeral FIO pod for %q...", scName))
+	podOverrides := fmt.Sprintf(`{"spec":{"nodeName":%q,"volumes":[{"name":"bench-volume","persistentVolumeClaim":{"claimName":%q}},{"name":"bench-script","configMap":{"name":%q}}],"containers":[{"name":"fio-bench","image":%q,"volumeMounts":[{"name":"bench-volume","mountPath":"/data"},{"name":"bench-script","mountPath":"/scripts"}],"command":["sh","/scripts/bench.sh"]}]}}`,
+		nodeName, pvcName, storageBenchScriptName, probeImage("alpine:3.19"))
+	if _, err := c.run(ctx, "kubectl", "run", podName,
+		"--image="+probeImage("alpine:3.19"), "-n", ns,
+		"--overrides", podOverrides,
+		"--restart=Never"); err != nil {
+		return fallback("Storage benchmarking: failed to launch pod on %q, falling back to heuristics...")
+	}
+
+	c.progress(fmt.Sprintf("Storage benchmarking: waiting for FIO pod to be ready on %q...", scName))
+	if _, err := c.runFor(ctx, 90*time.Second, "kubectl", "wait", "--for=condition=Ready", "pod/"+podName, "-n", ns, "--timeout=60s"); err != nil {
+		return fallback("Storage benchmarking: pod failed to become ready on %q, falling back to heuristics...")
+	}
+
+	c.progress(fmt.Sprintf("Storage benchmarking: executing 15s random I/O benchmark on %q...", scName))
+	// Wait for the run to end, bounded (the fio run is 15 s plus the
+	// package install), then read the logs once: `logs -f` had no bound.
+	if _, err := c.runFor(ctx, 150*time.Second, "kubectl", "wait", "--for=jsonpath={.status.phase}=Succeeded", "pod/"+podName, "-n", ns, "--timeout="+storageBenchTimeout); err != nil {
+		c.progress(fmt.Sprintf("Storage benchmarking: benchmark did not finish within %s on %q, falling back to heuristics...", storageBenchTimeout, scName))
+		return "", false, true
+	}
+	logOut, err = c.run(ctx, "kubectl", "logs", podName, "-n", ns)
+	if err != nil {
+		return fallback("Storage benchmarking: failed to capture benchmark logs on %q, falling back to heuristics...")
+	}
+	return logOut, true, true
 }
 
 type iperfOutput struct {
@@ -2153,18 +2217,58 @@ type iperfOutput struct {
 	Error string `json:"error"`
 }
 
-func (c *Collector) runAZBandwidthBench(ctx context.Context, report *DetectReport) {
-	// Group nodes by zone
-	zoneToNode := make(map[string]string)
-	for _, n := range report.Nodes {
-		if n.Zone == "" || n.Zone == "-" {
-			continue
-		}
-		// Pick the first node in each zone
-		if _, exists := zoneToNode[n.Zone]; !exists {
-			zoneToNode[n.Zone] = n.Name
-		}
+// createZoneProbers runs one sleeping pod of image per zone, pinned to the
+// zone's node and named by zoneProberPod.
+func (c *Collector) createZoneProbers(ctx context.Context, ns, runID, image, container string, zoneToNode map[string]string) error {
+	var g errgroup.Group
+	for zone, nodeName := range zoneToNode {
+		podName := zoneProberPod(zone)
+		g.Go(func() error {
+			overrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","containers":[{"name":"`+container+`","image":"`+image+`","command":["sleep","3600"]}]}}`, nodeName)
+			_, runErr := c.run(ctx, "kubectl", "run", podName, "--image="+image, "-n", ns,
+				"--labels", fmt.Sprintf("kates-detect-experimental=true,kates-detect-run=%s", runID),
+				"--overrides", overrides, "--restart=Never")
+			return runErr
+		})
 	}
+	return g.Wait()
+}
+
+// waitZoneProbers waits for every prober pod in ns to be Ready.
+func (c *Collector) waitZoneProbers(ctx context.Context, ns string) error {
+	_, err := c.runFor(ctx, 45*time.Second, "kubectl", "wait", "--for=condition=Ready", "pod", "-n", ns, "-l", "kates-detect-experimental=true", "--timeout=30s")
+	return err
+}
+
+// zoneProberIPs returns the prober pods' IPs by pod name; ok is false when
+// the list cannot be read.
+func (c *Collector) zoneProberIPs(ctx context.Context, ns string) (podIPs map[string]string, ok bool) {
+	podListOut, err := c.run(ctx, "kubectl", "get", "pods", "-n", ns, "-l", "kates-detect-experimental=true", "-o", "json")
+	if err != nil {
+		return nil, false
+	}
+	var podData struct {
+		Items []struct {
+			Metadata struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+			Status struct {
+				PodIP string `json:"podIP"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if json.Unmarshal([]byte(podListOut), &podData) != nil {
+		return nil, false
+	}
+	podIPs = make(map[string]string)
+	for _, item := range podData.Items {
+		podIPs[item.Metadata.Name] = item.Status.PodIP
+	}
+	return podIPs, true
+}
+
+func (c *Collector) runAZBandwidthBench(ctx context.Context, report *DetectReport) {
+	zoneToNode := firstNodePerZone(report.Nodes)
 
 	// If zero or only one zone is detected, cross-AZ bandwidth doesn't apply
 	if len(zoneToNode) <= 1 {
@@ -2184,75 +2288,9 @@ func (c *Collector) runAZBandwidthBench(ctx context.Context, report *DetectRepor
 		c.cleanup(ctx, ns)
 	}()
 
-	c.progress("Auditing inter-AZ network bandwidth: creating iperf3 prober pods...")
-
-	// Spin up a prober pod in each zone
-	g, ctx2 := errgroup.WithContext(ctx)
-	podNames := make(map[string]string)
-	for zone, nodeName := range zoneToNode {
-		zone := zone
-		nodeName := nodeName
-		podName := fmt.Sprintf("prober-%s", sanitizeDNSLabel(zone))
-		podNames[zone] = podName
-
-		g.Go(func() error {
-			overrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","containers":[{"name":"alpine","image":"`+probeImage("alpine:3.19")+`","command":["sleep","3600"]}]}}`, nodeName)
-			_, runErr := c.run(ctx, "kubectl", "run", podName, "--image="+probeImage("alpine:3.19"), "-n", ns,
-				"--labels", fmt.Sprintf("kates-detect-experimental=true,kates-detect-run=%s", runID),
-				"--overrides", overrides, "--restart=Never")
-			return runErr
-		})
-	}
-
-	if err := g.Wait(); err != nil {
-		c.progress("Auditing inter-AZ network bandwidth: failed to create prober pods, falling back gracefully...")
+	podIPs, ok := c.startBandwidthProbers(ctx, ns, runID, zoneToNode)
+	if !ok {
 		return
-	}
-
-	c.progress("Auditing inter-AZ network bandwidth: waiting for prober pods to be Ready...")
-	_, waitErr := c.runFor(ctx, 45*time.Second, "kubectl", "wait", "--for=condition=Ready", "pod", "-n", ns, "-l", "kates-detect-experimental=true", "--timeout=30s")
-	if waitErr != nil {
-		c.progress("Auditing inter-AZ network bandwidth: pods failed to become ready, falling back gracefully...")
-		return
-	}
-
-	c.progress("Auditing inter-AZ network bandwidth: installing iperf3 on prober pods...")
-	gInstall, _ := errgroup.WithContext(ctx2)
-	for _, podName := range podNames {
-		podName := podName
-		gInstall.Go(func() error {
-			_, installErr := c.runFor(ctx, 90*time.Second, "kubectl", "exec", "-n", ns, podName, "--", "apk", "add", "--no-cache", "iperf3")
-			return installErr
-		})
-	}
-	if err := gInstall.Wait(); err != nil {
-		c.progress("Auditing inter-AZ network bandwidth: failed to install iperf3, falling back gracefully...")
-		return
-	}
-
-	// Fetch Pod IPs
-	podListOut, err := c.run(ctx, "kubectl", "get", "pods", "-n", ns, "-l", "kates-detect-experimental=true", "-o", "json")
-	if err != nil {
-		return
-	}
-
-	var podData struct {
-		Items []struct {
-			Metadata struct {
-				Name string `json:"name"`
-			} `json:"metadata"`
-			Status struct {
-				PodIP string `json:"podIP"`
-			} `json:"status"`
-		} `json:"items"`
-	}
-	if json.Unmarshal([]byte(podListOut), &podData) != nil {
-		return
-	}
-
-	podIPs := make(map[string]string)
-	for _, item := range podData.Items {
-		podIPs[item.Metadata.Name] = item.Status.PodIP
 	}
 
 	// Loop over unique source/target zone combinations sequentially to avoid port conflict or saturation
@@ -2262,67 +2300,102 @@ func (c *Collector) runAZBandwidthBench(ctx context.Context, report *DetectRepor
 			if srcZone == dstZone {
 				continue
 			}
-
-			srcPod := podNames[srcZone]
-			dstPod := podNames[dstZone]
-			dstIP := podIPs[dstPod]
-
+			dstIP := podIPs[zoneProberPod(dstZone)]
 			if dstIP == "" {
 				continue
 			}
-
-			c.progress(fmt.Sprintf("Auditing inter-AZ network bandwidth: sweeping %s -> %s...", srcZone, dstZone))
-
-			// Start server on destination pod (runs exactly once and terminates using -1)
-			_, srvErr := c.run(ctx, "kubectl", "exec", "-n", ns, dstPod, "--", "sh", "-c", "iperf3 -s -p 5201 -1 >/dev/null 2>&1 &")
-			if srvErr != nil {
-				results = append(results, BandwidthResult{
-					SourceZone: srcZone,
-					TargetZone: dstZone,
-					Success:    false,
-				})
-				continue
-			}
-
-			// Sleep briefly to let server start
-			time.Sleep(1000 * time.Millisecond)
-
-			// Run client on source pod (runs 5 seconds)
-			clientOut, clientErr := c.run(ctx, "kubectl", "exec", "-n", ns, srcPod, "--", "iperf3", "-c", dstIP, "-p", "5201", "-t", "5", "-J")
-
-			var iperfData iperfOutput
-			var success bool
-			var bandwidthMbps float64
-
-			if clientErr == nil {
-				firstBrace := strings.Index(clientOut, "{")
-				if firstBrace != -1 {
-					jsonStr := clientOut[firstBrace:]
-					if jsonUnmarshalErr := json.Unmarshal([]byte(jsonStr), &iperfData); jsonUnmarshalErr == nil {
-						if iperfData.Error == "" && iperfData.End.SumReceived.BitsPerSecond > 0 {
-							bandwidthMbps = iperfData.End.SumReceived.BitsPerSecond / 1000000.0
-							success = true
-						}
-					}
-				}
-			}
-
-			if success {
-				c.progress(fmt.Sprintf("Auditing inter-AZ network bandwidth: successfully measured %s -> %s: %.2f Mbps", srcZone, dstZone, bandwidthMbps))
-			} else {
-				c.progress(fmt.Sprintf("Auditing inter-AZ network bandwidth: failed to sweep %s -> %s, falling back gracefully...", srcZone, dstZone))
-			}
-
-			results = append(results, BandwidthResult{
-				SourceZone:    srcZone,
-				TargetZone:    dstZone,
-				BandwidthMbps: bandwidthMbps,
-				Success:       success,
-			})
+			results = append(results, c.sweepBandwidth(ctx, ns, srcZone, dstZone, dstIP))
 		}
 	}
 
 	report.Network.BandwidthMatrix = results
+}
+
+// startBandwidthProbers runs an alpine pod with iperf3 in each zone and
+// returns their IPs by pod name; ok is false when any step fails.
+func (c *Collector) startBandwidthProbers(ctx context.Context, ns, runID string, zoneToNode map[string]string) (podIPs map[string]string, ok bool) {
+	c.progress("Auditing inter-AZ network bandwidth: creating iperf3 prober pods...")
+	if err := c.createZoneProbers(ctx, ns, runID, probeImage("alpine:3.19"), "alpine", zoneToNode); err != nil {
+		c.progress("Auditing inter-AZ network bandwidth: failed to create prober pods, falling back gracefully...")
+		return nil, false
+	}
+
+	c.progress("Auditing inter-AZ network bandwidth: waiting for prober pods to be Ready...")
+	if err := c.waitZoneProbers(ctx, ns); err != nil {
+		c.progress("Auditing inter-AZ network bandwidth: pods failed to become ready, falling back gracefully...")
+		return nil, false
+	}
+
+	c.progress("Auditing inter-AZ network bandwidth: installing iperf3 on prober pods...")
+	var gInstall errgroup.Group
+	for zone := range zoneToNode {
+		podName := zoneProberPod(zone)
+		gInstall.Go(func() error {
+			_, installErr := c.runFor(ctx, 90*time.Second, "kubectl", "exec", "-n", ns, podName, "--", "apk", "add", "--no-cache", "iperf3")
+			return installErr
+		})
+	}
+	if err := gInstall.Wait(); err != nil {
+		c.progress("Auditing inter-AZ network bandwidth: failed to install iperf3, falling back gracefully...")
+		return nil, false
+	}
+
+	return c.zoneProberIPs(ctx, ns)
+}
+
+// sweepBandwidth measures srcZone -> dstZone with a one-shot iperf3 server
+// on the target's prober and a 5-second client on the source's.
+func (c *Collector) sweepBandwidth(ctx context.Context, ns, srcZone, dstZone, dstIP string) BandwidthResult {
+	srcPod := zoneProberPod(srcZone)
+	dstPod := zoneProberPod(dstZone)
+
+	c.progress(fmt.Sprintf("Auditing inter-AZ network bandwidth: sweeping %s -> %s...", srcZone, dstZone))
+
+	// Start server on destination pod (runs exactly once and terminates using -1)
+	if _, srvErr := c.run(ctx, "kubectl", "exec", "-n", ns, dstPod, "--", "sh", "-c", "iperf3 -s -p 5201 -1 >/dev/null 2>&1 &"); srvErr != nil {
+		return BandwidthResult{SourceZone: srcZone, TargetZone: dstZone, Success: false}
+	}
+
+	// Sleep briefly to let server start
+	time.Sleep(1000 * time.Millisecond)
+
+	// Run client on source pod (runs 5 seconds)
+	clientOut, clientErr := c.run(ctx, "kubectl", "exec", "-n", ns, srcPod, "--", "iperf3", "-c", dstIP, "-p", "5201", "-t", "5", "-J")
+	var bandwidthMbps float64
+	var success bool
+	if clientErr == nil {
+		bandwidthMbps, success = parseIperfMbps(clientOut)
+	}
+
+	if success {
+		c.progress(fmt.Sprintf("Auditing inter-AZ network bandwidth: successfully measured %s -> %s: %.2f Mbps", srcZone, dstZone, bandwidthMbps))
+	} else {
+		c.progress(fmt.Sprintf("Auditing inter-AZ network bandwidth: failed to sweep %s -> %s, falling back gracefully...", srcZone, dstZone))
+	}
+
+	return BandwidthResult{
+		SourceZone:    srcZone,
+		TargetZone:    dstZone,
+		BandwidthMbps: bandwidthMbps,
+		Success:       success,
+	}
+}
+
+// parseIperfMbps reads the received rate from iperf3 -J output (anything
+// before the JSON is skipped); ok is false when there is no positive rate.
+func parseIperfMbps(out string) (mbps float64, ok bool) {
+	firstBrace := strings.Index(out, "{")
+	if firstBrace == -1 {
+		return 0, false
+	}
+	var iperfData iperfOutput
+	if json.Unmarshal([]byte(out[firstBrace:]), &iperfData) != nil {
+		return 0, false
+	}
+	if iperfData.Error != "" || iperfData.End.SumReceived.BitsPerSecond <= 0 {
+		return 0, false
+	}
+	return iperfData.End.SumReceived.BitsPerSecond / 1000000.0, true
 }
 
 func (c *Collector) runDNSResolutionProbe(ctx context.Context, report *DetectReport) {
@@ -2343,30 +2416,8 @@ func (c *Collector) runDNSResolutionProbe(ctx context.Context, report *DetectRep
 		c.cleanup(ctx, ns)
 	}()
 
-	c.progress("Auditing CoreDNS performance: creating prober pod...")
-
-	nodeName := report.Nodes[0].Name
-	podName := "dns-prober"
-	overrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","containers":[{"name":"alpine","image":"`+probeImage("alpine:3.19")+`","command":["sleep","3600"]}]}}`, nodeName)
-	_, runErr := c.run(ctx, "kubectl", "run", podName, "--image="+probeImage("alpine:3.19"), "-n", ns,
-		"--labels", fmt.Sprintf("kates-detect-experimental=true,kates-detect-run=%s", runID),
-		"--overrides", overrides, "--restart=Never")
-	if runErr != nil {
-		c.progress("Auditing CoreDNS performance: failed to create prober pod, falling back gracefully...")
-		return
-	}
-
-	c.progress("Auditing CoreDNS performance: waiting for prober pod to be Ready...")
-	_, waitErr := c.runFor(ctx, 45*time.Second, "kubectl", "wait", "--for=condition=Ready", "pod/"+podName, "-n", ns, "--timeout=30s")
-	if waitErr != nil {
-		c.progress("Auditing CoreDNS performance: prober pod failed to become ready, falling back gracefully...")
-		return
-	}
-
-	c.progress("Auditing CoreDNS performance: installing bind-tools...")
-	_, installErr := c.runFor(ctx, 90*time.Second, "kubectl", "exec", "-n", ns, podName, "--", "apk", "add", "--no-cache", "bind-tools")
-	if installErr != nil {
-		c.progress("Auditing CoreDNS performance: failed to install bind-tools, falling back gracefully...")
+	const podName = "dns-prober"
+	if !c.startDNSProber(ctx, ns, runID, podName, report.Nodes[0].Name) {
 		return
 	}
 
@@ -2380,67 +2431,77 @@ func (c *Collector) runDNSResolutionProbe(ctx context.Context, report *DetectRep
 	}
 	internalName := "kubernetes.default.svc." + clusterDomain
 
-	var internalTimes []float64
-	var externalTimes []float64
-
-	internalChan := make(chan float64, 20)
-	externalChan := make(chan float64, 20)
-
-	g, _ := errgroup.WithContext(ctx)
-
-	// Internal queries
+	const queries = 20
+	var internalTimes, externalTimes []float64
+	var g errgroup.Group
 	g.Go(func() error {
-		gInt, _ := errgroup.WithContext(ctx)
-		for i := 0; i < 20; i++ {
-			gInt.Go(func() error {
-				out, err := c.run(ctx, "kubectl", "exec", "-n", ns, podName, "--", "dig", "+tries=1", "+timeout=2", internalName)
-				if err == nil {
-					if ms, ok := parseDigOutput(out); ok {
-						internalChan <- ms
-					}
-				}
-				return nil
-			})
-		}
-		_ = gInt.Wait()
-		close(internalChan)
+		internalTimes = c.digTimes(ctx, ns, podName, internalName, queries)
 		return nil
 	})
-
-	// External queries
 	g.Go(func() error {
-		gExt, _ := errgroup.WithContext(ctx)
-		for i := 0; i < 20; i++ {
-			gExt.Go(func() error {
-				out, err := c.run(ctx, "kubectl", "exec", "-n", ns, podName, "--", "dig", "+tries=1", "+timeout=2", "google.com")
-				if err == nil {
-					if ms, ok := parseDigOutput(out); ok {
-						externalChan <- ms
-					}
-				}
-				return nil
-			})
-		}
-		_ = gExt.Wait()
-		close(externalChan)
+		externalTimes = c.digTimes(ctx, ns, podName, "google.com", queries)
 		return nil
 	})
-
 	_ = g.Wait()
-
-	for ms := range internalChan {
-		internalTimes = append(internalTimes, ms)
-	}
-	for ms := range externalChan {
-		externalTimes = append(externalTimes, ms)
-	}
 
 	c.progress("Auditing CoreDNS performance: compiling results...")
 
-	internalResult := computeDNSProbeResult("Internal", internalTimes, 20)
-	externalResult := computeDNSProbeResult("External", externalTimes, 20)
+	internalResult := computeDNSProbeResult("Internal", internalTimes, queries)
+	externalResult := computeDNSProbeResult("External", externalTimes, queries)
 
 	report.Network.DNSResults = []DNSProbeResult{internalResult, externalResult}
+}
+
+// startDNSProber runs an alpine pod with dig on nodeName; it reports
+// false, having said why, when the pod cannot be made ready.
+func (c *Collector) startDNSProber(ctx context.Context, ns, runID, podName, nodeName string) bool {
+	c.progress("Auditing CoreDNS performance: creating prober pod...")
+	overrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","containers":[{"name":"alpine","image":"`+probeImage("alpine:3.19")+`","command":["sleep","3600"]}]}}`, nodeName)
+	if _, err := c.run(ctx, "kubectl", "run", podName, "--image="+probeImage("alpine:3.19"), "-n", ns,
+		"--labels", fmt.Sprintf("kates-detect-experimental=true,kates-detect-run=%s", runID),
+		"--overrides", overrides, "--restart=Never"); err != nil {
+		c.progress("Auditing CoreDNS performance: failed to create prober pod, falling back gracefully...")
+		return false
+	}
+
+	c.progress("Auditing CoreDNS performance: waiting for prober pod to be Ready...")
+	if _, err := c.runFor(ctx, 45*time.Second, "kubectl", "wait", "--for=condition=Ready", "pod/"+podName, "-n", ns, "--timeout=30s"); err != nil {
+		c.progress("Auditing CoreDNS performance: prober pod failed to become ready, falling back gracefully...")
+		return false
+	}
+
+	c.progress("Auditing CoreDNS performance: installing bind-tools...")
+	if _, err := c.runFor(ctx, 90*time.Second, "kubectl", "exec", "-n", ns, podName, "--", "apk", "add", "--no-cache", "bind-tools"); err != nil {
+		c.progress("Auditing CoreDNS performance: failed to install bind-tools, falling back gracefully...")
+		return false
+	}
+	return true
+}
+
+// digTimes resolves name n times in parallel from the prober pod and
+// returns the query times of the lookups that answered.
+func (c *Collector) digTimes(ctx context.Context, ns, podName, name string, n int) []float64 {
+	timesChan := make(chan float64, n)
+	var g errgroup.Group
+	for range n {
+		g.Go(func() error {
+			out, err := c.run(ctx, "kubectl", "exec", "-n", ns, podName, "--", "dig", "+tries=1", "+timeout=2", name)
+			if err == nil {
+				if ms, ok := parseDigOutput(out); ok {
+					timesChan <- ms
+				}
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
+	close(timesChan)
+
+	var times []float64
+	for ms := range timesChan {
+		times = append(times, ms)
+	}
+	return times
 }
 
 func parseDigOutput(out string) (float64, bool) {
@@ -2473,11 +2534,11 @@ func computeDNSProbeResult(queryType string, times []float64, totalRun int) DNSP
 		}
 	}
 	var sum float64
-	var max float64 = -1.0
+	maxMs := -1.0
 	for _, t := range times {
 		sum += t
-		if t > max {
-			max = t
+		if t > maxMs {
+			maxMs = t
 		}
 	}
 	avg := sum / float64(len(times))
@@ -2488,7 +2549,7 @@ func computeDNSProbeResult(queryType string, times []float64, totalRun int) DNSP
 		SuccessCount: len(times),
 		SuccessRate:  successRate,
 		AvgLatencyMs: avg,
-		MaxLatencyMs: max,
+		MaxLatencyMs: maxMs,
 	}
 }
 
@@ -2498,114 +2559,134 @@ func (c *Collector) getSecurityAudit(ctx context.Context, adm AdmissionInfo) Sec
 		KyvernoEnforced:  adm.Kyverno.Installed,
 	}
 
-	// 1. Fetch "kafka" namespace labels
-	nsOut, err := c.run(ctx, "kubectl", "get", "ns", "kafka", "-o", "json")
-	if err == nil {
-		var nsData struct {
-			Metadata struct {
-				Labels map[string]string `json:"labels"`
-			} `json:"metadata"`
-		}
-		if json.Unmarshal([]byte(nsOut), &nsData) == nil {
-			if val, ok := nsData.Metadata.Labels["pod-security.kubernetes.io/enforce"]; ok {
-				audit.PSALabelEnforced = val
-			}
+	// 1. The kafka namespace's enforced Pod Security level
+	if nsOut, err := c.run(ctx, "kubectl", "get", "ns", "kafka", "-o", "json"); err == nil {
+		if level, ok := psaEnforceLabel(nsOut); ok {
+			audit.PSALabelEnforced = level
 		}
 	}
 
 	// 2. Check RBAC permissions (permissionsOk)
-	hasRbac := true
-	for _, res := range []string{"deployments", "statefulsets", "configmaps", "secrets", "services", "persistentvolumeclaims"} {
-		if check, _ := c.run(ctx, "kubectl", "auth", "can-i", "create", res, "-n", "kafka"); !strings.Contains(check, "yes") {
-			hasRbac = false
-			break
-		}
-	}
-	audit.PermissionsOk = hasRbac
+	audit.PermissionsOk = c.canCreateInKafkaNamespace(ctx)
 
 	// 3. Scan for TLS secrets and verify expiration
-	secOut, err := c.run(ctx, "kubectl", "get", "secrets", "-n", "kafka", "-o", "json")
-	if err == nil {
-		var secData struct {
-			Items []struct {
-				Metadata struct {
-					Name string `json:"name"`
-				} `json:"metadata"`
-				Type string            `json:"type"`
-				Data map[string]string `json:"data"`
-			} `json:"items"`
-		}
-		if json.Unmarshal([]byte(secOut), &secData) == nil {
-			for _, item := range secData.Items {
-				if item.Type == "kubernetes.io/tls" {
-					if certB64, ok := item.Data["tls.crt"]; ok {
-						certBytes, err := base64.StdEncoding.DecodeString(certB64)
-						if err == nil {
-							block, _ := pem.Decode(certBytes)
-							if block != nil {
-								cert, err := x509.ParseCertificate(block.Bytes)
-								if err == nil {
-									daysLeft := int(time.Until(cert.NotAfter).Hours() / 24)
-									audit.ExpiringCerts = append(audit.ExpiringCerts, CertExpirationInfo{
-										SecretName: item.Metadata.Name,
-										Subject:    cert.Subject.CommonName,
-										ExpiryDate: cert.NotAfter.Format("2006-01-02"),
-										DaysLeft:   daysLeft,
-									})
-								}
-							}
-						}
-					}
-				}
-			}
-		}
+	if secOut, err := c.run(ctx, "kubectl", "get", "secrets", "-n", "kafka", "-o", "json"); err == nil {
+		audit.ExpiringCerts = tlsSecretExpiries(secOut, time.Now())
 	}
 
 	// 4. Audit roles inside target namespace for excessive privileges
-	rolesOut, err := c.run(ctx, "kubectl", "get", "roles", "-n", "kafka", "-o", "json")
-	if err == nil {
-		var rolesData struct {
-			Items []struct {
-				Metadata struct {
-					Name string `json:"name"`
-				} `json:"metadata"`
-				Rules []struct {
-					APIGroups []string `json:"apiGroups"`
-					Resources []string `json:"resources"`
-					Verbs     []string `json:"verbs"`
-				} `json:"rules"`
-			} `json:"items"`
-		}
-		if json.Unmarshal([]byte(rolesOut), &rolesData) == nil {
-			for _, role := range rolesData.Items {
-				for _, rule := range role.Rules {
-					hasWildcardVerb := false
-					hasWildcardResource := false
-
-					for _, v := range rule.Verbs {
-						if v == "*" {
-							hasWildcardVerb = true
-							break
-						}
-					}
-					for _, r := range rule.Resources {
-						if r == "*" {
-							hasWildcardResource = true
-							break
-						}
-					}
-
-					if hasWildcardVerb && hasWildcardResource {
-						audit.HasExcessivePrivileges = true
-						break
-					}
-				}
-				if audit.HasExcessivePrivileges {
-					break
-				}
-			}
-		}
+	if rolesOut, err := c.run(ctx, "kubectl", "get", "roles", "-n", "kafka", "-o", "json"); err == nil {
+		audit.HasExcessivePrivileges = rolesHaveWildcardRule(rolesOut)
 	}
 
 	return audit
+}
+
+// psaEnforceLabel reads the pod-security enforce label from a namespace's
+// JSON; ok is false when the namespace has none.
+func psaEnforceLabel(nsJSON string) (level string, ok bool) {
+	var nsData struct {
+		Metadata struct {
+			Labels map[string]string `json:"labels"`
+		} `json:"metadata"`
+	}
+	if json.Unmarshal([]byte(nsJSON), &nsData) != nil {
+		return "", false
+	}
+	level, ok = nsData.Metadata.Labels["pod-security.kubernetes.io/enforce"]
+	return level, ok
+}
+
+// canCreateInKafkaNamespace asks whether the caller may create every kind
+// of object the chart installs in the kafka namespace.
+func (c *Collector) canCreateInKafkaNamespace(ctx context.Context) bool {
+	for _, res := range []string{"deployments", "statefulsets", "configmaps", "secrets", "services", "persistentvolumeclaims"} {
+		if check, _ := c.run(ctx, "kubectl", "auth", "can-i", "create", res, "-n", "kafka"); !strings.Contains(check, "yes") {
+			return false
+		}
+	}
+	return true
+}
+
+// tlsSecretExpiries lists the expiry of each kubernetes.io/tls secret in a
+// secret list whose tls.crt parses, days counted from now.
+func tlsSecretExpiries(secretsJSON string, now time.Time) []CertExpirationInfo {
+	var secData struct {
+		Items []struct {
+			Metadata struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+			Type string            `json:"type"`
+			Data map[string]string `json:"data"`
+		} `json:"items"`
+	}
+	if json.Unmarshal([]byte(secretsJSON), &secData) != nil {
+		return nil
+	}
+	var certs []CertExpirationInfo
+	for _, item := range secData.Items {
+		if item.Type != "kubernetes.io/tls" {
+			continue
+		}
+		cert := parseTLSCertB64(item.Data["tls.crt"])
+		if cert == nil {
+			continue
+		}
+		certs = append(certs, CertExpirationInfo{
+			SecretName: item.Metadata.Name,
+			Subject:    cert.Subject.CommonName,
+			ExpiryDate: cert.NotAfter.Format("2006-01-02"),
+			DaysLeft:   int(cert.NotAfter.Sub(now).Hours() / 24),
+		})
+	}
+	return certs
+}
+
+// parseTLSCertB64 decodes the first certificate of a base64 PEM bundle, or
+// returns nil.
+func parseTLSCertB64(certB64 string) *x509.Certificate {
+	if certB64 == "" {
+		return nil
+	}
+	certBytes, err := base64.StdEncoding.DecodeString(certB64)
+	if err != nil {
+		return nil
+	}
+	block, _ := pem.Decode(certBytes)
+	if block == nil {
+		return nil
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil
+	}
+	return cert
+}
+
+// rolesHaveWildcardRule reports whether any rule of any Role in a role
+// list grants verb * on resource *.
+func rolesHaveWildcardRule(rolesJSON string) bool {
+	var rolesData struct {
+		Items []struct {
+			Metadata struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+			Rules []struct {
+				APIGroups []string `json:"apiGroups"`
+				Resources []string `json:"resources"`
+				Verbs     []string `json:"verbs"`
+			} `json:"rules"`
+		} `json:"items"`
+	}
+	if json.Unmarshal([]byte(rolesJSON), &rolesData) != nil {
+		return false
+	}
+	for _, role := range rolesData.Items {
+		for _, rule := range role.Rules {
+			if slices.Contains(rule.Verbs, "*") && slices.Contains(rule.Resources, "*") {
+				return true
+			}
+		}
+	}
+	return false
 }

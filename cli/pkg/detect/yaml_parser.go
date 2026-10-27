@@ -62,9 +62,13 @@ func parseCPU(v interface{}) int {
 	return parseCPUMilli(quantityText(v))
 }
 
+// ParseValuesYAML reads the resource requests a values file sets. It is
+// lenient on purpose: a file that does not parse, or parses only in part
+// (yaml.v3 keeps what decoded before a type error), budgets with what it
+// does say, and every request it does not set keeps the default.
 func ParseValuesYAML(data []byte) ParsedReqs {
 	var cfg ValuesConfig
-	yaml.Unmarshal(data, &cfg)
+	_ = yaml.Unmarshal(data, &cfg) // lenient: see the doc comment
 
 	reqs := ParsedReqs{}
 

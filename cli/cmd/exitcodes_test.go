@@ -81,11 +81,8 @@ func TestNoExitZeroAfterError(t *testing.T) {
 // rewriting, so they are fixed there rather than in two places at once. A new
 // hit in one of these files fails the test; a fix lowers the count here.
 //
-//	detect.go    runDetect: a values file that cannot be read or written
-//	             exits 0 (four returns); couldNotTell is the fix.
 //	security.go  security audit: an "error" field in the API's result exits 0.
 var exitZeroBacklog = map[string]int{
-	"detect.go":   4,
 	"security.go": 1,
 }
 

@@ -25,7 +25,8 @@ compatibility report for deploying a 3-AZ Kafka cluster with Strimzi.
 Exit codes:
   0  — compatible (or compatible with warnings when --fail-on-warning is not set)
   1  — compatible but warnings detected (only with --fail-on-warning)
-  2  — incompatible (check failures detected)`,
+  2  — incompatible (check failures detected, only with --fail-on-error),
+       or a values file that could not be read or written`,
 	Example: `  kates detect
   kates detect -f values.yaml
   kates detect --output json
@@ -103,8 +104,7 @@ func runDetect(cmd *cobra.Command, args []string) error {
 	if detectValuesFile != "" {
 		data, err := os.ReadFile(detectValuesFile)
 		if err != nil {
-			output.Error(fmt.Sprintf("Failed to read values file: %v", err))
-			return nil
+			return couldNotTell(fmt.Sprintf("Failed to read values file: %v", err))
 		}
 		reqs = detect.ParseValuesYAML(data)
 	}
@@ -135,8 +135,7 @@ func runDetect(cmd *cobra.Command, args []string) error {
 	report.Capacity = capGen.Cap
 
 	if generateValues {
-		writeGeneratedValues(report)
-		return nil
+		return writeGeneratedValues(report)
 	}
 
 	// ── Standard report mode ────────────────────────────────────────────────
@@ -221,14 +220,14 @@ func printDetectVerdict(report *detect.DetectReport) {
 }
 
 // writeGeneratedValues is --generate-values: the values file, on stdout or
-// in --values-output, merged over the -f base when there is one.
-func writeGeneratedValues(report *detect.DetectReport) {
+// in --values-output, merged over the -f base when there is one. A values
+// file that cannot be read, rendered or written is exit 2 (couldNotTell).
+func writeGeneratedValues(report *detect.DetectReport) error {
 	var baseData []byte
 	if detectValuesFile != "" {
 		data, err := os.ReadFile(detectValuesFile)
 		if err != nil {
-			output.Error(fmt.Sprintf("Failed to read base values: %v", err))
-			return
+			return couldNotTell(fmt.Sprintf("Failed to read base values: %v", err))
 		}
 		baseData = data
 	}
@@ -241,16 +240,16 @@ func writeGeneratedValues(report *detect.DetectReport) {
 
 	if dryRun || valuesOutput == "" {
 		if err := render(os.Stdout); err != nil {
-			output.Error(fmt.Sprintf("Failed to render values: %v", err))
+			return couldNotTell(fmt.Sprintf("Failed to render values: %v", err))
 		}
-		return
+		return nil
 	}
 	if err := writeFileWith(valuesOutput, render); err != nil {
-		output.Error(fmt.Sprintf("Failed to write values file: %v", err))
-		return
+		return couldNotTell(fmt.Sprintf("Failed to write values file: %v", err))
 	}
 	output.Success(fmt.Sprintf("Values written to %s", valuesOutput))
 	output.Hint(fmt.Sprintf("Deploy with: helm upgrade --install %s %s -n kafka -f %s --timeout 10m --wait", clusterName, chartRef("kafka-cluster"), valuesOutput))
+	return nil
 }
 
 // writeDetectReportFile is --output-file: the report in the format the
@@ -281,8 +280,7 @@ func writeDetectReportFile(report *detect.DetectReport, path string) {
 		writePDF(path)
 	case ".json":
 		write(path, func(w io.Writer) error {
-			detect.RenderJSONTo(report, w)
-			return nil
+			return detect.RenderJSONTo(report, w)
 		})
 	case ".html", ".htm":
 		write(path, func(w io.Writer) error { return detect.RenderHTML(report, w) })

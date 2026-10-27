@@ -3,6 +3,7 @@ package detect
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -308,15 +309,12 @@ func (g *ValuesGenerator) computeStorageBudget(totalBrokers, totalControllers in
 	// Try to derive from PV inventory
 	audit := g.Report.StorageAudit
 	if audit.PVCount > 0 && audit.PVTotalCapacity != "" {
+		// The collector writes the total as "<n>Gi" (getStorageAudit).
 		totalGi := 0
-		cap := audit.PVTotalCapacity
-		if strings.HasSuffix(cap, "Gi") {
-			totalGi, _ = fmt.Sscan(strings.TrimSuffix(cap, "Gi"))
-			// fmt.Sscan returns count not value, use Atoi
-		}
-		if totalGi == 0 {
-			// parse manually
-			fmt.Sscanf(cap, "%dGi", &totalGi)
+		if digits, ok := strings.CutSuffix(audit.PVTotalCapacity, "Gi"); ok {
+			if n, err := strconv.Atoi(digits); err == nil {
+				totalGi = n
+			}
 		}
 		if totalGi > 0 {
 			kafkaStorageGi := int(float64(totalGi) * usable)

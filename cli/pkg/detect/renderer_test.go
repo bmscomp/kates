@@ -139,7 +139,9 @@ func TestRenderMarkdownAndJSON(t *testing.T) {
 	}
 
 	buf.Reset()
-	RenderJSONTo(report, &buf)
+	if err := RenderJSONTo(report, &buf); err != nil {
+		t.Fatalf("RenderJSONTo: %v", err)
+	}
 	if buf.Len() == 0 {
 		t.Error("RenderJSONTo wrote no bytes")
 	}
