@@ -2,9 +2,9 @@ apiVersion: v2
 name: kates-platform
 description: Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure
 type: application
-# Patch: the umbrella packs the subcharts the v1.31.0 release pins: kates
-# 0.14.3, kafka-cluster 1.0.22, connect-cluster 2.1.17, mirror-maker2 0.11.15.
-version: 0.8.11
+# Patch: the umbrella packs the subcharts the v1.32.0 release pins: kates
+# 0.14.4, kafka-cluster 1.0.23, connect-cluster 2.1.18, mirror-maker2 0.11.16.
+version: 0.8.12
 appVersion: "1.0.0"
 keywords:
   - kafka
@@ -41,6 +41,8 @@ dependencies:
     condition: connect-cluster.enabled
 annotations:
   artifacthub.io/changes: |
+    - kind: changed
+      description: "The umbrella moves with the v1.32.0 release: it packs kates 0.14.4, kafka-cluster 1.0.23, connect-cluster 2.1.18 and mirror-maker2 0.11.16 as they are on disk. Templates are unchanged."
     - kind: changed
       description: "The umbrella moves with the v1.31.0 release: it packs kates 0.14.3, kafka-cluster 1.0.22, connect-cluster 2.1.17 and mirror-maker2 0.11.15 as they are on disk. Templates are unchanged."
     - kind: changed

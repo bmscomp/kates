@@ -3,7 +3,7 @@
   "name": "io.github.bmscomp/kates",
   "title": "Kates MCP Server",
   "description": "Read-only Model Context Protocol (MCP) server for Apache Kafka cluster diagnostics, benchmark run analysis, chaos dry-run previews, and security posture audits.",
-  "version": "1.31.0",
+  "version": "1.32.0",
   "websiteUrl": "https://bmscomp.github.io/kates/",
   "repository": {
     "url": "https://github.com/bmscomp/kates",
@@ -13,8 +13,8 @@
   "packages": [
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/bmscomp/kates/releases/download/v1.31.0/kates-linux-amd64.tar.gz",
-      "version": "1.31.0",
+      "identifier": "https://github.com/bmscomp/kates/releases/download/v1.32.0/kates-linux-amd64.tar.gz",
+      "version": "1.32.0",
       "transport": {
         "type": "stdio"
       },

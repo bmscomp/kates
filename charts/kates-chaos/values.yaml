@@ -48,7 +48,7 @@ images:
   # tester — kates-tester, for GameDay and the Helm tests, whose scripts need
   # the shell the kubectl image lacks. Runs as uid 1000. Pinned to the kates
   # appVersion, like every chart's test image (scripts/check-versions.sh).
-  tester: "ghcr.io/bmscomp/kates-tester:1.31.0"
+  tester: "ghcr.io/bmscomp/kates-tester:1.32.0"
   # go-runner — default runtime for ChaosExperiment definitions
   goRunner:
     repository: litmuschaos/go-runner
