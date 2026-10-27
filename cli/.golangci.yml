@@ -49,6 +49,15 @@ linters:
       - linters:
           - funlen
         path: _test\.go
+      # getEcosystemStatus (196 lines), getSecurityAudit (111),
+      # getStrimziStatus (gocyclo 35) and parseKyvernoPolicies (gocyclo 36)
+      # predate wave 3; item 3.8 only threaded a context through them, which
+      # puts their signature lines in the diff. Splitting them into one probe
+      # per function is the remaining part of item 3.8.
+      - linters:
+          - funlen
+          - gocyclo
+        path: pkg/detect/collector\.go
       # runDeploy (157 statements): item 3.6 reduces it to resolution and
       # reporting over a component table.
       - linters:

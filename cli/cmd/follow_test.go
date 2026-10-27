@@ -215,7 +215,8 @@ func TestNextPollDelay(t *testing.T) {
 	// Two pollers do not stay in step.
 	same := 0
 	for range 20 {
-		if nextPollDelay(base, 3, err) == nextPollDelay(base, 3, err) {
+		a, b := nextPollDelay(base, 3, err), nextPollDelay(base, 3, err)
+		if a == b {
 			same++
 		}
 	}

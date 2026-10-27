@@ -168,7 +168,7 @@ func followRun(ctx context.Context, id string, opts followOpts) (*client.TestRun
 			if opts.onError != nil {
 				repaired, report := opts.onError(ctx, err)
 				if repaired {
-					failures, lastErr = 0, nil
+					failures = 0
 					continue
 				}
 				if report != nil {

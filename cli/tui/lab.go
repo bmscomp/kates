@@ -1002,13 +1002,13 @@ func (m LabModel) viewDiff(width int) string {
 		for _, key := range slices.Sorted(maps.Keys(a.Params)) {
 			aVal, bVal := a.Params[key], b.Params[key]
 			if aVal != bVal {
-				sb.WriteString(fmt.Sprintf("  %-*s %s %s %s\n",
+				fmt.Fprintf(&sb, "  %-*s %s %s %s\n",
 					colW,
 					dimStyle.Render(key),
 					warnStyle.Render(aVal),
 					glyphs().To,
 					healthyStyle.Render(bVal),
-				))
+				)
 			}
 		}
 	}
