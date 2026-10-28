@@ -169,7 +169,7 @@ public class ConformityCheck {
          * Each node's labels. A namespace-scoped role, such as the kates chart's
          * with rbac.scope=namespace, may not list nodes, which are cluster-scoped;
          * then the default zone label comes from the EndpointSlices of Strimzi's
-         * headless Service instead.
+         * headless Service instead, and another one from the brokers' racks.
          */
         private final Source<NodeLabels> nodeLabels = new Source<>("Kubernetes: nodes", () -> {
             try {
@@ -180,17 +180,17 @@ public class ConformityCheck {
                                         n -> n.getMetadata().getLabels() == null
                                                 ? Map.of()
                                                 : n.getMetadata().getLabels())),
-                        null);
+                        null,
+                        false);
             } catch (KubernetesClientException e) {
                 if (e.getCode() != 403) {
                     throw e;
                 }
             }
-            if (!DEFAULT_ZONE_LABEL.equals(zoneLabel())) {
-                throw new IllegalStateException("Forbidden: the Kates API's service account may not list nodes,"
-                        + " which are cluster-scoped, and only nodes carry " + zoneLabel());
+            if (DEFAULT_ZONE_LABEL.equals(zoneLabel())) {
+                return endpointZones();
             }
-            return endpointZones();
+            return brokerRacks();
         });
 
         /** With kafka.source brokers only: the brokers Kafka reports, and their effective configs. */
@@ -486,7 +486,7 @@ public class ConformityCheck {
          */
         private void placement(String role, Role spec, String roleLabel) {
             String zoneLabel = zoneLabel();
-            String source = pods.name + ", nodes' " + zoneLabel;
+            Supplier<String> source = () -> pods.name + ", " + zonesFrom("nodes' " + zoneLabel);
             rule(
                     role + ".zones",
                     spec.zones(),
@@ -528,14 +528,11 @@ public class ConformityCheck {
         private Observation<Integer> zoned(
                 String roleLabel, String zoneLabel, Function<Map<String, Integer>, Integer> measure) {
             NodeLabels nodes = nodeLabels.get();
-            Map<String, Map<String, String>> labels = nodes.byNode();
             Map<String, Integer> perZone = new TreeMap<>();
             Map<String, Integer> values = new LinkedHashMap<>();
             for (Pod pod : rolePods(roleLabel)) {
                 String node = pod.getSpec().getNodeName();
-                String zone = node == null
-                        ? null
-                        : labels.getOrDefault(node, Map.of()).get(zoneLabel);
+                String zone = node == null ? null : nodes.of(node).get(zoneLabel);
                 if (zone == null) {
                     values.put(pod.getMetadata().getName(), null);
                 } else {
@@ -598,7 +595,49 @@ public class ConformityCheck {
                         + " which are cluster-scoped, and no EndpointSlice of " + namespace + "/" + service
                         + " names a node");
             }
-            return new NodeLabels(byNode, "the EndpointSlices of " + namespace + "/" + service);
+            return new NodeLabels(byNode, "the EndpointSlices of " + namespace + "/" + service, false);
+        }
+
+        /**
+         * The zone label of each node a broker runs on, as Strimzi copies it
+         * into the broker's rack when it is spec.kafka.rack.topologyKey. A
+         * node that runs no broker Kafka reports is not covered: its zone is
+         * not known, rather than missing.
+         */
+        private NodeLabels brokerRacks() {
+            if (!zoneLabel().equals(at(kafka, "spec", "kafka", "rack", "topologyKey"))) {
+                throw new IllegalStateException("Forbidden: the Kates API's service account may not list nodes,"
+                        + " which are cluster-scoped, and only nodes carry " + zoneLabel()
+                        + ", which is not the Kafka CR's spec.kafka.rack.topologyKey");
+            }
+            Map<String, String> rackById = new HashMap<>();
+            for (Node broker : brokers.get()) {
+                rackById.put(broker.idString(), broker.rack());
+            }
+            Map<String, Map<String, String>> byNode = new HashMap<>();
+            for (Pod pod : pods.get()) {
+                String name = pod.getMetadata().getName();
+                String id = name.substring(name.lastIndexOf('-') + 1);
+                String node = pod.getSpec().getNodeName();
+                if (node != null && rackById.containsKey(id)) {
+                    Map<String, String> labels = byNode.computeIfAbsent(node, n -> new HashMap<>());
+                    String rack = rackById.get(id);
+                    if (rack != null && !rack.isEmpty()) {
+                        labels.put(zoneLabel(), rack);
+                    }
+                }
+            }
+            if (byNode.isEmpty()) {
+                throw new IllegalStateException("Forbidden: the Kates API's service account may not list nodes,"
+                        + " which are cluster-scoped, and no broker Kafka reports runs in a Kafka pod");
+            }
+            return new NodeLabels(byNode, brokers.name + " racks", true);
+        }
+
+        /** Where the zones come from: the nodes' labels, or what stood in for the node list once read. */
+        private String zonesFrom(String nodesSource) {
+            NodeLabels nodes = nodeLabels.peek();
+            return nodes != null && nodes.from() != null ? nodes.from() : nodesSource;
         }
 
         private String zoneLabel() {
@@ -681,7 +720,7 @@ public class ConformityCheck {
                     "kafka.rackAwareness",
                     rules.rackAwareness(),
                     meets(rules.rackAwareness()),
-                    crKafka + ".rack, " + (fromBrokers ? brokers.name + " racks" : "nodes' labels"),
+                    () -> crKafka + ".rack, " + (fromBrokers ? brokers.name + " racks" : zonesFrom("nodes' labels")),
                     () -> rackAwareness(fromBrokers));
             if (rules.listeners() != null) {
                 listeners(rules.listeners(), crKafka + ".listeners");
@@ -829,11 +868,10 @@ public class ConformityCheck {
                     throw new Unreadable(String.join("; ", unread));
                 }
             } else {
-                Map<String, Map<String, String>> labels = nodeLabels.get().byNode();
+                NodeLabels nodes = nodeLabels.get();
                 without = rolePods("strimzi.io/broker-role").stream()
                         .filter(p -> p.getSpec().getNodeName() == null
-                                || !labels.getOrDefault(p.getSpec().getNodeName(), Map.of())
-                                        .containsKey(zoneLabel))
+                                || !nodes.of(p.getSpec().getNodeName()).containsKey(zoneLabel))
                         .map(p -> p.getMetadata().getName())
                         .toList();
             }
@@ -943,6 +981,16 @@ public class ConformityCheck {
                 Predicate<T> meets,
                 String source,
                 Supplier<Observation<T>> observe) {
+            rule(id, constraint, meets, () -> source, observe);
+        }
+
+        /** A rule whose source is known once it has read: the zones' source depends on what it may list. */
+        private <T> void rule(
+                String id,
+                Constraint<?> constraint,
+                Predicate<T> meets,
+                Supplier<String> source,
+                Supplier<Observation<T>> observe) {
             if (constraint == null) {
                 return;
             }
@@ -958,7 +1006,7 @@ public class ConformityCheck {
                         null,
                         null,
                         e.getMessage(),
-                        source,
+                        source.get(),
                         null,
                         null));
                 return;
@@ -990,7 +1038,7 @@ public class ConformityCheck {
                             named.size() > MAX_SUBJECTS
                                     ? named.size() + " fall short; the first " + MAX_SUBJECTS + " are listed"
                                     : null),
-                    source,
+                    source.get(),
                     null,
                     null));
         }
@@ -1342,7 +1390,21 @@ public class ConformityCheck {
     private record BrokerConfigs(Map<String, Config> configs, List<String> unread) {}
 
     /** Each node's labels by name, and where they came from when not the nodes themselves. */
-    private record NodeLabels(Map<String, Map<String, String>> byNode, String from) {}
+    /**
+     * Each node's labels, and where they came from when not from the node
+     * list. A partial source covers only some nodes: it does not answer for
+     * the others.
+     */
+    private record NodeLabels(Map<String, Map<String, String>> byNode, String from, boolean partial) {
+        Map<String, String> of(String node) {
+            Map<String, String> labels = byNode.get(node);
+            if (labels == null && partial) {
+                throw new Unreadable(
+                        node + " runs no broker Kafka reports, and without the node list the zones come from " + from);
+            }
+            return labels == null ? Map.of() : labels;
+        }
+    }
 
     /** The PodMonitors read, null when the CRD is missing, and whether they are only the Kafka namespace's. */
     private record Monitors(List<GenericKubernetesResource> items, boolean ownNamespaceOnly) {}
@@ -1379,6 +1441,11 @@ public class ConformityCheck {
             if (error != null) {
                 throw new Unreadable(name + ": " + error.getMessage());
             }
+            return value;
+        }
+
+        /** The value once read, or null. */
+        T peek() {
             return value;
         }
     }

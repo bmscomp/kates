@@ -730,7 +730,7 @@ Read the workflow from the top:
 The recipe leans on the install's own limits:
 
 - A namespace-only install runs no chaos, so its pipeline leaves `KATES_CHAOS` unset.
-- Under a namespace-only install, a conformity rule that reads a custom `zoneLabel` is UNKNOWN. So is `monitoring.podMonitor` when no PodMonitor in the Kafka namespace selects every broker pod. Each exits 2, so give such a rule `severity: warn` in the reference.
+- Under a namespace-only install, a conformity rule that reads a custom `zoneLabel` is UNKNOWN, unless that label is the Kafka CR's `spec.kafka.rack.topologyKey`, and even then for a pod on a node without a broker. So is `monitoring.podMonitor` when no PodMonitor in the Kafka namespace selects every broker pod. Each exits 2, so give such a rule `severity: warn` in the reference.
 - The conformity check needs a Kates API of 1.27.0 or later. An older one answers it with a 404, and the CLI exits 2.
 - Cancelling the job cancels a run `kates test apply` waits for, but not a disruption plan, which keeps running in the Kates API.
 - On a cluster that enforces Kafka ACLs, the Kates API's Kafka user needs the grants that [Running Without Cluster Admin](12-deployment.md#running-without-cluster-admin) lists.

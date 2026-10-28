@@ -1026,6 +1026,9 @@ class ConformityCheckTest {
         assertEquals(2, zones.observed());
         assertEquals(
                 "alpha: 2, sigma: 1; zones from the EndpointSlices of kafka/krafter-kafka-brokers", zones.detail());
+        assertEquals(
+                "Kubernetes: pods kafka/strimzi.io/cluster=krafter, the EndpointSlices of kafka/krafter-kafka-brokers",
+                zones.source());
         assertEquals(1, result(report, "brokers.skew").observed());
     }
 
@@ -1054,8 +1057,57 @@ class ConformityCheckTest {
         assertEquals(Status.UNKNOWN, zones.status());
         assertEquals(
                 "Kubernetes: nodes: Forbidden: the Kates API's service account may not list nodes,"
-                        + " which are cluster-scoped, and only nodes carry example.com/zone",
+                        + " which are cluster-scoped, and only nodes carry example.com/zone,"
+                        + " which is not the Kafka CR's spec.kafka.rack.topologyKey",
                 zones.detail());
+    }
+
+    /**
+     * With the zone label as the rack key, Strimzi copies each broker's node label into its rack: brokers 3 and 4
+     * on alpha's node, 5 on sigma's, as place() put them. Controller 2's node runs no broker.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void withoutAccessToNodesTheRackKeyComesFromTheBrokersRacks() throws IOException {
+        place();
+        server.expect().get().withPath("/api/v1/nodes").andReturn(403, "").always();
+        Map<String, Object> kafkaSpec = new java.util.HashMap<>(KAFKA_SPEC);
+        Map<String, Object> kafkaPart =
+                new java.util.HashMap<String, Object>((Map<String, Object>) KAFKA_SPEC.get("kafka"));
+        kafkaPart.put("rack", Map.of("topologyKey", "example.com/zone"));
+        kafkaSpec.put("kafka", kafkaPart);
+        client.genericKubernetesResources(ClusterTopologyService.KAFKA_CRD)
+                .inNamespace("kafka")
+                .withName("krafter")
+                .delete();
+        create(ClusterTopologyService.KAFKA_CRD, kafka(kafkaSpec, Map.of("clusterId", "4L6g3nShT-eMCtK--X86sw")));
+        brokers();
+        when(admin.sharedAdminClient().describeCluster().nodes())
+                .thenReturn(KafkaFuture.completedFuture(List.of(
+                        new Node(3, "b3", 9092, "alpha"),
+                        new Node(4, "b4", 9092, "alpha"),
+                        new Node(5, "b5", 9092, "sigma"))));
+
+        ConformityReport report = run("{zoneLabel: example.com/zone, controllers: {zones: 3},"
+                + " brokers: {zones: {min: 3}, skew: {max: 0}}, kafka: {rackAwareness: true}}");
+
+        Result zones = result(report, "brokers.zones");
+        assertEquals(Status.FAIL, zones.status());
+        assertEquals(2, zones.observed());
+        assertEquals("alpha: 2, sigma: 1; zones from Kafka Admin: describeCluster racks", zones.detail());
+        assertEquals(
+                "Kubernetes: pods kafka/strimzi.io/cluster=krafter, Kafka Admin: describeCluster racks",
+                zones.source());
+        assertEquals(1, result(report, "brokers.skew").observed());
+        Result controllers = result(report, "controllers.zones");
+        assertEquals(Status.UNKNOWN, controllers.status());
+        assertEquals(
+                "node-gamma runs no broker Kafka reports, and without the node list the zones come from"
+                        + " Kafka Admin: describeCluster racks",
+                controllers.detail());
+        Result rack = result(report, "kafka.rackAwareness");
+        assertEquals(Status.PASS, rack.status());
+        assertTrue(rack.source().endsWith(".rack, Kafka Admin: describeCluster racks"), rack.source());
     }
 
     /** Strimzi's headless Service's EndpointSlice: each pod's endpoint on the node place() put it on. */

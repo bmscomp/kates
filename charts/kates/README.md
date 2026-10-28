@@ -123,7 +123,7 @@ helm template kates oci://ghcr.io/bmscomp/charts/kates -n team -f team-values.ya
   --set rbac.kafkaNamespaceRole=true --show-only templates/rbac.yaml | kubectl apply -f -
 ```
 
-Without node access, a conformity check takes each Kafka pod's zone for `zones`, `skew` and `kafka.rackAwareness` (source `cr`) from the EndpointSlices of Strimzi's headless Service, which carry only `topology.kubernetes.io/zone`; with another `zoneLabel` those rules are `UNKNOWN`. It finds PodMonitors only in the Kafka namespace.
+Without node access, a conformity check takes each Kafka pod's zone for `zones`, `skew` and `kafka.rackAwareness` (source `cr`) from the EndpointSlices of Strimzi's headless Service, which carry only `topology.kubernetes.io/zone`. With another `zoneLabel` that is the Kafka CR's `spec.kafka.rack.topologyKey`, it takes the zone from the racks the brokers report; with any other, those rules are `UNKNOWN`. It finds PodMonitors only in the Kafka namespace.
 
 ### Secret access
 
