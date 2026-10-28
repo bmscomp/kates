@@ -233,7 +233,7 @@ Find your question in the table below, then follow the family's link, or a comma
 | [Versions and Operators](#versions-and-operators) | [`versions`](#versions), [`operators list`](#operators-list) | Which Strimzi operators and Kafka versions can run on this cluster? | Kubernetes, through `kubectl` and `helm` |
 | [Migration Commands](#migration-commands) | [`migrate pairs`](#migration-commands), [`plan`](#migration-commands), [`up`](#migration-commands), [`status`](#migration-commands), [`verify`](#migration-commands), [`cutover`](#migration-commands), [`rollback`](#migration-commands), [`down`](#migration-commands), [`run`](#migration-commands) | Do an older Kafka's records and consumer offsets survive a MirrorMaker 2 move onto the primary? | Kubernetes (`kubectl`, `helm`); `up` and `run` may build images with `docker` |
 | [Security Commands](#security-commands) | [`security audit`](#security-audit), [`tls-inspect`](#security-tls-inspect), [`auth-test`](#security-auth-test), [`pentest`](#security-pentest), [`compliance`](#security-compliance), [`baseline`](#security-baseline), [`drift`](#security-drift), [`gate`](#security-gate), [`certs`](#security-certs), [`cve`](#security-cve), [`secrets`](#security-secrets), [`netpol`](#security-netpol), [`acl-map`](#security-acl-map), [`config-diff`](#security-config-diff), [`trend`](#security-trend) | How secure is the cluster, and has its security posture drifted? | Kates API; `security netpol` uses `kubectl` |
-| [Kyverno Policy Commands](#kyverno-policy-commands) | [`kyverno status`](#kyverno-status), [`violations`](#kyverno-violations), [`enforce`](#kyverno-enforce), [`audit`](#kyverno-audit), [`detect`](#kyverno-detect), [`apply`](#kyverno-apply), [`check`](#kyverno-check) | Which admission policies guard the cluster, what do they catch, and would they let Kates in? | Kubernetes (`kubectl`); `apply` and `check` also run `helm` |
+| [Kyverno Policy Commands](#kyverno-policy-commands) | [`kyverno status`](#kyverno-status), [`violations`](#kyverno-violations), [`enforce`](#kyverno-enforce), [`audit`](#kyverno-audit), [`detect`](#kyverno-detect), [`apply`](#kyverno-apply), [`check`](#kyverno-check) | Which admission policies guard the cluster, what do they catch, and would they let Kates in? | Kubernetes (`kubectl`); `apply` also runs `helm`, and `check` runs `helm` and the `kyverno` CLI on each chart `kates deploy` installs |
 | [Kafka Client Commands](#kafka-client-commands) | [`kafka brokers`](#kafka-brokers), [`topics`](#kafka-topics), [`topic`](#kafka-topic), [`groups`](#kafka-groups), [`group`](#kafka-group), [`consume`](#kafka-consume), [`produce`](#kafka-produce), [`create-topic`](#kafka-create-topic), [`alter-topic`](#kafka-alter-topic), [`delete-topic`](#kafka-delete-topic), [`tui`](#kafka-tui), [`connect`](#kafka-connect) | What is in a topic or consumer group, and how do you read, write or change it? | Kates API; `kafka connect` uses `kubectl` |
 | [Analysis & Optimization Commands](#analysis--optimization-commands) | [`benchmark`](#benchmark), [`advisor`](#advisor), [`explain`](#explain), [`replay`](#replay), [`gate`](#gate), [`test baseline`](#test-baseline), [`report regression`](#test-baseline) | What do a run's results mean, and do they clear the grade or baseline you require? | Kates API |
 | [Tuning Commands](#tuning-commands) | [`tune run`](#tune-run), [`types`](#tune-types) | How does one setting of `acks`, batching, compression, partition count or replication factor perform? | Kates API |
@@ -2144,15 +2144,19 @@ When two `kates` releases are installed, `kyverno apply` asks for `--app-ns`.
 
 #### kyverno check
 
-Hold the `kates` chart, rendered with the values you would install it with, to the Kyverno policies the cluster already enforces, before anything is installed. It reads the cluster's policies and exceptions with `kubectl`, renders the chart with `helm template`, and evaluates the render with the [Kyverno CLI](https://kyverno.io/docs/kyverno-cli/)'s `kyverno apply`. Nothing is written to the cluster.
+Hold the charts `kates deploy` installs, rendered with the values you would install them with, to the Kyverno policies the cluster already enforces, before anything is installed. It reads the cluster's policies and exceptions with `kubectl`, renders each chart with `helm template`, and evaluates the render with the [Kyverno CLI](https://kyverno.io/docs/kyverno-cli/)'s `kyverno apply`. Nothing is written to the cluster.
 
 ```bash
 kates kyverno check -n team -f team-values.yaml
 kates kyverno check -n team --set podLabels.team=payments
-kates kyverno check -n team -o json
+kates kyverno check --stack --with-kafka-connect
+kates kyverno check --stack --label team=payments --write-values kyverno/
+kates kyverno check --chart kafka-cluster -o json
 ```
 
-It reads ClusterPolicies, ValidatingPolicies and ImageValidatingPolicies, the release namespace's Policies, and PolicyExceptions in every namespace, or only in the release namespace when the account may not list the others. A kind the cluster doesn't have is skipped. One the account may not read is named, and the check can't pass without it. The render gets the release namespace on each object, as `helm install` would set it, so exceptions that match by namespace apply. The chart's own `kyvernoPolicy.exceptions` count too.
+By default it checks the `kates` chart. `--chart` names the charts to check, from `strimzi-operator`, `monitoring`, `kafka-cluster`, `connect-cluster`, `mirror-maker2` and `kates`. `--stack` checks each of them that `kates deploy` would install with the same `--with-*` flags. Each chart goes in the namespace `kates deploy` would put it in, set by the `--*-ns` flags (the Strimzi operator always goes in `strimzi-operator`). `-n` puts every chart in one namespace instead. The release names are deploy's too: `--kafka-name` for the Kafka cluster, `mm2` for MirrorMaker 2. Charts render with their defaults plus the values files deploy always passes (`values-platform.yaml` for `kafka-cluster`). They don't get the values deploy derives from the cluster, such as the cluster domain, the bootstrap address or the resolved versions. A `-f` or `--set` entry applies to every chart checked, or to one chart when you prefix it with the chart's name: `-f kafka-cluster=kafka.yaml`, `--set kates=image.tag=1.0`.
+
+It reads ClusterPolicies, ValidatingPolicies and ImageValidatingPolicies, each namespace's Policies, and PolicyExceptions in every namespace, or only in the chart's namespace when the account may not list the others. A kind the cluster doesn't have is skipped. One the account may not read is named, and the check can't pass without it. The render gets the release namespace on each object, as `helm install` would set it, so exceptions that match by namespace apply. The `kates` chart's own `kyvernoPolicy.exceptions` count too.
 
 Exceptions count only where Kyverno accepts them. The check reads the flags of Kyverno's admission controller: with exceptions off (`features.policyExceptions.enabled`), or accepted only in another namespace, it says so and leaves out the exceptions Kyverno would ignore, so it fails what admission would refuse. When the account may not read Kyverno's Deployment, it counts the chart's exceptions and says it couldn't tell.
 
@@ -2167,17 +2171,49 @@ Each rule that doesn't pass is listed with the resources it failed on and the ch
 | Running as root, privileges, capabilities, seccomp | `securityContext` and `containerSecurityContext` |
 | Requests and limits | `resources`, and the failing component's own resources values |
 
-The mapping reads the policy name, the rule name and the message, so it's a suggestion. A rule nothing matches, such as one on `hostPath` volumes, is left to an exception. For every rule that fails, the check prints the `kyvernoPolicy.exceptions` values that would exempt the release's own pods. Kyverno must accept exceptions in that namespace ([Policy Exceptions](17-security.md#policy-exceptions)).
+The mapping reads the policy name, the rule name and the message, so it's a suggestion. A rule nothing matches, such as one on `hostPath` volumes, is left to an exception. For every rule that fails in the `kates` chart, the check prints the `kyvernoPolicy.exceptions` values that would exempt the release's own pods. Kyverno must accept exceptions in that namespace ([Policy Exceptions](17-security.md#policy-exceptions)). The other charts render no PolicyException, so their rules list the policy and rule names a PolicyException of your own would need.
 
 Audit-mode policies show as warnings, because they don't block an install. Rules that call the API server or read ConfigMaps evaluate offline without that data, so treat their result as a hint.
 
+##### Writing the missing values
+
+`--write-values <dir>` writes `<chart>-kyverno.yaml` into `<dir>` for each chart with a rule that failed or errored. It writes only what it can fill in exactly:
+
+- A missing pod label, when `--label key=value` gives its value. The label goes under every value that labels the chart's pods: `podLabels`, and the label values of the subcharts a chart wraps. These are the same values `scripts/check-chart-policies.sh` sets in CI to prove they reach every pod: `strimzi-kafka-operator.labels` for `strimzi-operator`, and `kube-prometheus-stack`'s `commonLabels` plus the `podLabels` of Grafana, the Prometheus Operator, kube-state-metrics and node-exporter for `monitoring`. The label must be on the pod or the pod template. A rule on a Deployment's own labels isn't one `podLabels` fixes.
+- Any other rule is written as a comment with its message and the suggested value. In the `kates` chart it's also a commented `kyvernoPolicy.exceptions` entry, which you can uncomment to exempt the release. Other charts have no such value, so the file says so.
+
+Values already in the file are kept, so you can run it again into the same directory. A chart whose rules all pass gets no file. Pass the files back with one `-f` each, and the second run passes on everything the files fixed:
+
+```bash
+kates kyverno check --stack --label team=payments --write-values kyverno/
+kates kyverno check --stack \
+  -f strimzi-operator=kyverno/strimzi-operator-kyverno.yaml \
+  -f monitoring=kyverno/monitoring-kyverno.yaml \
+  -f kafka-cluster=kyverno/kafka-cluster-kyverno.yaml \
+  -f kates=kyverno/kates-kyverno.yaml
+```
+
+Then install with the same files, as values files for each chart.
+
+::: {.callout-note title="Kafka's Own Pods"}
+Strimzi creates the broker, controller, entity operator, Cruise Control and Kafka Exporter pods from the templates in the Kafka CR, not Helm. Their labels come from the `kafka-cluster` chart's `podLabels`, which the chart copies into those templates. The render holds the Kafka CR, not those pods, so the check sees only the chart's own pods (its Helm tests). A label written into `kafka-cluster-kyverno.yaml` reaches the broker pods too, but rules about anything else on them aren't checked offline.
+:::
+
+The flags:
+
 | Flag | Description |
 |---|---|
-| `--namespace`, `-n` | The namespace the release would be installed in (default: `--app-ns`'s default, `kates`) |
-| `--values`, `-f` | A values file for the `kates` chart; repeatable |
-| `--set` | A value for the `kates` chart, as `helm --set`; repeatable |
+| `--namespace`, `-n` | One namespace for every chart checked (default: where `kates deploy` puts each) |
+| `--chart` | A chart to check: `strimzi-operator`, `monitoring`, `kafka-cluster`, `connect-cluster`, `mirror-maker2` or `kates`; repeatable (default: `kates`) |
+| `--stack` | Check every chart `kates deploy` would install with the `--with-*` flags given |
+| `--with-strimzi`, `--with-monitoring`, `--with-kafka-connect`, `--with-mirror-maker2` | As for `kates deploy`, with the same defaults: which charts `--stack` checks |
+| `--kafka-ns`, `--connect-ns`, `--monitoring-ns`, `--mm2-ns`, `--app-ns`, `--kafka-name` | As for `kates deploy`: where each chart goes, and the Kafka release's name |
+| `--values`, `-f` | A values file for every chart checked, or `<chart>=<file>` for one; repeatable |
+| `--set` | A value as `helm --set` for every chart checked, or `<chart>=<key>=<value>` for one; repeatable |
+| `--write-values` | Write `<chart>-kyverno.yaml` into this directory for each chart with a failed rule |
+| `--label` | The value of a pod label a policy requires, as `key=value`, for `--write-values`; repeatable |
 
-It exits `0` when no rule fails and `1` when one does. It exits `2` when it couldn't run: no `kyverno` CLI on the `PATH`, a `helm template` error, a rule Kyverno couldn't evaluate, or a policy kind the account may not read. With `-o json` it prints `namespace`, `unread`, `pass`, `skip`, `findings` (each with `result`, `policy`, `rule`, `message`, `resources` and `fix`) and `exceptions`, with the same exit code. The chart comes from where `kates deploy` takes it: the published charts of this release, or the checkout `KATES_CHECKOUT` names (a CLI built from source uses the checkout it runs in).
+It exits `0` when no rule fails, `1` when one does, and `2` when it couldn't run: no `kyverno` CLI on the `PATH`, a `helm dependency` or `helm template` error, a rule Kyverno couldn't evaluate, or a policy kind the account may not read. With `-o json` it prints a list with one object per chart: `chart`, `namespace`, `unread`, `pass`, `skip`, `findings` (each with `result`, `policy`, `rule`, `message`, `resources` and `fix`), `exceptions`, `exceptionNote` (set when Kyverno's exception settings change what the check counts) and `valuesFile`, with the same exit code. The charts come from where `kates deploy` takes them: the published charts of this release, or the checkout `KATES_CHECKOUT` names (a CLI built from source uses the checkout it runs in). In a checkout, it runs the same `helm dependency` command on each chart that deploy does first.
 
 See also [Security & Compliance](17-security.md) for Kyverno policy deep dive and custom policy authoring.
 
