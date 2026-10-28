@@ -304,7 +304,7 @@ Find your question in the table below, then follow its link to the family's comm
 | [Versions and Operators](#versions-and-operators) | `versions`, `operators list` | Which Strimzi operators and Kafka versions can run on this cluster? | Kubernetes, through `kubectl` and `helm` |
 | [Migration Commands](#migration-commands) | `migrate pairs`, `plan`, `up`, `status`, `verify`, `cutover`, `rollback`, `down`, `run` | Do an older Kafka's records and consumer offsets survive a MirrorMaker 2 move onto the primary? | Kubernetes, through `kubectl` and `helm`; when a source has no upstream image, `up` and `run` build one with `docker` and, on a Kind cluster, load it there, unless you pass `--skip-build` |
 | [Security Commands](#security-commands) | `security audit`, `tls-inspect`, `auth-test`, `pentest`, `compliance`, `baseline`, `drift`, `gate`, `certs`, `cve`, `secrets`, `netpol`, `acl-map`, `config-diff`, `trend` | How secure is the cluster, and has its security posture drifted? | Kates API; `security netpol` uses `kubectl`, and `security audit` also asks it about Kyverno |
-| [Kyverno Policy Commands](#kyverno-policy-commands) | `kyverno status`, `violations`, `enforce`, `audit`, `detect`, `apply` | Which admission policies guard the cluster, and what do they catch? | Kubernetes, through `kubectl`; `kyverno apply` also runs `helm` |
+| [Kyverno Policy Commands](#kyverno-policy-commands) | `kyverno status`, `violations`, `enforce`, `audit`, `detect`, `apply`, `check` | Which admission policies guard the cluster, what do they catch, and would they let Kates in? | Kubernetes, through `kubectl`; `kyverno apply` also runs `helm`, and `kyverno check` runs `helm` and the `kyverno` CLI |
 | [Kafka Client Commands](#kafka-client-commands) | `kafka brokers`, `topics`, `topic`, `groups`, `group`, `consume`, `produce`, `create-topic`, `alter-topic`, `delete-topic`, `tui`, `connect` | What is in a topic or consumer group, and how do you read, write or change it? | Kates API; `kafka connect` uses `kubectl` |
 | [Analysis & Optimization Commands](#analysis--optimization-commands) | `benchmark`, `advisor`, `explain`, `replay`, `gate`, `test baseline`, `report regression` | What do a run's results mean, and do they clear the grade or baseline you require? | Kates API |
 | [Tuning Commands](#tuning-commands) | `tune run`, `types` | How does one setting of `acks`, batching, compression, partition count or replication factor perform? | Kates API |
@@ -1957,6 +1957,41 @@ kates kyverno apply --mode Enforce --yes --with-netpol
 | `--dry-run` | Render the release with `helm upgrade --install --dry-run` and report how many resources it would apply; installs nothing |
 | `--app-ns`, `--topology`, `--namespace` | The namespace of the kates release to update, as for `kates deploy`. Without them it uses the namespace of the installed `kates` release, and asks for `--app-ns` when two are installed |
 | `--labels-file` | Labels for the `kyverno` and `kates` namespaces (default: `.labels` in the current directory); see [Namespace Labels](12-deployment.md#namespace-labels) |
+
+#### kyverno check
+
+Hold the `kates` chart, rendered with the values you would install it with, to the Kyverno policies the cluster already enforces, before anything is installed. It reads the cluster's policies and exceptions with `kubectl`, renders the chart with `helm template`, and evaluates the render with the [Kyverno CLI](https://kyverno.io/docs/kyverno-cli/)'s `kyverno apply`. Nothing is written to the cluster.
+
+```bash
+kates kyverno check -n team -f team-values.yaml
+kates kyverno check -n team --set podLabels.team=payments
+kates kyverno check -n team -o json
+```
+
+It reads ClusterPolicies, ValidatingPolicies and ImageValidatingPolicies, the release namespace's Policies, and PolicyExceptions in every namespace, or only in the release namespace when the account may not list the others. A kind the cluster doesn't have is skipped. One the account may not read is named, and the check can't pass without it. The render gets the release namespace on each object, as `helm install` would set it, so exceptions that match by namespace apply. The chart's own `kyvernoPolicy.exceptions` count too.
+
+Each rule that doesn't pass is listed with the resources it failed on and the chart value most likely to fix it:
+
+| The rule is about | Chart value |
+|---|---|
+| A label, such as `/metadata/labels/team/` | `podLabels.team=<value>` |
+| Image pull secrets | `global.imagePullSecrets` |
+| A `latest` or mutable image tag | `image.tag`, and the tag of the image the rule names |
+| Allowed or trusted registries | `global.imageRegistry` |
+| Running as root, privileges, capabilities, seccomp | `securityContext` and `containerSecurityContext` |
+| Requests and limits | `resources`, and the failing component's own resources values |
+
+The mapping reads the policy name, the rule name and the message, so it's a suggestion. A rule nothing matches, such as one on `hostPath` volumes, is left to an exception. For every rule that fails, the check prints the `kyvernoPolicy.exceptions` values that would exempt the release's own pods. Kyverno must accept exceptions in that namespace.
+
+Audit-mode policies show as warnings, because they don't block an install. Rules that call the API server or read ConfigMaps evaluate offline without that data, so treat their result as a hint.
+
+| Flag | Description |
+|---|---|
+| `--namespace`, `-n` | The namespace the release would be installed in (default: `--app-ns`'s default, `kates`) |
+| `--values`, `-f` | A values file for the `kates` chart; repeatable |
+| `--set` | A value for the `kates` chart, as `helm --set`; repeatable |
+
+It exits `0` when no rule fails, `1` when one does, and `2` when it couldn't run: no `kyverno` CLI on the `PATH`, a `helm template` error, a rule Kyverno couldn't evaluate, or a policy kind the account may not read. With `-o json` it prints `namespace`, `unread`, `pass`, `skip`, `findings` (each with `result`, `policy`, `rule`, `message`, `resources` and `fix`) and `exceptions`, with the same exit code. The chart comes from where `kates deploy` takes it: the published charts of this release, or the checkout `KATES_CHECKOUT` names (a CLI built from source uses the checkout it runs in).
 
 **See also:** [Security & Compliance](17-security.md) for Kyverno policy deep dive and custom policy authoring.
 

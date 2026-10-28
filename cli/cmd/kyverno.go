@@ -22,7 +22,8 @@ Commands:
   status       Show all ClusterPolicies with mode, readiness, and rule counts
   violations   Pretty-print policy violations grouped by namespace
   enforce      Switch a policy from Audit to Enforce mode
-  audit        Switch a policy from Enforce to Audit mode`,
+  audit        Switch a policy from Enforce to Audit mode
+  check        Hold the kates chart to the cluster's policies before installing it`,
 	Example: `  kates kyverno status
   kates kyverno violations
   kates kyverno violations --namespace kafka
