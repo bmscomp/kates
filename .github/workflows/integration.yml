@@ -45,6 +45,7 @@ jobs:
               - 'versions.env'
               - 'Makefile'
               - 'charts/kafka-cluster/**'
+              - 'charts/kates/**'
               - 'charts/strimzi-operator/**'
               - 'scripts/deploy-kafka-generic.sh'
               - '.github/workflows/integration.yml'
@@ -180,12 +181,27 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           cache: maven
 
+      # ConformityNamespacedLiveTest impersonates the ServiceAccount kates as a
+      # rbac.scope=namespace install grants it: in team, the Kafka-namespace
+      # Role only; in team-nodes, rbac.nodeReads too.
+      - name: Apply the kates chart's namespace-scope RBAC
+        run: |
+          set -euo pipefail
+          for ns in team team-nodes; do
+            kubectl create namespace "${ns}" --dry-run=client -o yaml | kubectl apply -f -
+            kubectl create serviceaccount kates -n "${ns}" --dry-run=client -o yaml | kubectl apply -f -
+          done
+          helm template kates charts/kates/ -n team --set rbac.scope=namespace \
+              --show-only templates/rbac.yaml | kubectl apply -f -
+          helm template kates charts/kates/ -n team-nodes --set rbac.scope=namespace --set rbac.nodeReads=true \
+              --show-only templates/rbac.yaml | kubectl apply -f -
+
       - name: Conformity check against the live cluster
         id: conformity
         working-directory: kates
         env:
           KATES_CONFORMITY_LIVE: "true"
-        run: ./mvnw test -q -B -ntp -Dtest=ConformityLiveTest
+        run: ./mvnw test -q -B -ntp -Dtest='ConformityLiveTest,ConformityNamespacedLiveTest'
 
       # Reads each step's real outcome. The previous table printed ✅ on every
       # row under `if: always()`, so a failed run still summarised as green.
