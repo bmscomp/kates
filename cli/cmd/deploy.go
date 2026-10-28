@@ -640,7 +640,8 @@ func finishDeploy(ctx context.Context, target string, ns resolvedNamespaces, ent
 	}
 
 	// Store the key from Secret kates-api-key in the active context,
-	// unless that context holds a key kates did not put there.
+	// unless that context holds a key kates did not put there or its API
+	// refuses the key (it points at another cluster).
 	updateActiveContextAPIKey(ctx, ns.app)
 
 	if deployPortForward {

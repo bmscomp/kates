@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -29,6 +31,11 @@ func TestSyncActiveContextKey(t *testing.T) {
 	// Key-sources are salted: a context whose key-source must stay as it was
 	// shares this one string with its want.
 	oldSource := secretKeySource("old")
+	// ours is the cluster just deployed: it accepts the Secret's key. lab is
+	// another cluster's API, which refuses it.
+	ours := keyAPI(t, adminKey)
+	lab := keyAPI(t, "lab-key")
+	labSource := secretKeySource("lab-key")
 	tests := []struct {
 		name        string
 		contexts    map[string]Context
@@ -43,19 +50,37 @@ func TestSyncActiveContextKey(t *testing.T) {
 	}{
 		{
 			name:        "stores the key in a context without one",
-			contexts:    map[string]Context{"local": {URL: "http://localhost:8080", Output: "table"}},
+			contexts:    map[string]Context{"local": {URL: ours, Output: "table"}},
 			current:     "local",
 			wantOutcome: deployKeyStored, wantTarget: "local",
-			wantCtx: &Context{URL: "http://localhost:8080", Output: "table", APIKey: adminKey}, freshSource: true,
+			wantCtx: &Context{URL: ours, Output: "table", APIKey: adminKey}, freshSource: true,
 			wantReport: `API key from Secret kates-api-key (namespace kates) stored in context "local"`,
 		},
 		{
 			name:        "replaces a key it stored before",
-			contexts:    map[string]Context{"local": {URL: "u", APIKey: "old", KeySource: oldSource}},
+			contexts:    map[string]Context{"local": {URL: ours, APIKey: "old", KeySource: oldSource}},
 			current:     "local",
 			wantOutcome: deployKeyStored, wantTarget: "local",
-			wantCtx: &Context{URL: "u", APIKey: adminKey}, freshSource: true,
+			wantCtx: &Context{URL: ours, APIKey: adminKey}, freshSource: true,
 			wantReport: `stored in context "local"`,
+		},
+		{
+			// 2026-10-28: a deploy to a scratch cluster stored its key in
+			// "ports", port-forwarded to the lab's API, over the lab's key.
+			name:        "keeps the key of a context pointing at another cluster's API",
+			contexts:    map[string]Context{"ports": {URL: lab, APIKey: "lab-key", KeySource: labSource}},
+			current:     "ports",
+			wantOutcome: deployKeyOtherAPI, wantTarget: "ports",
+			wantCtx:    &Context{URL: lab, APIKey: "lab-key", KeySource: labSource},
+			wantReport: `Context "ports" was left as it is: its API (` + lab + `) did not accept the API key from Secret kates-api-key (namespace kates) (HTTP 401 Unauthorized)`,
+		},
+		{
+			name:        "stores nothing when the context's API cannot be asked",
+			contexts:    map[string]Context{"local": {URL: "http://127.0.0.1:1"}},
+			current:     "local",
+			wantOutcome: deployKeyOtherAPI, wantTarget: "local",
+			wantCtx:    &Context{URL: "http://127.0.0.1:1"},
+			wantReport: `kates ports forwards this cluster's API`,
 		},
 		{
 			name: "keeps an agent-scoped key in the current MCP context",
@@ -87,11 +112,11 @@ func TestSyncActiveContextKey(t *testing.T) {
 			name: "writes the context --context names, not the current one",
 			contexts: map[string]Context{
 				"mcp": {URL: "u", APIKey: agentKey},
-				"lab": {URL: "http://lab"},
+				"lab": {URL: ours},
 			},
 			current: "mcp", flag: "lab",
 			wantOutcome: deployKeyStored, wantTarget: "lab",
-			wantCtx: &Context{URL: "http://lab", APIKey: adminKey}, freshSource: true,
+			wantCtx: &Context{URL: ours, APIKey: adminKey}, freshSource: true,
 			wantReport: `stored in context "lab"`,
 		},
 		{
@@ -168,6 +193,17 @@ func TestSyncActiveContextKey(t *testing.T) {
 			}
 		})
 	}
+}
+
+// keyAPI starts a Kates API stand-in that accepts only key, and returns its URL.
+func keyAPI(t *testing.T, key string) string {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+key {
+			w.WriteHeader(http.StatusUnauthorized)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
 }
 
 func TestRunKatesHelmUpgradeRecoversFromPostgresImmutableStatefulSet(t *testing.T) {
