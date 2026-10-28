@@ -2,9 +2,9 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Minor: rbac.nodeReads, an opt-in ClusterRole with get and list on nodes for
-# a rbac.scope=namespace install's conformity check. Off, nothing changes.
-version: 0.15.0
+# Patch: kyvernoPolicy.exceptions' PolicyException is a pre-install and
+# pre-upgrade hook, so it exists before the workloads it exempts.
+version: 0.15.1
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -28,6 +28,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "kyvernoPolicy.exceptions did not exempt a first install from an Enforce policy: Helm applies custom resources after Deployments, so Kyverno refused the Deployment before the PolicyException existed. The PolicyException is now a pre-install and pre-upgrade hook (weight -10, before the migration Job). Helm does not track hooks: helm uninstall, or emptying the list, leaves it, to delete with kubectl"
     - kind: added
       description: "rbac.nodeReads: with rbac.scope=namespace, an opt-in ClusterRole and ClusterRoleBinding with get and list on nodes, so a conformity check reads any zoneLabel. Off by default."
     - kind: changed

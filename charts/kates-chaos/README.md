@@ -171,7 +171,7 @@ Each key under `engines:` renders a `ChaosEngine`. Probes and pod `components` a
 | `kyvernoPolicy.action` | `Audit` / `Enforce` | `Audit` |
 | `kyvernoPolicy.namespaces` | Namespaces the policy applies to (empty = release ns) | `[]` |
 | `kyvernoPolicy.excludeSelector` | Pods skipped (need privileges) | `chaosUID Exists` |
-| `kyvernoPolicy.exceptions` | `[{policyName, ruleNames}]` — one `kyverno.io/v2` PolicyException in the release namespace, matching litmus-core's operator and exporter (`app.kubernetes.io/instance` and `app.kubernetes.io/name: litmus`, litmus-core's `nameOverride`), for any policy, the cluster's own included, each rule's `autogen-` and `autogen-cronjob-` variants too. Rendered whenever non-empty and the API exists, regardless of `kyvernoPolicy.enabled`; Kyverno must accept exceptions from the release namespace | `[]` |
+| `kyvernoPolicy.exceptions` | `[{policyName, ruleNames}]` — one `kyverno.io/v2` PolicyException in the release namespace, matching litmus-core's operator and exporter (`app.kubernetes.io/instance` and `app.kubernetes.io/name: litmus`, litmus-core's `nameOverride`), for any policy, the cluster's own included, each rule's `autogen-` and `autogen-cronjob-` variants too. Rendered whenever non-empty and the API exists, regardless of `kyvernoPolicy.enabled`; Kyverno must accept exceptions from the release namespace. A pre-install and pre-upgrade hook, so it exists before the Litmus Deployments; `helm uninstall` leaves it | `[]` |
 | `pdb.enabled` | PodDisruptionBudget (requires `selector`) | `false` |
 | `pdb.minAvailable` / `maxUnavailable` / `selector` | PDB config | `1` / `""` / `{}` |
 | `gameday.enabled` | Run the validation Job | `false` |

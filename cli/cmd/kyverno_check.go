@@ -81,6 +81,26 @@ rule fails, 2 when the check could not run or could not read every policy.`,
 		if err != nil {
 			return couldNotTell(err.Error())
 		}
+		// Kyverno ignores an exception outside the namespace it accepts them
+		// from, so the check does too, rather than pass what admission refuses.
+		exceptionNS, known := kyvernoExceptionNamespace(ctx)
+		accepts := func(n string) bool { return !known || exceptionNS == "*" || exceptionNS == n }
+		read.exceptions = slices.DeleteFunc(read.exceptions, func(e []byte) bool {
+			var obj struct {
+				Metadata struct {
+					Namespace string `json:"namespace"`
+				} `json:"metadata"`
+			}
+			return json.Unmarshal(e, &obj) == nil && !accepts(obj.Metadata.Namespace)
+		})
+		switch {
+		case known && exceptionNS == "":
+			report.ExceptionNote = "Kyverno accepts no PolicyException (features.policyExceptions): the check counts none"
+		case !accepts(ns):
+			report.ExceptionNote = "Kyverno accepts PolicyExceptions only in " + exceptionNS + ": the check counts none in " + ns
+		case !known && bytes.Contains(render, []byte("kind: PolicyException")):
+			report.ExceptionNote = "could not read whether Kyverno accepts PolicyExceptions in " + ns + ": the check counts the chart's"
+		}
 		dir, err := os.MkdirTemp("", "kates-kyverno-check-")
 		if err != nil {
 			return couldNotTell(err.Error())
@@ -98,9 +118,11 @@ rule fails, 2 when the check could not run or could not read every policy.`,
 		}
 		kyvernoArgs := []string{"apply", filepath.Join(dir, "policies.yaml"),
 			"--resource", filepath.Join(dir, "kates.yaml"),
-			// The chart's own PolicyException (kyvernoPolicy.exceptions) is in the render.
-			"--exceptions-within-resources",
 			"--audit-warn", "--policy-report", "--output-format", "json"}
+		if accepts(ns) {
+			// The chart's own PolicyException (kyvernoPolicy.exceptions) is in the render.
+			kyvernoArgs = append(kyvernoArgs, "--exceptions-within-resources")
+		}
 		if len(read.exceptions) > 0 {
 			kyvernoArgs = append(kyvernoArgs, "--exception", filepath.Join(dir, "exceptions.yaml"))
 		}
@@ -191,6 +213,53 @@ func listKyvernoKind(ctx context.Context, resource, scope, ns string) ([][]byte,
 		items[i] = item
 	}
 	return items, "", nil
+}
+
+// kyvernoExceptionNamespace reads, from the flags of Kyverno's admission
+// controller, the namespace it accepts PolicyExceptions from: "*" any, ""
+// none. known is false when there is none the account may read.
+func kyvernoExceptionNamespace(ctx context.Context) (ns string, known bool) {
+	out, err := newKubectl("").Output(ctx, "get", "deploy", "-A", "-o", "json",
+		"-l", "app.kubernetes.io/part-of=kyverno,app.kubernetes.io/component=admission-controller")
+	var list struct {
+		Items []struct {
+			Spec struct {
+				Template struct {
+					Spec struct {
+						Containers []struct {
+							Name string   `json:"name"`
+							Args []string `json:"args"`
+						} `json:"containers"`
+					} `json:"spec"`
+				} `json:"template"`
+			} `json:"spec"`
+		} `json:"items"`
+	}
+	if err != nil || json.Unmarshal(out, &list) != nil {
+		return "", false
+	}
+	for _, item := range list.Items {
+		for _, c := range item.Spec.Template.Spec.Containers {
+			if c.Name != "kyverno" {
+				continue
+			}
+			// enablePolicyException defaults to false.
+			enabled := false
+			for _, a := range c.Args {
+				switch {
+				case a == "--enablePolicyException" || a == "--enablePolicyException=true":
+					enabled = true
+				case strings.HasPrefix(a, "--exceptionNamespace="):
+					ns = strings.TrimPrefix(a, "--exceptionNamespace=")
+				}
+			}
+			if !enabled {
+				return "", true
+			}
+			return ns, true
+		}
+	}
+	return "", false
 }
 
 // renderKatesChart renders the kates chart as it would be installed in ns.
@@ -297,6 +366,9 @@ type kyvernoCheckReport struct {
 	Skip       int                  `json:"skip"`
 	Findings   []kyvernoFinding     `json:"findings"`
 	Exceptions []kyvernoChartExcept `json:"exceptions,omitempty"`
+
+	// ExceptionNote says when Kyverno's exception settings changed what counts.
+	ExceptionNote string `json:"exceptionNote,omitempty"`
 }
 
 // kyvernoFinding is a rule that did not pass, on the resources it failed.
@@ -437,6 +509,9 @@ func renderKyvernoCheck(r kyvernoCheckReport) {
 	fmt.Println()
 	for _, u := range r.Unread {
 		output.Warn("Not read (forbidden): " + u)
+	}
+	if r.ExceptionNote != "" {
+		output.Warn(r.ExceptionNote)
 	}
 	if r.Pass+r.Skip+len(r.Findings) == 0 {
 		output.Success("No Kyverno policy applies: the cluster has none the account can read")

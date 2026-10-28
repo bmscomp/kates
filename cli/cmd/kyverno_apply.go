@@ -80,6 +80,9 @@ several are.`,
 					"--set", "backgroundController.replicas=1",
 					"--set", "cleanupController.replicas=1",
 					"--set", "reportsController.replicas=1",
+					// Without both, the release's kyvernoPolicy.exceptions do nothing.
+					"--set", "features.policyExceptions.enabled=true",
+					"--set", "features.policyExceptions.namespace="+appNS,
 					"--timeout", "5m", "--wait"); err != nil {
 					output.Error("Failed to install Kyverno: " + err.Error())
 					return err

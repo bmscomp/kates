@@ -95,7 +95,7 @@ that namespace (`kates/docs/deployment.md` runs one in `kates`) needs a
 | `containerSecurityContext.readOnlyRootFilesystem` | `true` | Read-only root FS |
 | `containerSecurityContext.allowPrivilegeEscalation` | `false` | Block privilege escalation |
 | `postgresql.securityContext` | UID and `fsGroup` 999, seccomp `RuntimeDefault` | PostgreSQL pod security context |
-| `kyvernoPolicy.exceptions` | `[]` | `{policyName, ruleNames}` entries: one Kyverno `PolicyException` in the release namespace exempts this release's pods and controllers from those rules of any policy, `autogen-` and `autogen-cronjob-` variants included. Needs no `kyvernoPolicy.enabled`, and Kyverno must accept exceptions from the namespace |
+| `kyvernoPolicy.exceptions` | `[]` | `{policyName, ruleNames}` entries: one Kyverno `PolicyException` in the release namespace exempts this release's pods and controllers from those rules of any policy, `autogen-` and `autogen-cronjob-` variants included. Needs no `kyvernoPolicy.enabled`, and Kyverno must accept exceptions from the namespace. A pre-install and pre-upgrade hook, so it exists before the workloads; `helm uninstall` leaves it |
 | `serviceAccount.create` | `true` | Create a ServiceAccount |
 | `rbac.create` | `true` | Create the RBAC objects `rbac.scope` calls for |
 | `rbac.scope` | `cluster` | `cluster`: the backend's ClusterRole/ClusterRoleBinding (Litmus CRDs, Strimzi resources, cluster reads; no Secrets). `namespace`: nothing cluster-scoped; see [Namespace-only install](#namespace-only-install) |

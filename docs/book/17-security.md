@@ -987,7 +987,9 @@ Reading the render:
 2. The selector matches the release's Litmus operator and exporter, which carry the release and litmus-core's name, `litmus`. The chart's own jobs and test pods pass on their own and stay under the policy, and so do the Litmus runner and experiment pods, which carry no `app.kubernetes.io/instance` label. In the `kates` chart the selector matches every pod whose `app.kubernetes.io/name` is `kates` or `kates-postgresql` instead, its jobs and Helm test pods included.
 3. A namespaced `Policy` is named `<namespace>/<name>` in `policyName`.
 
-Kyverno must accept exceptions from the release namespace, which its `exceptionNamespace` setting decides.
+Kyverno must accept exceptions from the release namespace. Kyverno's chart turns exceptions off by default (`features.policyExceptions.enabled`), and an empty `features.policyExceptions.namespace` accepts none: set it to the release namespace, or `*` for any. When `kates deploy --with-kyverno` or `kates kyverno apply` installs Kyverno, they set both, with the app namespace. A Kyverno already installed is left as it is.
+
+The `PolicyException` is a Helm pre-install and pre-upgrade hook, so it exists before the workloads it exempts: Helm applies custom resources after Deployments, and an Enforce policy would refuse the Deployment first. Helm does not track hooks, so `helm uninstall`, or emptying `kyvernoPolicy.exceptions`, leaves it in the namespace: delete it with `kubectl delete policyexception`.
 
 The second kind relaxes the `kates` chart's own `kates-pod-security-standards` policy for whole namespaces, such as development ones. It comes from `kyvernoPolicy.policyExceptions`, needs `kyvernoPolicy.enabled` and `policyExceptions.enabled`, and renders nothing under `rbac.scope=namespace`. These values exempt the `litmus` namespace from two of the policy's rules:
 

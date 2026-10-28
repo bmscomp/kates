@@ -852,6 +852,10 @@ func (dc *deployContext) kyvernoComponent() component {
 				"--set", "cleanupController.replicas=1",
 				"--set", "reportsController.replicas=1",
 				"--set", "global.clusterDomain="+kyvernoDomain,
+				// Off by default, and an empty namespace accepts none: without
+				// both, the kates chart's kyvernoPolicy.exceptions do nothing.
+				"--set", "features.policyExceptions.enabled=true",
+				"--set", "features.policyExceptions.namespace="+dc.ns.app,
 				"--timeout", "5m")...)
 			if err != nil {
 				return err
