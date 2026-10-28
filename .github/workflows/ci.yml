@@ -366,6 +366,17 @@ jobs:
           cm=$(helm template kates charts/kates/ --set rbac.scope=namespace \
                  --set chaos.provider=kubernetes --show-only templates/configmap.yaml)
           grep -q 'KATES_CHAOS_PROVIDER: "kubernetes"' <<<"${cm}" || fail "chaos.provider not honoured"
+          # rbac.nodeReads: one ClusterRole, get and list on nodes only, bound to the ServiceAccount.
+          nodes=$(helm template kates charts/kates/ -n team --set rbac.scope=namespace \
+                    --set rbac.kafkaNamespaceRole=false --set rbac.nodeReads=true --show-only templates/rbac.yaml)
+          [ "$(grep -cE '^kind: ClusterRole(Binding)?$' <<<"${nodes}")" = 2 ] \
+            || fail "rbac.nodeReads does not render one ClusterRole and its binding"
+          grep -q 'name: kates-node-reader-team' <<<"${nodes}" || fail "node ClusterRole not named after the release namespace"
+          [ "$(grep -c -- '- apiGroups:' <<<"${nodes}")" = 1 ] || fail "the node ClusterRole has other than its 1 rule"
+          grep -q 'resources: \["nodes"\]' <<<"${nodes}" || fail "the node ClusterRole is not on nodes"
+          grep -q 'verbs: \["get", "list"\]' <<<"${nodes}" || fail "the node ClusterRole grants other than get and list"
+          [ "$(helm template kates charts/kates/ --set rbac.nodeReads=true --show-only templates/rbac.yaml \
+                 | grep -c '^kind: ClusterRole$')" = 1 ] || fail "rbac.nodeReads adds a ClusterRole to scope cluster"
           if helm template kates charts/kates/ --set rbac.scope=team > /dev/null 2>&1; then
             fail "values.schema.json accepted rbac.scope=team"
           fi

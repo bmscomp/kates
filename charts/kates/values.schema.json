@@ -67,6 +67,7 @@
                 "create": { "type": "boolean" },
                 "scope": { "type": "string", "enum": [ "cluster", "namespace" ] },
                 "kafkaNamespaceRole": { "type": "boolean" },
+                "nodeReads": { "type": "boolean" },
                 "directChaos": { "type": "boolean" },
                 "cdcSecretNamespaces": {
                     "type": "array",

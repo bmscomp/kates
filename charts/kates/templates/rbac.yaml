@@ -101,7 +101,8 @@ subjects:
   namespace (ConformityCheck). It lists PodMonitors across namespaces first,
   then here when that is refused. Nodes stay unread: zones, skew and
   kafka.rackAwareness with source cr take each pod's zone from the
-  EndpointSlices of Strimzi's headless Service. The release namespace ends
+  EndpointSlices of Strimzi's headless Service, unless rbac.nodeReads grants
+  them below. The release namespace ends
   the name, as for the CDC Role below, so two teams' releases don't collide.
 */}}
 {{- $name := printf "%s-kafka-reader-%s" (include "kates.fullname" .) .Release.Namespace }}
@@ -141,6 +142,42 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kates.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- if and (eq .Values.rbac.scope "namespace") .Values.rbac.nodeReads }}
+{{- /*
+  rbac.scope=namespace with rbac.nodeReads: the one cluster-scoped grant a
+  conformity check uses, get and list on nodes, so zones, skew and
+  kafka.rackAwareness read any zoneLabel. Scope cluster's ClusterRole holds it
+  already. Named after the release namespace, so two teams' grants don't
+  collide.
+*/}}
+{{- $name := printf "%s-node-reader-%s" (include "kates.fullname" .) .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
   name: {{ $name }}
 subjects:
   - kind: ServiceAccount

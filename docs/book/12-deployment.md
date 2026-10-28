@@ -939,6 +939,14 @@ The Role is `kates-kafka-reader-team` in the `kafka` namespace, and it only read
 
 Without the Role, a conformity check stops before its first rule: the Kates API answers 503 and says which grant is missing.
 
+Optionally, the cluster admin also lets the check read nodes. Nodes are cluster-scoped, so this is a ClusterRole, `kates-node-reader-team`, with `get` and `list` on `nodes` and nothing else. With it, `zones`, `skew` and `kafka.rackAwareness` read any `zoneLabel` from the nodes themselves:
+
+```bash
+helm template kates oci://ghcr.io/bmscomp/charts/kates -n team \
+  --set rbac.scope=namespace --set rbac.kafkaNamespaceRole=false \
+  --set rbac.nodeReads=true --show-only templates/rbac.yaml | kubectl apply -f -
+```
+
 ### Step 2 — Install the Chart in the Team's Namespace
 
 The team stores the password where the chart looks for it, the key `password` of the Secret `kates-backend` (`kafka.sasl.secretName`), and installs with plain Helm. `rbac.scope=namespace` renders nothing cluster-scoped, `rbac.kafkaNamespaceRole=false` leaves out the Role the team can't create, and `kafka.sasl.username` names the KafkaUser:
