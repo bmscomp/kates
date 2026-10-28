@@ -2,11 +2,9 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Minor: kyvernoPolicy.cosign verifies the release's keyless signatures with an
-# ImageValidatingPolicy, which needs Kyverno 1.17, and gains keyless values.
-# Patch: appVersion and the image tag move to 1.32.0, the tag the v1.32.0
-# release publishes.
-version: 0.14.4
+# Minor: rbac.nodeReads, an opt-in ClusterRole with get and list on nodes for
+# a rbac.scope=namespace install's conformity check. Off, nothing changes.
+version: 0.15.0
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -30,6 +28,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "rbac.nodeReads: with rbac.scope=namespace, an opt-in ClusterRole and ClusterRoleBinding with get and list on nodes, so a conformity check reads any zoneLabel. Off by default."
     - kind: changed
       description: "appVersion 1.32.0 and the image tag move to 1.32.0. No Kates API or image change since 1.31.0: v1.32.0 is the CLI release of the enhancement plan (#518, #519, #520, #523, #524) and the restyled deploy dashboard (#526). Templates are unchanged."
     - kind: changed
