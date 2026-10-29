@@ -153,7 +153,7 @@ public class ScheduleResource {
             schedule.setId(UUID.randomUUID().toString().substring(0, 8));
             schedule.setName(request.name);
             schedule.setCronExpression(request.cronExpression);
-            schedule.setEnabled(request.enabled);
+            schedule.setEnabled(request.enabled == null || request.enabled);
             // A TestSpec writes only the fields the request set (TestSpec's
             // class comment), so the schedule fires the request it was given
             // and the type defaults of the day fill in the rest.
@@ -206,7 +206,7 @@ public class ScheduleResource {
                     }
                     if (request.name != null) schedule.setName(request.name);
                     if (request.cronExpression != null) schedule.setCronExpression(request.cronExpression);
-                    schedule.setEnabled(request.enabled);
+                    if (request.enabled != null) schedule.setEnabled(request.enabled);
                     if (request.testRequest != null) {
                         try {
                             schedule.setRequestJson(JSON.writeValueAsString(request.testRequest));
@@ -241,16 +241,18 @@ public class ScheduleResource {
                         .build());
     }
 
+    /** The name and cronExpression sizes are their column widths in V2__create_schedules_table.sql. */
     public static class CreateScheduleRequest {
         @jakarta.validation.constraints.NotBlank(message = "name is required")
-        @jakarta.validation.constraints.Size(max = 255)
+        @jakarta.validation.constraints.Size(max = 128)
         public String name;
 
         @jakarta.validation.constraints.NotBlank(message = "cronExpression is required")
-        @jakarta.validation.constraints.Size(max = 120)
+        @jakarta.validation.constraints.Size(max = 64)
         public String cronExpression;
 
-        public boolean enabled = true;
+        // Null when the body leaves it out: POST then enables, PUT keeps the stored flag.
+        public Boolean enabled;
 
         @jakarta.validation.Valid
         public CreateTestRequest testRequest;
