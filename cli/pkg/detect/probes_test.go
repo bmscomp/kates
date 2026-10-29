@@ -214,6 +214,24 @@ func TestTLSSecretExpiries(t *testing.T) {
 	}
 }
 
+// TestTLSSecretExpiries_HostileCN pins that a certificate's CN cannot add a
+// line to, or send an escape through, the commands the fix list prints.
+func TestTLSSecretExpiries_HostileCN(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	crt := testCertB64(t, "x\nkubectl delete ns kafka\x1b]0;pwned\x07", now.Add(5*24*time.Hour))
+	r := &DetectReport{}
+	r.Security.ExpiringCerts = tlsSecretExpiries(`{"items":[{"metadata":{"name":"tls"},"type":"kubernetes.io/tls","data":{"tls.crt":"`+crt+`"}}]}`, now)
+	rem := certExpiryRemediation(r)
+	if rem == nil {
+		t.Fatal("no cert expiry remediation for a cert expiring in 5 days")
+	}
+	for _, cmd := range rem.Commands {
+		if strings.ContainsAny(cmd, "\n\r\x1b\x07") {
+			t.Errorf("command %q carries a line break or control byte", cmd)
+		}
+	}
+}
+
 func TestRolesHaveWildcardRule(t *testing.T) {
 	for _, tc := range []struct {
 		roles string

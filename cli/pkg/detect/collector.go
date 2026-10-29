@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bmscomp/kates/cli/output"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -637,7 +638,7 @@ func (c *Collector) getExistingKafkaResources(ctx context.Context) KafkaResource
 			k := kData.Items[0]
 			health := KafkaClusterHealth{
 				Name:     k.Metadata.Name,
-				Version:  k.Status.KafkaVersion,
+				Version:  output.Printable(k.Status.KafkaVersion), // printed in the Cluster fact; CRD status is free text
 				Replicas: k.Spec.Kafka.Replicas,
 			}
 			for _, l := range k.Spec.Kafka.Listeners {
@@ -647,7 +648,8 @@ func (c *Collector) getExistingKafkaResources(ctx context.Context) KafkaResource
 			}
 			for _, c := range k.Status.Conditions {
 				health.Conditions = append(health.Conditions, KafkaCondition{
-					Type: c.Type, Status: c.Status, Reason: c.Reason, Message: c.Message,
+					// Status and reason are printed; a CRD status is free text.
+					Type: c.Type, Status: output.Printable(c.Status), Reason: output.Printable(c.Reason), Message: c.Message,
 				})
 				if c.Type == "Ready" && c.Status == "True" {
 					health.ReadyReplicas = health.Replicas
@@ -1691,6 +1693,8 @@ func kyvernoPolicyFromJSON(raw json.RawMessage) (KyvernoPolicyInfo, bool) {
 	if category == "" {
 		category = pol.Metadata.Annotations["kyverno.io/category"]
 	}
+	// An annotation can carry newlines and escapes; the category is printed.
+	category = output.Printable(category)
 
 	var ruleNames []string
 	affectsKafka := false
@@ -1843,7 +1847,7 @@ func (c *Collector) getNetworkPolicyAudit(ctx context.Context) NetworkPolicyAudi
 		// Determine who manages this policy
 		managedBy := "manual"
 		if rel, ok := np.Metadata.Annotations["meta.helm.sh/release-name"]; ok {
-			managedBy = rel
+			managedBy = output.Printable(rel) // an annotation, printed in the policy table
 		} else if np.Metadata.Labels["app.kubernetes.io/managed-by"] == "strimzi-cluster-operator" || np.Metadata.Labels["strimzi.io/cluster"] != "" || np.Metadata.Labels["strimzi.io/kind"] == "Kafka" {
 			managedBy = "strimzi"
 		}
@@ -2634,7 +2638,8 @@ func tlsSecretExpiries(secretsJSON string, now time.Time) []CertExpirationInfo {
 		}
 		certs = append(certs, CertExpirationInfo{
 			SecretName: item.Metadata.Name,
-			Subject:    cert.Subject.CommonName,
+			// The CN is printed in the fix list's commands: a newline would add a line.
+			Subject:    output.Printable(cert.Subject.CommonName),
 			ExpiryDate: cert.NotAfter.Format("2006-01-02"),
 			DaysLeft:   int(cert.NotAfter.Sub(now).Hours() / 24),
 		})
