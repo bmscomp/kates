@@ -152,6 +152,65 @@ class ScheduleResourceTest {
     }
 
     /**
+     * A cronExpression the scheduler can't read, or one wider than its
+     * column, is refused with 400 on POST and on PUT, with the same body. It
+     * was saved, and then never fired, or failed with a 500 at the column.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("refusedCronExpressions")
+    void aCronExpressionTheSchedulerCannotReadIsRefused(String cron) {
+        ScheduledTestRun s = storedSchedule("{\"type\":\"LOAD\"}");
+        Mockito.when(repository.findById("s1")).thenReturn(Optional.of(s));
+
+        Map<String, Object> post = RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body(Map.of("name", "nightly", "cronExpression", cron, "testRequest", Map.of("type", "LOAD")))
+                .when()
+                .post("/api/schedules")
+                .then()
+                .statusCode(400)
+                .body("message", startsWith("cronExpression: "))
+                .body("fieldErrors", hasKey("cronExpression"))
+                .extract()
+                .jsonPath()
+                .getMap("");
+        Map<String, Object> put = RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body(Map.of("cronExpression", cron))
+                .when()
+                .put("/api/schedules/s1")
+                .then()
+                .statusCode(400)
+                .extract()
+                .jsonPath()
+                .getMap("");
+
+        assertEquals(post, put);
+        Mockito.verify(repository, Mockito.never()).save(any());
+        assertEquals("0 0 * * *", s.getCronExpression());
+    }
+
+    static Stream<String> refusedCronExpressions() {
+        // 65 characters of a valid expression: only its width refuses it.
+        String wide = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21 0-9 * * *";
+        assertEquals(65, wide.length());
+        TestScheduler.CRON.parse(wide);
+        return Stream.of("@daily", "0 9 * *", "0 0 * * * *", "60 * * * *", "0 0 ? * MON", wide);
+    }
+
+    @Test
+    void standardCronIsSaved() {
+        RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"weekly\",\"cronExpression\":\"0 9 * * MON\",\"testRequest\":{\"type\":\"LOAD\"}}")
+                .when()
+                .post("/api/schedules")
+                .then()
+                .statusCode(201)
+                .body("cronExpression", is("0 9 * * MON"));
+    }
+
+    /**
      * A testRequest value outside the limits POST /api/tests sets is named in
      * the message, with its reason. The message said only "Request
      * validation failed", so kates schedule create, which prints the message

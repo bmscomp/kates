@@ -1251,7 +1251,7 @@
       desc: "Playbook name"
     - name: "--cron"
       type: string
-      desc: "Cron expression (5-field)"
+      desc: "5-field UNIX cron expression in UTC, e.g. '0 9 * * MON-FRI' (required)"
   examples:
     - "kates disruption schedule create nightly-chaos --playbook broker-kill --cron '0 3 * * *'"
   see_also:
@@ -1298,7 +1298,7 @@
       desc: "Schedule name (required)"
     - name: "--cron"
       type: string
-      desc: "Cron expression (required)"
+      desc: "5-field UNIX cron expression in UTC, e.g. '0 9 * * MON-FRI' (required)"
     - name: "--type"
       type: string
       desc: "Test type"

@@ -5,6 +5,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -251,6 +252,49 @@ class DisruptionReportPersistenceTest {
                     .statusCode(200)
                     .body("status", equalTo("COMPLETED"))
                     .body("planName", equalTo(planName));
+        } finally {
+            given().when()
+                    .delete("/api/disruptions/schedules/" + scheduleId)
+                    .then()
+                    .statusCode(204);
+        }
+    }
+
+    /**
+     * A disruption schedule takes the test schedules' cron: "0 9 * * MON" is
+     * saved, and one the scheduler can't read, or one wider than its column,
+     * is refused on POST and PUT. Both were saved and then never fired.
+     */
+    @Test
+    void aCronExpressionTheSchedulerCannotReadIsRefused() {
+        String wide = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21 0-9 * * *";
+        assertEquals(65, wide.length());
+        String scheduleId = given().contentType(ContentType.JSON)
+                .body(Map.of("name", unique("weekly"), "cronExpression", "0 9 * * MON", "playbookName", "az-failure"))
+                .when()
+                .post("/api/disruptions/schedules")
+                .then()
+                .statusCode(201)
+                .extract()
+                .path("id");
+        try {
+            for (String cron : List.of("@daily", "0 0 ? * MON", wide)) {
+                given().contentType(ContentType.JSON)
+                        .body(Map.of("name", unique("bad"), "cronExpression", cron, "playbookName", "az-failure"))
+                        .when()
+                        .post("/api/disruptions/schedules")
+                        .then()
+                        .statusCode(400)
+                        .body("message", startsWith("cronExpression: "))
+                        .body("fieldErrors.cronExpression", notNullValue());
+                given().contentType(ContentType.JSON)
+                        .body(Map.of("cronExpression", cron))
+                        .when()
+                        .put("/api/disruptions/schedules/" + scheduleId)
+                        .then()
+                        .statusCode(400)
+                        .body("message", startsWith("cronExpression: "));
+            }
         } finally {
             given().when()
                     .delete("/api/disruptions/schedules/" + scheduleId)

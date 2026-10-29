@@ -2,11 +2,16 @@ package com.bmscomp.kates.schedule;
 
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import com.cronutils.model.CronType;
+import com.cronutils.model.definition.CronDefinitionBuilder;
+import com.cronutils.model.time.ExecutionTime;
+import com.cronutils.parser.CronParser;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.scheduler.Scheduled;
 import org.jboss.logging.Logger;
@@ -113,66 +118,11 @@ public class TestScheduler {
         }
     }
 
-    /**
-     * Evaluates a simplified cron expression (minute hour dayOfMonth month dayOfWeek)
-     * against the current time. Supports '*' (any) and fixed values.
-     */
-    static boolean matchesCron(String cronExpr, ZonedDateTime now) {
-        String[] parts = cronExpr.trim().split("\\s+");
-        if (parts.length < 5) {
-            LOG.warn("Invalid cron expression (need 5 fields): " + cronExpr);
-            return false;
-        }
+    /** Standard 5-field UNIX cron; schedules are validated with it on POST and PUT. */
+    public static final CronParser CRON = new CronParser(CronDefinitionBuilder.instanceDefinitionFor(CronType.UNIX));
 
-        return matchesField(parts[0], now.getMinute())
-                && matchesField(parts[1], now.getHour())
-                && matchesField(parts[2], now.getDayOfMonth())
-                && matchesField(parts[3], now.getMonthValue())
-                && matchesField(parts[4], now.getDayOfWeek().getValue() % 7);
-    }
-
-    private static boolean matchesField(String field, int value) {
-        if ("*".equals(field)) return true;
-
-        // Handle step values like */5
-        if (field.startsWith("*/")) {
-            try {
-                int step = Integer.parseInt(field.substring(2));
-                return step > 0 && value % step == 0;
-            } catch (NumberFormatException e) {
-                return false;
-            }
-        }
-
-        // Handle comma-separated values like 0,15,30,45
-        if (field.contains(",")) {
-            for (String part : field.split(",")) {
-                try {
-                    if (Integer.parseInt(part.trim()) == value) return true;
-                } catch (NumberFormatException e) {
-                    // skip
-                }
-            }
-            return false;
-        }
-
-        // Handle range like 9-17
-        if (field.contains("-")) {
-            String[] range = field.split("-");
-            try {
-                int low = Integer.parseInt(range[0].trim());
-                int high = Integer.parseInt(range[1].trim());
-                return value >= low && value <= high;
-            } catch (Exception e) {
-                return false;
-            }
-        }
-
-        // Fixed value
-        try {
-            return Integer.parseInt(field) == value;
-        } catch (NumberFormatException e) {
-            return false;
-        }
+    /** Whether the expression fires in the minute of {@code now}; throws when it doesn't parse. */
+    public static boolean matchesCron(String cronExpr, ZonedDateTime now) {
+        return ExecutionTime.forCron(CRON.parse(cronExpr)).isMatch(now.truncatedTo(ChronoUnit.MINUTES));
     }
 }

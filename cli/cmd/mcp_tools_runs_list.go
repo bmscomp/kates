@@ -579,7 +579,7 @@ func mcpRunDecodeSpec(raw json.RawMessage, w *mcpRunSpecWire) (bool, error) {
 // accepts (mcpKafkaTopicRE, mcpAcksRE, mcpCompressionRE, the values
 // TestSpec's bean validation accepts). A stored run can hold others: a
 // schedule saved by a PUT, which runs no bean validation
-// (ScheduleResource.java:137-138), fires its spec as sent, a Kates API
+// (ScheduleResource.java:224-226), fires its spec as sent, a Kates API
 // without the check of a scenario's specs (TestOrchestrator.java:1126-1130)
 // stored a scenario's base spec as sent (TestOrchestrator.java:347-355,
 // 373-377), and one without the check of a gRPC request's fields

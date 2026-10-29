@@ -27,7 +27,7 @@ func init() {
 	disruptionScheduleCmd.AddCommand(disruptionScheduleCreateCmd)
 	disruptionScheduleCmd.AddCommand(disruptionScheduleDeleteCmd)
 	disruptionScheduleCreateCmd.Flags().StringVar(&disruptSchedPlaybook, "playbook", "", "Playbook name")
-	disruptionScheduleCreateCmd.Flags().StringVar(&disruptSchedCron, "cron", "", "Cron expression (5-field)")
+	disruptionScheduleCreateCmd.Flags().StringVar(&disruptSchedCron, "cron", "", "5-field UNIX cron expression in UTC, e.g. '0 3 * * *' or '0 9 * * MON-FRI' (required)")
 }
 
 var disruptionWatchCmd = &cobra.Command{

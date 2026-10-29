@@ -2,6 +2,7 @@ package com.bmscomp.kates.disruption;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
@@ -29,6 +30,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import com.bmscomp.kates.api.ApiError;
 import com.bmscomp.kates.audit.Audited;
+import com.bmscomp.kates.schedule.ScheduleResource;
 import com.bmscomp.kates.security.Scopes;
 
 @RolesAllowed(Scopes.READ)
@@ -81,6 +83,10 @@ public class DisruptionScheduleResource {
             summary = "Create a disruption schedule",
             description = "Creates a recurring disruption schedule from a playbook or plan")
     @APIResponse(responseCode = "201", description = "Schedule created")
+    @APIResponse(
+            responseCode = "400",
+            description = "Invalid request, including a cronExpression that isn't 5-field UNIX cron of at most 64"
+                    + " characters; fieldErrors names the field")
     public Response createSchedule(DisruptionDtos.CreateDisruptionScheduleRequest request) {
         if (request.name == null || request.name.isBlank()) {
             return Response.status(400)
@@ -91,6 +97,10 @@ public class DisruptionScheduleResource {
             return Response.status(400)
                     .entity(ApiError.of(400, "Bad Request", "Field 'cronExpression' is required"))
                     .build();
+        }
+        Optional<Response> badCron = invalidCron(request.cronExpression);
+        if (badCron.isPresent()) {
+            return badCron.get();
         }
         if ((request.playbookName == null || request.playbookName.isBlank()) && request.plan == null) {
             return Response.status(400)
@@ -126,6 +136,7 @@ public class DisruptionScheduleResource {
     @Transactional
     @Operation(summary = "Update a disruption schedule")
     @APIResponse(responseCode = "200", description = "Schedule updated")
+    @APIResponse(responseCode = "400", description = "A cronExpression or plan that POST would refuse")
     @APIResponse(responseCode = "404", description = "Schedule not found")
     public Response updateSchedule(
             @Parameter(description = "Schedule ID") @PathParam("id") String id,
@@ -137,6 +148,12 @@ public class DisruptionScheduleResource {
                     .build();
         }
 
+        if (request.cronExpression != null) {
+            Optional<Response> badCron = invalidCron(request.cronExpression);
+            if (badCron.isPresent()) {
+                return badCron.get();
+            }
+        }
         if (request.name != null) entity.setName(request.name);
         if (request.cronExpression != null) entity.setCronExpression(request.cronExpression);
         entity.setEnabled(request.enabled);
@@ -152,6 +169,17 @@ public class DisruptionScheduleResource {
         }
         em.merge(entity);
         return Response.ok(entity).build();
+    }
+
+    /** The test schedules' 400, plus the cron_expression column's width (V4__create_disruption_schedules.sql). */
+    private static Optional<Response> invalidCron(String cronExpression) {
+        if (cronExpression.length() > 64) {
+            String why = "at most 64 characters";
+            return Optional.of(Response.status(400)
+                    .entity(ApiError.validationFailed("cronExpression: " + why, Map.of("cronExpression", why)))
+                    .build());
+        }
+        return ScheduleResource.invalidCron(cronExpression);
     }
 
     @Audited(action = "DELETE", type = "disruption-schedule")
