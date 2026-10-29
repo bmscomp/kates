@@ -54,7 +54,7 @@ public class WebhookService {
             existing.setUrl(registration.url());
             existing.setEvents(registration.events());
         }
-        LOG.infof("Registered webhook: %s → %s", registration.name(), registration.url());
+        LOG.infof("Registered webhook: %s", registration.name());
     }
 
     @jakarta.transaction.Transactional
@@ -183,7 +183,7 @@ public class WebhookService {
         try {
             urlValidator.validate(reg.url());
         } catch (IllegalArgumentException e) {
-            LOG.errorf("Refusing webhook delivery to %s (%s): %s", reg.name(), reg.url(), e.getMessage());
+            LOG.errorf("Refusing webhook delivery to %s: %s", reg.name(), e.getMessage());
             self.saveToDlq(reg, payload, "Blocked by URL policy: " + e.getMessage());
             return;
         }

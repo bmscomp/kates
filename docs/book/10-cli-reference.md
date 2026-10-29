@@ -2534,7 +2534,7 @@ kates webhook
 
 #### webhook list
 
-List registered webhooks.
+List registered webhooks. A URL such as a Slack incoming webhook is itself a secret, so the key needs the `read:sensitive` scope.
 
 ```bash
 kates webhook list
