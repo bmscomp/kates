@@ -2522,7 +2522,7 @@ kates badge --metric throughput
 
 ### Webhook Notifications
 
-Webhooks send HTTP POST notifications to external endpoints when a test finishes. The Kates API fires a `test.completed` event whenever a test reaches `DONE` or `FAILED` status; the payload carries the event name, test ID, test type, final status, and timestamp (the event name is also sent in the `X-Kates-Event` header). Use webhooks to integrate Kates with Slack, PagerDuty, Microsoft Teams, or any system that accepts incoming webhooks. Each webhook registration binds a name to a URL. Deliveries are retried, and events that still fail are parked in a dead-letter queue.
+Webhooks send HTTP POST notifications to external endpoints when a test finishes. The Kates API fires a `test.completed` event whenever a test reaches `DONE` or `FAILED` status; the payload carries the event name, test ID, test type, final status, and timestamp (the event name is also sent in the `X-Kates-Event` header). Use webhooks to integrate Kates with Slack, PagerDuty, Microsoft Teams, or any system that accepts incoming webhooks. Each webhook registration binds a name to a URL. `kates webhook add` registers for every completion. Through `POST /api/webhooks`, the `events` field narrows that to a comma-separated list of `DONE` and `FAILED` (`test.completed`, or no `events`, means both), and any other value is refused with a 400. Deliveries are retried, and events that still fail are parked in a dead-letter queue.
 
 #### webhook
 

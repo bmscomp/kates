@@ -44,6 +44,12 @@ public class WebhookService {
     /** Persisted (V16): registrations previously lived in memory and were lost on restart. */
     @jakarta.transaction.Transactional
     public void register(WebhookRegistration registration) {
+        for (String event : eventNames(registration.events())) {
+            if (!ACCEPTED_EVENTS.contains(event.toUpperCase(java.util.Locale.ROOT))) {
+                throw new IllegalArgumentException("Unknown webhook event '" + event
+                        + "': events takes a comma-separated list of test.completed, DONE and FAILED, or none for all");
+            }
+        }
         // Explicit upsert by name (@Id). A merge() of a fresh instance did not
         // reliably update an existing row here (an integration test caught a
         // re-registration keeping the old URL), so find-then-update-or-persist.
@@ -144,8 +150,32 @@ public class WebhookService {
                 java.time.Instant.ofEpochMilli(event.getTimestamp()).toString());
 
         for (WebhookRegistration reg : targets) {
-            fireAsync(reg, payload);
+            if (wants(reg.events(), event.getStatus().name())) {
+                fireAsync(reg, payload);
+            }
         }
+    }
+
+    /** test.completed, the one event the payload names, stands for both statuses; the CLI registers with it. */
+    private static final java.util.Set<String> ACCEPTED_EVENTS = java.util.Set.of("TEST.COMPLETED", "DONE", "FAILED");
+
+    private static List<String> eventNames(String events) {
+        if (events == null) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(events.split(","))
+                .map(String::trim)
+                .filter(e -> !e.isEmpty())
+                .toList();
+    }
+
+    /** No accepted event listed means every completion: rows saved before register() validated may hold anything. */
+    private static boolean wants(String events, String status) {
+        List<String> names = eventNames(events).stream()
+                .map(e -> e.toUpperCase(java.util.Locale.ROOT))
+                .filter(ACCEPTED_EVENTS::contains)
+                .toList();
+        return names.isEmpty() || names.contains("TEST.COMPLETED") || names.contains(status);
     }
 
     /**

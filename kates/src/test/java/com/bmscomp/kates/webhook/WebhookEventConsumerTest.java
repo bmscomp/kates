@@ -2,6 +2,7 @@ package com.bmscomp.kates.webhook;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -19,6 +20,7 @@ import jakarta.persistence.EntityManager;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import io.smallrye.reactive.messaging.memory.InMemoryConnector;
 import io.smallrye.reactive.messaging.memory.InMemorySource;
@@ -62,6 +64,9 @@ class WebhookEventConsumerTest {
 
     private HttpServer server;
     private final BlockingQueue<String> received = new LinkedBlockingQueue<>();
+    private final BlockingQueue<String> failedOnly = new LinkedBlockingQueue<>();
+    private final BlockingQueue<String> every = new LinkedBlockingQueue<>();
+    private final BlockingQueue<String> legacy = new LinkedBlockingQueue<>();
     private String hookName;
 
     @BeforeEach
@@ -69,6 +74,9 @@ class WebhookEventConsumerTest {
         received.clear();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/hook", this::handle);
+        server.createContext("/failed-only", exchange -> record(exchange, failedOnly));
+        server.createContext("/every", exchange -> record(exchange, every));
+        server.createContext("/legacy", exchange -> record(exchange, legacy));
         server.start();
         hookName = "consumer-hook-" + UUID.randomUUID();
         webhookService.register(new WebhookService.WebhookRegistration(
@@ -84,7 +92,11 @@ class WebhookEventConsumerTest {
     }
 
     private void handle(HttpExchange exchange) throws IOException {
-        received.offer(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        record(exchange, received);
+    }
+
+    private static void record(HttpExchange exchange, BlockingQueue<String> queue) throws IOException {
+        queue.offer(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
         exchange.sendResponseHeaders(200, -1);
         exchange.close();
     }
@@ -128,5 +140,54 @@ class WebhookEventConsumerTest {
         assertNull(
                 em.find(ProcessedEventEntity.class, staleRun + ":DONE"),
                 "a skipped event leaves no ledger row for the next sweep to prune");
+    }
+
+    @Test
+    void aRegistrationGetsOnlyTheEventsItListed() throws Exception {
+        String base = "http://127.0.0.1:" + server.getAddress().getPort();
+        String failedHook = "failed-hook-" + UUID.randomUUID();
+        String everyHook = "every-hook-" + UUID.randomUUID();
+        webhookService.register(new WebhookService.WebhookRegistration(failedHook, base + "/failed-only", "FAILED"));
+        webhookService.register(new WebhookService.WebhookRegistration(everyHook, base + "/every", null));
+        String legacyHook = "legacy-hook-" + UUID.randomUUID();
+        // A row saved before register() validated events, which no accepted token can match.
+        QuarkusTransaction.requiringNew()
+                .run(() -> em.persist(new WebhookRegistrationEntity(legacyHook, base + "/legacy", "ALL")));
+        try {
+            InMemorySource<TestEvent> events = connector.source("test-events-in");
+            String doneRun = "done-run-" + UUID.randomUUID();
+            String failedRun = "failed-run-" + UUID.randomUUID();
+            events.send(new TestEvent(doneRun, "LOAD", TestResult.TaskStatus.DONE, "", System.currentTimeMillis()));
+            events.send(new TestEvent(failedRun, "LOAD", TestResult.TaskStatus.FAILED, "", System.currentTimeMillis()));
+
+            String failedDelivery = failedOnly.poll(DELIVERY_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            assertNotNull(failedDelivery, "a FAILED registration must get the FAILED event");
+            assertTrue(
+                    failedDelivery.contains(failedRun), "a FAILED registration got the DONE event: " + failedDelivery);
+            assertNull(
+                    failedOnly.poll(SILENCE_WINDOW.toMillis(), TimeUnit.MILLISECONDS),
+                    "a FAILED registration must not get the DONE event");
+
+            String first = every.poll(DELIVERY_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            String second = every.poll(DELIVERY_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            assertNotNull(second, "a registration with no events must get both events");
+            assertTrue((first + second).contains(doneRun) && (first + second).contains(failedRun), first + second);
+
+            String legacyFirst = legacy.poll(DELIVERY_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            String legacySecond = legacy.poll(DELIVERY_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            assertNotNull(legacySecond, "a stored row with no accepted event must still get both events");
+        } finally {
+            webhookService.unregister(failedHook);
+            webhookService.unregister(everyHook);
+            webhookService.unregister(legacyHook);
+        }
+    }
+
+    @Test
+    void anEventThatCanNeverFireIsRefused() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> webhookService.register(
+                        new WebhookService.WebhookRegistration("typo-hook", "http://127.0.0.1/hook", "DONEE")));
     }
 }
