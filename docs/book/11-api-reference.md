@@ -484,7 +484,7 @@ The summary is computed from the run's task rows, and the example is a LOAD run 
 | `p50LatencyMs`, `p95LatencyMs`, `p99LatencyMs` | The producer's; with several producers, the highest of theirs |
 | `avgLatencyMs` | The producers' mean latency, weighted by their records |
 | `maxLatencyMs` | The slowest producer's |
-| `totalErrors`, `errorRate` | Tasks that ended with an error, and that count divided by `totalRecords` |
+| `totalErrors`, `errorRate` | Tasks that ended with an error, and that count divided by the number of tasks |
 | `p999LatencyMs`, `durationMs` | Always 0 |
 
 A task that has not started is `PENDING` with no records, as a scenario's later phase is until its turn, and the means leave it out. So while a scenario runs, its throughput is that of the phases under way or done, and a phase that has not started reads 0 in `phases`. A task that a cancel or a failure ends before its turn is stored `FAILED`, and counts as a rate of 0.

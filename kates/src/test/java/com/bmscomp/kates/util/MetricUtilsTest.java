@@ -6,7 +6,11 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import com.bmscomp.kates.domain.SlaDefinition;
+import com.bmscomp.kates.domain.SlaMetrics;
+import com.bmscomp.kates.domain.SlaVerdict;
 import com.bmscomp.kates.domain.TestResult;
+import com.bmscomp.kates.engine.SlaEvaluator;
 import com.bmscomp.kates.report.ReportSummary;
 
 class MetricUtilsTest {
@@ -362,6 +366,23 @@ class MetricUtilsTest {
 
         ReportSummary s = MetricUtils.computeSummary(List.of(ok, failed));
         assertEquals(1, s.totalErrors());
-        assertTrue(s.errorRate() > 0);
+        assertEquals(0.5, s.errorRate(), 1e-9);
+    }
+
+    @Test
+    void producerThatLostHalfItsSendsFailsMaxErrorRate() {
+        // NativeKafkaBackend leaves such a task DONE, its loss only in the error.
+        TestResult halfLost = new TestResult()
+                .withStatus(TestResult.TaskStatus.DONE)
+                .withRecordsSent(1_000_000)
+                .withError("500000 of 1000000 sends were rejected");
+        ReportSummary s = MetricUtils.computeSummary(List.of(halfLost));
+        SlaDefinition sla = new SlaDefinition();
+        sla.setMaxErrorRate(0.01);
+
+        SlaVerdict verdict =
+                new SlaEvaluator().evaluate(sla, SlaMetrics.of(-1, -1, -1, 0, s.totalRecords(), s.errorRate()));
+
+        assertFalse(verdict.passed());
     }
 }
