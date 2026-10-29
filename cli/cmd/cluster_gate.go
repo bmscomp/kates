@@ -229,15 +229,6 @@ func offerKind(d cluster.Decision) (string, error) {
 			len(cluster.KindZones), how)
 	}
 
-	if kindClusterExistsFn(defaultExecutor, cluster.DefaultKindClusterName) {
-		// The cluster exists but nothing was reachable — recreating would
-		// silently destroy it, so stop and let a human decide.
-		return "", fmt.Errorf("a kind cluster named %q already exists but is not reachable.\n"+
-			"  Inspect it:  kubectl cluster-info --context kind-%s\n"+
-			"  Or remove it and re-run: kind delete cluster --name %s",
-			cluster.DefaultKindClusterName, cluster.DefaultKindClusterName, cluster.DefaultKindClusterName)
-	}
-
 	// Read before asking, so a bad PROXY_CA_FILE stops here, not after the
 	// cluster exists.
 	proxy, warnings, err := proxyFromEnvFn(os.Getenv)
@@ -249,9 +240,32 @@ func offerKind(d cluster.Decision) (string, error) {
 	}
 
 	fmt.Println()
+	choice, err := kindChoiceFn()
+	if err != nil {
+		return "", err
+	}
+	name := choice.name
+
+	if kindClusterExistsFn(defaultExecutor, name) {
+		// The cluster exists but nothing was reachable — recreating would
+		// silently destroy it, so stop and let a human decide.
+		return "", fmt.Errorf("a kind cluster named %q already exists but is not reachable.\n"+
+			"  Inspect it:  kubectl cluster-info --context kind-%s\n"+
+			"  Or remove it and re-run: kind delete cluster --name %s",
+			name, name, name)
+	}
+
+	fmt.Println()
 	fmt.Println("  " + gateTitle.Render("Create a local Kubernetes cluster?"))
 	fmt.Println("  " + gateDim.Render(fmt.Sprintf("kind · %s · zones %s · takes a few minutes",
-		cluster.DefaultKindClusterName, strings.Join(cluster.KindZones, "/"))))
+		name, strings.Join(cluster.KindZones, "/"))))
+	if choice.adminless {
+		installs := "nothing"
+		if len(choice.operators) > 0 {
+			installs = strings.Join(choice.operators, ", ")
+		}
+		fmt.Println("  " + gateDim.Render("admin-less · the admin installs "+installs+"; kates deploys as context "+name+", admin in its namespaces only"))
+	}
 	if proxy.Configures() {
 		fmt.Println("  " + gateDim.Render(describeProxy(proxy)))
 	}
@@ -273,10 +287,11 @@ func offerKind(d cluster.Decision) (string, error) {
 
 	// kind names the context kind-<cluster>. The waits and the untaint that
 	// follow creation go to it by name, not to whatever is current by then.
-	ctxName := "kind-" + cluster.DefaultKindClusterName
+	ctxName := "kind-" + name
 
 	fmt.Println()
 	err = createKindFn(kubeContextExecutor{inner: defaultExecutor, kubeContext: ctxName}, cluster.KindOptions{
+		Name:       name,
 		ConfigPath: configPath,
 		Proxy:      proxy,
 		Progress: func(step string) {
@@ -288,6 +303,9 @@ func offerKind(d cluster.Decision) (string, error) {
 	}
 
 	fmt.Println("  " + gateOK.Render("✓") + " Cluster ready: " + gateAccent.Render(ctxName))
+	if choice.adminless {
+		return bootstrapAdminlessKindFn(name, choice.operators)
+	}
 	return ctxName, nil
 }
 

@@ -1970,6 +1970,8 @@ kates kyverno check -n team -o json
 
 It reads ClusterPolicies, ValidatingPolicies and ImageValidatingPolicies, the release namespace's Policies, and PolicyExceptions in every namespace, or only in the release namespace when the account may not list the others. A kind the cluster doesn't have is skipped. One the account may not read is named, and the check can't pass without it. The render gets the release namespace on each object, as `helm install` would set it, so exceptions that match by namespace apply. The chart's own `kyvernoPolicy.exceptions` count too.
 
+Exceptions count only where Kyverno accepts them. The check reads the flags of Kyverno's admission controller: with exceptions off (`features.policyExceptions.enabled`), or accepted only in another namespace, it says so and leaves out the exceptions Kyverno would ignore, so it fails what admission would refuse. When the account may not read Kyverno's Deployment, it counts the chart's exceptions and says it couldn't tell.
+
 Each rule that doesn't pass is listed with the resources it failed on and the chart value most likely to fix it:
 
 | The rule is about | Chart value |
@@ -1981,7 +1983,7 @@ Each rule that doesn't pass is listed with the resources it failed on and the ch
 | Running as root, privileges, capabilities, seccomp | `securityContext` and `containerSecurityContext` |
 | Requests and limits | `resources`, and the failing component's own resources values |
 
-The mapping reads the policy name, the rule name and the message, so it's a suggestion. A rule nothing matches, such as one on `hostPath` volumes, is left to an exception. For every rule that fails, the check prints the `kyvernoPolicy.exceptions` values that would exempt the release's own pods. Kyverno must accept exceptions in that namespace.
+The mapping reads the policy name, the rule name and the message, so it's a suggestion. A rule nothing matches, such as one on `hostPath` volumes, is left to an exception. For every rule that fails, the check prints the `kyvernoPolicy.exceptions` values that would exempt the release's own pods. Kyverno must accept exceptions in that namespace ([Policy Exceptions](17-security.md#policy-exceptions)).
 
 Audit-mode policies show as warnings, because they don't block an install. Rules that call the API server or read ConfigMaps evaluate offline without that data, so treat their result as a hint.
 

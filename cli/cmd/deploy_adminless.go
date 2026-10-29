@@ -106,6 +106,18 @@ func applyAdminlessProfile(ctx context.Context, cmd *cobra.Command) error {
 	return nil
 }
 
+// dropCreateNamespace takes --create-namespace out of every helm call until
+// the returned function restores the seam. Admin-less installs only into
+// namespaces that exist, and Helm 4 server-side applies the Namespace even
+// then, which needs patch on namespaces: a team account is refused.
+func dropCreateNamespace() (restore func()) {
+	helmFn := runHelmFn
+	runHelmFn = func(ctx context.Context, args ...string) error {
+		return helmFn(ctx, slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == "--create-namespace" })...)
+	}
+	return func() { runHelmFn = helmFn }
+}
+
 // kubeContextNamespace is the namespace the kube context names — usually the
 // one a team account was given.
 func kubeContextNamespace(ctx context.Context) string {

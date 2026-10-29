@@ -2,8 +2,8 @@ apiVersion: v2
 name: kates-platform
 description: Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure
 type: application
-# Patch: packs kates 0.15.0, which adds the opt-in rbac.nodeReads.
-version: 0.8.13
+# Patch: packs kates 0.15.1, whose kyvernoPolicy.exceptions go in first.
+version: 0.8.14
 appVersion: "1.0.0"
 keywords:
   - kafka
@@ -40,6 +40,8 @@ dependencies:
     condition: connect-cluster.enabled
 annotations:
   artifacthub.io/changes: |
+    - kind: changed
+      description: "Packs kates 0.15.1, whose kyvernoPolicy.exceptions PolicyException is a hook that goes in before the workloads. Templates are unchanged."
     - kind: changed
       description: "Packs kates 0.15.0, which adds the opt-in rbac.nodeReads. Templates are unchanged."
     - kind: changed

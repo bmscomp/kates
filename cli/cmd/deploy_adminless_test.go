@@ -155,6 +155,12 @@ func TestRunDeploy_AdminlessInstallsTheStack(t *testing.T) {
 					t.Errorf("cluster-scoped release %s installed admin-less", release)
 				}
 			}
+			// Helm 4 patches the namespace for it, which a team account may not.
+			for _, c := range installs {
+				if strings.Contains(c, "--create-namespace") {
+					t.Errorf("admin-less install asks helm to create its namespace: %s", c)
+				}
+			}
 			if !strings.Contains(installed["kates"], "--set rbac.scope=namespace") {
 				t.Errorf("kates without rbac.scope=namespace: %s", installed["kates"])
 			}

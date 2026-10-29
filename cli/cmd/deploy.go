@@ -63,7 +63,10 @@ used; KATES_REQUIRE_SIGNED_CHARTS=1 refuses charts it could not check.
 Without GHCR, KATES_CHART_REGISTRY names a mirror, and --chart-bundle reads a
 bundle that kates charts pull --to wrote, with no network. KATES_IMAGE_REGISTRY
 pulls every image from a registry that kates charts push filled. With no reachable cluster, and Docker and kind on the
-machine, it offers to create the local 3-zone kind cluster; behind a proxy, its
+machine, it offers to create a local 3-zone kind cluster: panda, where kates
+deploys as cluster admin, or an admin-less one (fanon by default), where kind's
+admin installs Kyverno, the Strimzi operator and monitoring (the list is yours)
+and kates deploys as an account that is admin in its namespaces only; behind a proxy, its
 nodes get HTTP_PROXY, HTTPS_PROXY, NO_PROXY and the CA in PROXY_CA_FILE. A dev build installs
 the charts of the checkout it runs in. --checkout (or KATES_CHECKOUT) makes any
 build install a checkout's charts:
@@ -173,6 +176,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	if err := resolveDeployProfile(cmd, target, wizard); err != nil {
 		return err
+	}
+	if deployAdminless {
+		defer dropCreateNamespace()()
 	}
 	if err := configureDeploySelection(cmd, wizard); err != nil {
 		return err
@@ -640,7 +646,8 @@ func finishDeploy(ctx context.Context, target string, ns resolvedNamespaces, ent
 	}
 
 	// Store the key from Secret kates-api-key in the active context,
-	// unless that context holds a key kates did not put there.
+	// unless that context holds a key kates did not put there or its API
+	// refuses the key (it points at another cluster).
 	updateActiveContextAPIKey(ctx, ns.app)
 
 	if deployPortForward {

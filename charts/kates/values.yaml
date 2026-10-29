@@ -843,7 +843,9 @@ kyvernoPolicy:
   # Deployment, ReplicaSet, StatefulSet, Job and CronJob, each rule with the
   # autogen-<rule> and autogen-cronjob-<rule> Kyverno generates from it. A
   # namespaced Policy is named <namespace>/<name>. Kyverno must accept
-  # exceptions from this namespace (its exceptionNamespace setting), e.g.
+  # exceptions from this namespace (its features.policyExceptions enabled and
+  # namespace). A pre-install/pre-upgrade hook, so it exists before the
+  # workloads; helm uninstall leaves it. e.g.
   #   - policyName: require-requests-limits
   #     ruleNames: [requests-and-memory-limit]
   exceptions: []

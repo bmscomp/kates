@@ -428,7 +428,7 @@ type mcpRunTaskOut struct {
 }
 
 // mcpRunSummaryOut is the report summary without the two fields the backend
-// always sends as 0 (p999LatencyMs and durationMs, MetricUtils.java:112,116).
+// always sends as 0 (p999LatencyMs and durationMs, MetricUtils.java:114,118).
 type mcpRunSummaryOut struct {
 	TotalRecords            int64   `json:"totalRecords" jsonschema:"records sent, summed over tasks"`
 	AvgThroughputRecPerSec  float64 `json:"avgThroughputRecPerSec" jsonschema:"the mean of the rates of the tasks that have started, not their sum"`
@@ -440,7 +440,7 @@ type mcpRunSummaryOut struct {
 	P99LatencyMs            float64 `json:"p99LatencyMs" jsonschema:"the p99 of the tasks that measured latency; with several, the highest"`
 	MaxLatencyMs            float64 `json:"maxLatencyMs" jsonschema:"the slowest task's maximum"`
 	TasksWithErrors         int64   `json:"tasksWithErrors" jsonschema:"tasks that ended with an error (the backend's totalErrors)"`
-	ErrorRate               float64 `json:"errorRate" jsonschema:"tasksWithErrors divided by records sent; not a share of failed records"`
+	ErrorRate               float64 `json:"errorRate" jsonschema:"tasksWithErrors divided by tasks; not a share of failed records"`
 }
 
 func mcpGetRun(ctx context.Context, call *mcpCall, in mcpGetRunIn) (mcpGetRunOut, error) {
@@ -1021,10 +1021,11 @@ var mcpCaveatsRunsList = []mcpCaveat{
 			"tasks that measured it, so a LOAD or ENDURANCE run's is its producer's; a consumer records none. Each " +
 			"percentile is the highest such task's, exact with one producer and an upper bound with several; the " +
 			"average is weighted by records, and maximum latency is the slowest task's. errorRate is the number of " +
-			"tasks that ended with an error divided by the records sent, not a share of failed records. The backend " +
+			"tasks that ended with an error divided by the number of tasks, not a share of failed records: one producer " +
+			"that lost any sends reads 1. An older Kates API divided by the records sent instead. The backend " +
 			"always sends p99.9 and duration as 0.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"util/MetricUtils.java:62-179",
+			mcpAnchoredRef(mcpJava+"util/MetricUtils.java:62-181",
 				"public static ReportSummary computeSummary(", "filter(r -> !notStarted(r))",
 				"result.getStatus() == TestResult.TaskStatus.PENDING", "private static double highest("),
 			mcpAnchoredRef(mcpJava+"report/ReportGenerator.java:220-249,283-294",

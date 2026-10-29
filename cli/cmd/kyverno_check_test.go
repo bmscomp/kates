@@ -166,6 +166,35 @@ func TestKyvernoCheckCannotPassWhatItCouldNotRead(t *testing.T) {
 	}
 }
 
+// An exception Kyverno would ignore, the cluster's or the chart's, does not
+// count: the check would otherwise pass what admission refuses.
+func TestKyvernoCheckCountsOnlyExceptionsKyvernoAccepts(t *testing.T) {
+	for _, tc := range []struct{ args, note string }{
+		{`"--enablePolicyException=false"`, "accepts no PolicyException"},
+		{`"--enablePolicyException=true","--exceptionNamespace=kyverno"`, "only in kyverno"},
+	} {
+		stubKyvernoCheck(t, `{"results":[]}`)
+		f := stubRunner(t).
+			On("kubectl get deploy -A", `{"items":[{"spec":{"template":{"spec":{"containers":[{"name":"kyverno","args":[`+tc.args+`]}]}}}}]}`).
+			On("kubectl get clusterpolicies.kyverno.io", `{"items":[`+kyvernoTeamPolicy+`]}`).
+			On("kubectl get policyexceptions.kyverno.io", `{"items":[`+kyvernoException+`]}`).
+			On("kubectl get", `{"items":[]}`).
+			On("helm template kates", "kind: PolicyException\n").
+			On("kyverno apply", `{"results":[]}`)
+
+		report, _ := runKyvernoCheck(t)
+
+		if !strings.Contains(report.ExceptionNote, tc.note) {
+			t.Errorf("%s: note = %q, want %q", tc.args, report.ExceptionNote, tc.note)
+		}
+		for _, c := range f.Calls() {
+			if c.Name == "kyverno" && (slices.Contains(c.Args, "--exception") || slices.Contains(c.Args, "--exceptions-within-resources")) {
+				t.Errorf("%s: kyverno counted an ignored exception: %q", tc.args, c.Args)
+			}
+		}
+	}
+}
+
 func TestKyvernoCheckNeedsTheKyvernoCLI(t *testing.T) {
 	stubKyvernoCheck(t, "")
 	kyvernoPathFn = func() (string, error) { return "", os.ErrNotExist }

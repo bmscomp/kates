@@ -285,8 +285,9 @@ kyvernoPolicy:
   # instance label) as Pod, Deployment, ReplicaSet, StatefulSet, Job and
   # CronJob, each rule with the autogen-<rule> and autogen-cronjob-<rule>
   # Kyverno generates from it. A namespaced Policy is named <namespace>/<name>.
-  # Kyverno must accept exceptions from this namespace (its exceptionNamespace
-  # setting). The litmus-core operator takes no securityContext from values,
+  # Kyverno must accept exceptions from this namespace (its
+  # features.policyExceptions enabled and namespace). A pre-install/pre-upgrade
+  # hook, so it exists before the Litmus Deployments; helm uninstall leaves it. The litmus-core operator takes no securityContext from values,
   # so it is restricted only through the mutate rules above (enabled, mutate)
   # or this; a cluster enforcing PSS restricted without them needs e.g.
   #   - policyName: pss-restricted

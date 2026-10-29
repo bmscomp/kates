@@ -35,6 +35,10 @@ type stubGate struct {
 	proxyErr error
 	proxyGot cluster.KindProxy // what createKindFn was given
 
+	// choice is what the kind form answers; zero means the admin cluster.
+	choice        kindChoice
+	createName    string
+	bootstrapped  []string // the name and operators bootstrapAdminlessKindFn got
 	createCalled  bool
 	createConfig  string // what the topology file held when kind ran
 	createConfigP string
@@ -58,6 +62,7 @@ func (s *stubGate) install(t *testing.T) {
 	probeEnvironmentFn = func(detect.CommandExecutor) cluster.Environment { return s.env }
 	createKindFn = func(_ detect.CommandExecutor, o cluster.KindOptions) error {
 		s.createCalled = true
+		s.createName = o.Name
 		s.proxyGot = o.Proxy
 		s.createConfigP = o.ConfigPath
 		if data, err := os.ReadFile(o.ConfigPath); err == nil {
@@ -84,7 +89,20 @@ func (s *stubGate) install(t *testing.T) {
 		return s.proxy, nil, s.proxyErr
 	}
 
+	origChoice, origBootstrap := kindChoiceFn, bootstrapAdminlessKindFn
+	kindChoiceFn = func() (kindChoice, error) {
+		if s.choice.name == "" {
+			return kindChoice{name: cluster.DefaultKindClusterName}, nil
+		}
+		return s.choice, nil
+	}
+	bootstrapAdminlessKindFn = func(name string, operators []string) (string, error) {
+		s.bootstrapped = append([]string{name}, operators...)
+		return name, nil
+	}
+
 	t.Cleanup(func() {
+		kindChoiceFn, bootstrapAdminlessKindFn = origChoice, origBootstrap
 		listContextsFn, checkAllReachableFn, probeEnvironmentFn, createKindFn = origList, origReach, origProbe, origCreate
 		interactiveFn, confirmFn, pickContextFn = origInteractive, origConfirm, origPick
 		kindClusterExistsFn = origExists
