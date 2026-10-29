@@ -90,6 +90,23 @@ public class ScheduleResource {
                 .build());
     }
 
+    /**
+     * A 400 naming cronExpression when it isn't standard 5-field UNIX cron,
+     * or empty. The scheduler matches with the same parser, so a saved
+     * expression it can't read would never fire.
+     */
+    public static Optional<Response> invalidCron(String cronExpression) {
+        try {
+            TestScheduler.CRON.parse(cronExpression);
+            return Optional.empty();
+        } catch (IllegalArgumentException e) {
+            String why = e.getMessage() + "; use 5-field UNIX cron: minute hour day-of-month month day-of-week";
+            return Optional.of(Response.status(400)
+                    .entity(ApiError.validationFailed("cronExpression: " + why, Map.of("cronExpression", why)))
+                    .build());
+        }
+    }
+
     /** The names as "a", "a or b", or "a, b or c". */
     private static String oneOf(List<String> names) {
         if (names.size() < 2) {
@@ -125,8 +142,9 @@ public class ScheduleResource {
     @APIResponse(responseCode = "201", description = "Schedule created")
     @APIResponse(
             responseCode = "400",
-            description = "Invalid request, including a testRequest that POST /api/tests would refuse, or one"
-                    + " whose backend the Kates API doesn't have; fieldErrors names each field")
+            description = "Invalid request, including a cronExpression that isn't 5-field UNIX cron, a testRequest"
+                    + " that POST /api/tests would refuse, or one whose backend the Kates API doesn't have;"
+                    + " fieldErrors names each field")
     public Response createSchedule(@jakarta.validation.Valid CreateScheduleRequest request) {
         if (request.name == null || request.name.isBlank()) {
             return Response.status(400)
@@ -143,7 +161,7 @@ public class ScheduleResource {
                     .entity(ApiError.of(400, "Bad Request", "Field 'testRequest' is required"))
                     .build();
         }
-        Optional<Response> refused = refusal(request.testRequest);
+        Optional<Response> refused = invalidCron(request.cronExpression).or(() -> refusal(request.testRequest));
         if (refused.isPresent()) {
             return refused.get();
         }
@@ -176,14 +194,26 @@ public class ScheduleResource {
     @APIResponse(responseCode = "200", description = "Schedule updated")
     @APIResponse(
             responseCode = "400",
-            description = "A testRequest that POST /api/schedules would refuse, with the body POST answers;"
-                    + " fieldErrors names each field")
+            description = "A cronExpression or testRequest that POST /api/schedules would refuse, with the body POST"
+                    + " answers; fieldErrors names each field")
     @APIResponse(responseCode = "404", description = "Schedule not found")
     public Response updateSchedule(
             @Parameter(description = "Schedule ID") @PathParam("id") String id, CreateScheduleRequest request) {
         return repository
                 .findById(id)
                 .map(schedule -> {
+                    if (request.cronExpression != null) {
+                        // POST's @Size and @NotBlank, which a PUT without @Valid skips.
+                        Set<ConstraintViolation<CreateScheduleRequest>> violations =
+                                validator.validateProperty(request, "cronExpression");
+                        if (!violations.isEmpty()) {
+                            throw new ConstraintViolationException(violations);
+                        }
+                        Optional<Response> badCron = invalidCron(request.cronExpression);
+                        if (badCron.isPresent()) {
+                            return badCron.get();
+                        }
+                    }
                     // Only a testRequest the body sends is checked, so a
                     // schedule saved before the check, whose firings the
                     // Kates API refuses, can still be renamed or disabled.
@@ -241,13 +271,14 @@ public class ScheduleResource {
                         .build());
     }
 
-    /** The name and cronExpression sizes are their column widths in V2__create_schedules_table.sql. */
     public static class CreateScheduleRequest {
         @jakarta.validation.constraints.NotBlank(message = "name is required")
+        // The name column's width (V2__create_schedules_table.sql).
         @jakarta.validation.constraints.Size(max = 128)
         public String name;
 
         @jakarta.validation.constraints.NotBlank(message = "cronExpression is required")
+        // The cron_expression column's width (V2__create_schedules_table.sql).
         @jakarta.validation.constraints.Size(max = 64)
         public String cronExpression;
 

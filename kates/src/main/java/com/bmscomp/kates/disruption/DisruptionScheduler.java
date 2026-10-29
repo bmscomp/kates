@@ -14,6 +14,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.scheduler.Scheduled;
 import org.jboss.logging.Logger;
 
+import com.bmscomp.kates.schedule.TestScheduler;
+
 /**
  * Cron-based scheduler for recurring disruption tests.
  * Evaluates enabled schedules every 60 seconds, executing matching plans
@@ -64,7 +66,7 @@ public class DisruptionScheduler {
 
         for (DisruptionScheduleEntity schedule : schedules) {
             try {
-                if (matchesCron(schedule.getCronExpression(), now)) {
+                if (TestScheduler.matchesCron(schedule.getCronExpression(), now)) {
                     LOG.info("Disruption schedule '" + schedule.getName() + "' triggered at " + now);
                     executeSchedule(schedule);
                 }
@@ -126,54 +128,6 @@ public class DisruptionScheduler {
             entity.setLastRunId(runId);
             entity.setLastRunAt(Instant.now());
             em.merge(entity);
-        }
-    }
-
-    static boolean matchesCron(String cronExpr, ZonedDateTime now) {
-        String[] parts = cronExpr.trim().split("\\s+");
-        if (parts.length < 5) {
-            LOG.warn("Invalid cron expression (need 5 fields): " + cronExpr);
-            return false;
-        }
-        return matchesField(parts[0], now.getMinute())
-                && matchesField(parts[1], now.getHour())
-                && matchesField(parts[2], now.getDayOfMonth())
-                && matchesField(parts[3], now.getMonthValue())
-                && matchesField(parts[4], now.getDayOfWeek().getValue() % 7);
-    }
-
-    private static boolean matchesField(String field, int value) {
-        if ("*".equals(field)) return true;
-        if (field.startsWith("*/")) {
-            try {
-                int step = Integer.parseInt(field.substring(2));
-                return step > 0 && value % step == 0;
-            } catch (NumberFormatException e) {
-                return false;
-            }
-        }
-        if (field.contains(",")) {
-            for (String part : field.split(",")) {
-                try {
-                    if (Integer.parseInt(part.trim()) == value) return true;
-                } catch (NumberFormatException e) {
-                    /* skip */
-                }
-            }
-            return false;
-        }
-        if (field.contains("-")) {
-            String[] range = field.split("-");
-            try {
-                return value >= Integer.parseInt(range[0].trim()) && value <= Integer.parseInt(range[1].trim());
-            } catch (Exception e) {
-                return false;
-            }
-        }
-        try {
-            return Integer.parseInt(field) == value;
-        } catch (NumberFormatException e) {
-            return false;
         }
     }
 }

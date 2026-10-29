@@ -101,6 +101,7 @@ class ScopesTest {
                 new String[] {"POST", "/api/kafka/topics", "{\"name\":\"t\"}"},
                 new String[] {"POST", "/api/kafka/produce/t", "{}"},
                 new String[] {"GET", "/api/kafka/consume/t", null},
+                new String[] {"GET", "/api/webhooks", null},
                 new String[] {"POST", "/api/webhooks", "{}"},
                 new String[] {"POST", "/api/schedules", "{}"},
                 new String[] {"POST", "/api/disruptions/schedules", "{}"},
@@ -150,6 +151,7 @@ class ScopesTest {
     @Test
     void theLegacyKeyKeepsEveryRight() {
         as(TestKeys.LEGACY).delete("/api/tests/deadbeef").then().statusCode(404);
+        as(TestKeys.LEGACY).get("/api/webhooks").then().statusCode(200);
         // Past the chaos:run check to the (mocked) launcher.
         int run = status(
                 as(TestKeys.LEGACY).body("{\"name\":\"p\",\"steps\":[{\"name\":\"s\"}]}"), "POST", "/api/disruptions");

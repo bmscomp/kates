@@ -148,7 +148,7 @@ var scheduleDeleteCmd = &cobra.Command{
 
 func init() {
 	scheduleCreateCmd.Flags().StringVar(&schedName, "name", "", "Schedule name (required)")
-	scheduleCreateCmd.Flags().StringVar(&schedCron, "cron", "", "Cron expression, e.g. '0 * * * *' (required)")
+	scheduleCreateCmd.Flags().StringVar(&schedCron, "cron", "", "5-field UNIX cron expression in UTC, e.g. '0 * * * *' or '0 9 * * MON-FRI' (required)")
 	scheduleCreateCmd.Flags().StringVar(&schedFile, "request", "", "Path to JSON file with test request (required)")
 
 	scheduleCmd.AddCommand(scheduleListCmd)

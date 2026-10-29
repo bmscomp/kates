@@ -36,6 +36,8 @@ public class WebhookResource {
     @Inject
     WebhookUrlValidator urlValidator;
 
+    // A webhook URL (a Slack incoming webhook, say) is itself the secret.
+    @RolesAllowed(Scopes.READ_SENSITIVE)
     @GET
     @Operation(summary = "List registered webhooks")
     public List<WebhookService.WebhookRegistration> list() {

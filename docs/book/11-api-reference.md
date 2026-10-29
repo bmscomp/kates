@@ -69,7 +69,7 @@ Every endpoint needs a scope. A key whose principal lacks it gets `403` with the
 | Scope | Allows |
 |-------|--------|
 | `read` | Every `GET` but those below, `POST /api/conformity/check`, `POST /api/cost/estimate`, and the dry run `POST /api/disruptions?dryRun=true` |
-| `read:sensitive` | `GET /api/security/secrets`, `/acl-map` and `/auth-test` |
+| `read:sensitive` | `GET /api/security/secrets`, `/acl-map` and `/auth-test`, and `GET /api/webhooks`, whose URLs are often secrets |
 | `test:run` | Creating a test run and cancelling one |
 | `chaos:run` | Running a disruption, playbook, template, compound plan or resilience test |
 | `admin` | Deleting test runs, pruning finished ones by age, bulk creation, baselines, topics, producing and consuming records, profiles, webhooks, test and disruption schedules, the security baseline, share groups |
@@ -1046,7 +1046,7 @@ A schedule stores a test request with a cron expression, and while the schedule 
 
 #### POST /api/schedules
 
-Create a recurring test schedule. Cron expressions use the 5-field Unix format (`minute hour day-of-month month day-of-week`, evaluated in UTC).
+Create a recurring test schedule. Cron expressions use the standard 5-field Unix format (`minute hour day-of-month month day-of-week`, evaluated in UTC), at most 64 characters: `*`, numbers, ranges (`9-17`), lists (`0,30`) and steps (`*/15`, `0-30/5`), with month and day names such as `JAN` or `MON-FRI`. Day-of-week `0` and `7` are both Sunday, and when both day fields are set the schedule fires on a day that matches either one. Macros such as `@daily`, six-field expressions with seconds, and Quartz's `?` and `L` are refused with a `400` keyed `cronExpression` in `fieldErrors`, and the schedule isn't saved.
 
 **Request Body:**
 
@@ -1105,7 +1105,7 @@ Get a single schedule, including the ID and time of its last triggered run.
 
 #### PUT /api/schedules/{id}
 
-Update a schedule. Accepts the same body as `POST /api/schedules` (fields you omit keep their current values, `enabled` included). Returns the updated schedule. A `testRequest` in the body that `POST /api/schedules` would refuse gets the same `400`, whatever the reason, and the schedule stays as it was. A body without one leaves the stored request unchecked, so you can rename or disable a schedule whose firings the Kates API refuses.
+Update a schedule. Accepts the same body as `POST /api/schedules` (fields you omit keep their current values, `enabled` included). Returns the updated schedule. A `cronExpression` or `testRequest` in the body that `POST /api/schedules` would refuse gets the same `400`, whatever the reason, and the schedule stays as it was. A body without one leaves the stored request unchecked, so you can rename or disable a schedule whose firings the Kates API refuses.
 
 #### DELETE /api/schedules/{id}
 

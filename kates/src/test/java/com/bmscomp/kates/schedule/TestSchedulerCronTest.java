@@ -78,18 +78,59 @@ class TestSchedulerCronTest {
     }
 
     @Test
-    void invalidCronReturnsFalse() {
+    void invalidCronThrows() {
         ZonedDateTime now = ZonedDateTime.of(2026, 2, 16, 14, 30, 0, 0, ZoneOffset.UTC);
-        assertFalse(TestScheduler.matchesCron("* *", now));
-        assertFalse(TestScheduler.matchesCron("*", now));
+        assertThrows(IllegalArgumentException.class, () -> TestScheduler.matchesCron("* *", now));
+        assertThrows(IllegalArgumentException.class, () -> TestScheduler.matchesCron("@daily", now));
+        assertThrows(IllegalArgumentException.class, () -> TestScheduler.matchesCron("60 * * * *", now));
     }
 
     @Test
-    void fullCronExpression() {
-        // Monday = 1 in java.time DayOfWeek, but cron uses %7 → 1
-        // Feb 16, 2026 is a Monday
-        ZonedDateTime monday = ZonedDateTime.of(2026, 2, 16, 10, 30, 0, 0, ZoneOffset.UTC);
-        assertTrue(TestScheduler.matchesCron("30 10 16 2 1", monday));
-        assertFalse(TestScheduler.matchesCron("30 10 16 2 0", monday));
+    void secondsWithinTheMinuteStillMatch() {
+        assertTrue(
+                TestScheduler.matchesCron("30 14 * * *", ZonedDateTime.of(2026, 2, 16, 14, 30, 42, 0, ZoneOffset.UTC)));
+    }
+
+    /** Day names were refused by the old matcher, which saved them and never fired. Feb 16, 2026 is a Monday. */
+    @Test
+    void dayNamesMatch() {
+        assertTrue(TestScheduler.matchesCron("0 9 * * MON", ZonedDateTime.of(2026, 2, 16, 9, 0, 0, 0, ZoneOffset.UTC)));
+        assertFalse(
+                TestScheduler.matchesCron("0 9 * * MON", ZonedDateTime.of(2026, 2, 17, 9, 0, 0, 0, ZoneOffset.UTC)));
+    }
+
+    @Test
+    void stepWithinARangeMatches() {
+        String cron = "0-30/5 * * * *";
+        assertTrue(TestScheduler.matchesCron(cron, ZonedDateTime.of(2026, 2, 16, 14, 25, 0, 0, ZoneOffset.UTC)));
+        assertFalse(TestScheduler.matchesCron(cron, ZonedDateTime.of(2026, 2, 16, 14, 35, 0, 0, ZoneOffset.UTC)));
+        assertFalse(TestScheduler.matchesCron(cron, ZonedDateTime.of(2026, 2, 16, 14, 7, 0, 0, ZoneOffset.UTC)));
+    }
+
+    /** Day-of-week 7 is Sunday, as 0 is. Feb 15, 2026 is a Sunday. */
+    @Test
+    void daySevenIsSunday() {
+        ZonedDateTime sunday = ZonedDateTime.of(2026, 2, 15, 0, 0, 0, 0, ZoneOffset.UTC);
+        assertTrue(TestScheduler.matchesCron("0 0 * * 7", sunday));
+        assertTrue(TestScheduler.matchesCron("0 0 * * 0", sunday));
+    }
+
+    /** A month step counts from January: the old matcher's value % 2 picked February, April, ... */
+    @Test
+    void monthStepStartsInJanuary() {
+        String cron = "0 0 1 */2 *";
+        assertTrue(TestScheduler.matchesCron(cron, ZonedDateTime.of(2026, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC)));
+        assertFalse(TestScheduler.matchesCron(cron, ZonedDateTime.of(2026, 2, 1, 0, 0, 0, 0, ZoneOffset.UTC)));
+        assertTrue(TestScheduler.matchesCron(cron, ZonedDateTime.of(2026, 3, 1, 0, 0, 0, 0, ZoneOffset.UTC)));
+    }
+
+    /** With both days set, cron fires on either one, not only when both hold. */
+    @Test
+    void dayOfMonthOrDayOfWeek() {
+        String cron = "0 9 1 * 1";
+        // Thursday Oct 1, Monday Oct 5, Tuesday Oct 6, 2026.
+        assertTrue(TestScheduler.matchesCron(cron, ZonedDateTime.of(2026, 10, 1, 9, 0, 0, 0, ZoneOffset.UTC)));
+        assertTrue(TestScheduler.matchesCron(cron, ZonedDateTime.of(2026, 10, 5, 9, 0, 0, 0, ZoneOffset.UTC)));
+        assertFalse(TestScheduler.matchesCron(cron, ZonedDateTime.of(2026, 10, 6, 9, 0, 0, 0, ZoneOffset.UTC)));
     }
 }
