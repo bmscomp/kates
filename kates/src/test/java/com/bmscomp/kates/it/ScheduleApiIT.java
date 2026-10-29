@@ -151,6 +151,22 @@ class ScheduleApiIT {
                 .statusCode(400);
 
         given().when().get("/api/schedules").then().statusCode(200).body("$", hasSize(0));
+
+        // PUT skips @Valid, so it has to hold the same widths itself.
+        String id = create("nightly", "0 2 * * *");
+        given().contentType(ContentType.JSON)
+                .body(Map.of("name", longName))
+                .when()
+                .put("/api/schedules/" + id)
+                .then()
+                .statusCode(400);
+        given().contentType(ContentType.JSON)
+                .body(Map.of("cronExpression", longCron))
+                .when()
+                .put("/api/schedules/" + id)
+                .then()
+                .statusCode(400);
+        given().when().get("/api/schedules/" + id).then().statusCode(200).body("name", equalTo("nightly"));
     }
 
     @Test
