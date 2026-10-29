@@ -95,6 +95,20 @@ class ProblemsTest(unittest.TestCase):
         self.assertEqual(verdict.numbers_in("run 3fa9c2e1 and 77b0d4aa, p99 4.8"), ["4.8"])
         self.assertEqual(verdict.numbers_in("10-run band, 2.9–3.6 ms"), ["10", "2.9", "3.6"])
 
+    def test_caveats_are_ids_only(self):
+        self.assertEqual(verdict.problems(answer(caveats=["load-single-producer", "regression-one-baseline"])), [])
+        p = verdict.problems(answer(caveats=["p99 rose 66.09% against c260a96f"]))
+        self.assertEqual(p, ["answer.caveats[0] must be a caveat id, lowercase words joined by hyphens, "
+                             "not 'p99 rose 66.09% against c260a96f'"])
+        for bad in ("Load-Single-Producer", "load_single", "-load", "load-", ""):
+            with self.subTest(bad=bad):
+                self.assertTrue(verdict.problems(answer(caveats=[bad])))
+
+    def test_caveats_ground_nothing(self):
+        # The first lab run: a figure written into a caveat must not back the headline.
+        p = verdict.problems(answer(caveats=["p99-66"], headline="p99 rose 66 % to 4.8 ms"))
+        self.assertEqual(p, ["headline says 66, which no structured field holds"])
+
     def test_next_is_read_only(self):
         p = verdict.problems(answer(next="kates test create --type LOAD"))
         self.assertEqual(p, ["next must be a read-only command, but it says create"])

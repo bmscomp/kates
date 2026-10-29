@@ -191,7 +191,10 @@ reads, connects and explains; the verdict is checked by code.
   verdict from, so the rules never depend on a metric's name.
 - Every number in `headline` and `next` must appear in a structured field, or be one rounded to
   the precision written (4.83 may be written 4.8). `evidence` names the tool and field behind
-  each claim; it is shown to people, not checked.
+  each claim; it is shown to people, not checked. `caveats` holds caveat ids only
+  (`^[a-z0-9]+(-[a-z0-9]+)*$`), and they ground nothing: in the first lab run the model wrote
+  sentences with figures there, which would have let a headline number pass unchecked.
+- Each SDK session's cost is logged (`session cost for run …`), whatever its outcome.
 - `next` suggests a read-only command for a person. It never suggests starting load or a fault.
 
 **Sinks** (config, not model): always the log and a JSON file per run on the PVC. Slack incoming

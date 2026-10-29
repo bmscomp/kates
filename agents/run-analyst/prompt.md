@@ -33,6 +33,8 @@ Return one JSON object that matches the output schema.
   metric `assess_run` placed against the band, with `kind` set to `latency` for latency
   percentiles, `throughput` for records or bytes per second, and `other` for everything else.
 - `overlaps`: each overlapping run (`kind: run`) or disruption (`kind: disruption`) by id.
+- `caveats`: the ids of the caveats you kept, exactly as the results name them, such as
+  `load-single-producer`. Only ids: lowercase words joined by hyphens, never a sentence.
 - `evidence`: for each claim in the headline, the tool and the result field it came from.
 - `next`: one read-only `kates` command a person could run to look further (for example
   `kates test compare <baseline> <run>`), or null. Never a command that starts load, a

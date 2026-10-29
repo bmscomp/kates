@@ -8,7 +8,8 @@ the answer is not normal. The design, and what it may and may not do, is in
 It reads Kates through `kates mcp` with an agent key that can only read. The model has no shell,
 files or network, and does not choose where its answer goes. Its answer is checked in code
 (`verdict.py`) before anything is posted: the verdict must follow from its own evidence fields,
-and every number it writes must be in a field.
+every number it writes must be in a field, and caveats are named by id only. Each session's cost
+is logged, whatever its outcome.
 
 | File | Role |
 | --- | --- |
@@ -55,6 +56,9 @@ and every number it writes must be in a field.
 | `ANALYST_POLL_SECONDS` | `60` | Poll mode's interval |
 | `ANALYST_SLACK_WEBHOOK_URL` | unset | A Slack incoming webhook |
 | `ANALYST_GITHUB_REPO`, `GITHUB_TOKEN` | unset | `owner/name` and a token that can write issues; issues get the label `run-analyst` |
+
+Each session logs its cost as `session cost for run <id>: <USD> USD, <turns> turns`. On a kind lab,
+one LOAD analysis with `claude-opus-5-5` took 5 turns and cost $0.89 (2026-10-29).
 
 ## Run it
 

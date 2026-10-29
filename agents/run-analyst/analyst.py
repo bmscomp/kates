@@ -5,10 +5,12 @@ verdict.problems; a refused answer gets one retry with the reasons.
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 
 import verdict
 
+LOG = logging.getLogger("run-analyst")
 PROMPT = (Path(__file__).parent / "prompt.md").read_text()
 
 # The kates mcp tools the analyst may call; everything else is refused.
@@ -57,12 +59,21 @@ def retry_prompt(run_id: str, answer: dict, problems: list[str]) -> str:
             "reasons:\n- " + "\n- ".join(problems) + "\n\nThe refused answer:\n" + json.dumps(answer, indent=2))
 
 
-async def _ask(cfg, prompt: str):
+def log_cost(run_id: str, result) -> None:
+    """One line per session, whatever its outcome: the cost the eval reports (plan §2.5)."""
+    LOG.info("session cost for run %s: %s USD, %s turns, %s", run_id,
+             result.total_cost_usd, result.num_turns, result.subtype)
+
+
+async def _ask(cfg, run_id: str, prompt: str):
     from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)  # the session's cwd; the SDK refuses a missing one
     result = None
     async for message in query(prompt=prompt, options=ClaudeAgentOptions(**session_options(cfg))):
         if isinstance(message, ResultMessage):
+            # Logged as it arrives: the SDK may raise after a failed session's result.
+            log_cost(run_id, message)
             result = message
     if result is None:
         return None, "the session ended without a result"
@@ -82,7 +93,7 @@ def answer_problems(run_id: str, answer: dict) -> list[str]:
 
 def analyze(cfg, run_id: str, ask=None):
     """(answer, None) when an answer passed the checks, else (None, why not)."""
-    ask = ask or (lambda prompt: asyncio.run(_ask(cfg, prompt)))
+    ask = ask or (lambda prompt: asyncio.run(_ask(cfg, run_id, prompt)))
     answer, error = ask(first_prompt(run_id))
     if answer is None:
         return None, error

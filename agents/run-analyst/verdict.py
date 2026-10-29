@@ -17,6 +17,9 @@ MUTATING_WORDS = {"create", "run", "apply", "delete", "cancel", "start", "stop",
 
 _STR = {"type": "string"}
 _NULLABLE_STR = {"type": ["string", "null"]}
+# A caveat is named by its id, as kates mcp results name it: never free text,
+# which could carry numbers the headline then counts as grounded.
+CAVEAT_ID = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 
 SCHEMA = {
     "type": "object",
@@ -77,7 +80,7 @@ SCHEMA = {
             },
         },
         "brokerSkew": _NULLABLE_STR,
-        "caveats": {"type": "array", "items": _STR},
+        "caveats": {"type": "array", "items": {"type": "string", "pattern": CAVEAT_ID}},
         "evidence": {
             "type": "array",
             "items": {
@@ -161,6 +164,8 @@ def _shape_problems(a, schema=SCHEMA, at="answer") -> list[str]:
         return [f"{at} must be {' or '.join(types)}"]
     if "enum" in schema and a not in schema["enum"]:
         return [f"{at} must be one of {', '.join(schema['enum'])}"]
+    if "pattern" in schema and isinstance(a, str) and not re.match(schema["pattern"], a):
+        return [f"{at} must be a caveat id, lowercase words joined by hyphens, not {a!r}"]
     out = []
     if isinstance(a, dict):
         for key in schema.get("required", []):
@@ -187,7 +192,8 @@ def problems(a) -> list[str]:
     if a["verdict"] != expected:
         out.append(f"verdict is {a['verdict']} but the evidence fields give {expected} by the rules")
     fields: list[float] = []
-    _field_numbers({k: v for k, v in a.items() if k not in ("headline", "next", "evidence")}, fields)
+    # Caveat ids name no figures, so they ground nothing either.
+    _field_numbers({k: v for k, v in a.items() if k not in ("headline", "next", "evidence", "caveats")}, fields)
     for name in ("headline", "next"):
         for raw in numbers_in(a[name]):
             if not _grounded(raw, fields):
