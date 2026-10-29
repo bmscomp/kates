@@ -666,3 +666,15 @@ func TestResolveVersionPlan_AdminlessOffersOperatorUpgrade(t *testing.T) {
 		t.Errorf("want the pin offered to the admin: %v", vp.Notes)
 	}
 }
+
+// Admin-less installs no Strimzi, so the account, which cannot list CRDs,
+// is not asked to check their stored versions.
+func TestResolveVersionPlan_AdminlessSkipsTheCRDStorageCheck(t *testing.T) {
+	root := versionsRepo(t, "1.1.0", "4.2.0")
+	r := &scriptedRunner{answers: map[string]string{
+		"get pods -A -l strimzi.io/kind=cluster-operator": `{"items":[]}`,
+	}}
+	if _, err := resolveVersionPlan(context.Background(), r, versionOptions{RepoRoot: root, CacheDir: t.TempDir(), Offline: true, KafkaNS: "kafka", FollowInstalled: true}); err != nil {
+		t.Fatalf("admin-less resolve read the CRDs: %v", err)
+	}
+}

@@ -418,6 +418,11 @@ func (vp *versionPlan) checkInstalledOperators(ctx context.Context, r strimzi.Ru
 	if _, chartOnly := r.(chartOnlyRunner); chartOnly {
 		return nil
 	}
+	// Admin-less installs no Strimzi, and a namespace account cannot list
+	// CRDs: the check is the cluster admin's.
+	if o.FollowInstalled {
+		return nil
+	}
 	return vp.checkStrimziCRDStorage(ctx, r)
 }
 
