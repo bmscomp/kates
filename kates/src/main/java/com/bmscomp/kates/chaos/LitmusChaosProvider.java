@@ -622,6 +622,7 @@ public class LitmusChaosProvider implements ChaosProvider {
             LOG.info("Cleaned up Kates-managed ChaosEngines");
         } catch (Exception e) {
             LOG.warn("ChaosEngine cleanup failed", e);
+            throw e; // the caller reports an engine that may still be live
         }
     }
 

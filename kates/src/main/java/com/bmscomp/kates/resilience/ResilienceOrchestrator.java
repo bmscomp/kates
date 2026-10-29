@@ -79,6 +79,12 @@ public class ResilienceOrchestrator {
         // Set when the fault is about to go in; release() frees the lease only
         // while this token holds it.
         String leaseToken = null;
+        // Ends the probe monitor; set on every way out, not only once the fault answers.
+        AtomicBoolean chaosActive = new AtomicBoolean(true);
+        // True from the trigger until the fault's future answers: a fault that
+        // timed out or failed may still be in the cluster.
+        boolean faultUnsettled = false;
+        CompletableFuture<ChaosOutcome> chaosFuture = null;
 
         try {
             List<ProbeSpec> probes = resolveProbes(request);
@@ -141,7 +147,6 @@ public class ResilienceOrchestrator {
                     + request.getChaosSpec().experimentName() + "'");
 
             List<ProbeResult> duringChaosResults = new CopyOnWriteArrayList<>();
-            AtomicBoolean chaosActive = new AtomicBoolean(true);
 
             if (!probes.isEmpty()) {
                 startContinuousProbes(
@@ -155,14 +160,16 @@ public class ResilienceOrchestrator {
             // mark came up to delayBeforeSec early. Noop injects nothing and
             // reports nothing, so RPO is reported as not measured, not zero.
             String runId = run.getId();
-            CompletableFuture<ChaosOutcome> chaosFuture = chaosCoordinator.triggerFault(
+            chaosFuture = chaosCoordinator.triggerFault(
                     request.getChaosSpec(), injectedAt -> testOrchestrator.markChaosStart(runId, injectedAt));
+            faultUnsettled = true;
 
             // 5. Wait for chaos to complete, its delay included: both chaos
             // providers wait that out before they inject.
             FaultSpec chaosSpec = request.getChaosSpec();
             ChaosOutcome outcome =
                     chaosFuture.get(chaosSpec.delayBeforeSec() + chaosSpec.chaosDurationSec() + 120, TimeUnit.SECONDS);
+            faultUnsettled = false;
             chaosActive.set(false);
             report.setChaosOutcome(outcome);
             report.setDuringChaosProbes(List.copyOf(duringChaosResults));
@@ -236,12 +243,53 @@ public class ResilienceOrchestrator {
                     e.getMessage() != null ? e.getMessage() : e.getClass().getName());
             LOG.error("Resilience test failed", e);
         } finally {
+            chaosActive.set(false);
+            if (faultUnsettled) {
+                cleanUpFault(request.getChaosSpec(), report);
+            }
             if (leaseToken != null) {
-                concurrencyGuard.release(target, leaseToken);
+                String token = leaseToken;
+                if (chaosFuture != null && !chaosFuture.isDone()) {
+                    // The provider is still applying the fault: no other disruption until it stops.
+                    addError(
+                            report,
+                            "The fault '" + request.getChaosSpec().experimentName()
+                                    + "' may still be running: the disruption lease is held until it stops");
+                    chaosFuture.whenComplete((o, e) -> concurrencyGuard.release(target, token));
+                } else {
+                    concurrencyGuard.release(target, token);
+                }
             }
         }
 
         return report;
+    }
+
+    /**
+     * Cleans up a fault whose future never answered, before the lease is
+     * released: otherwise the next plan or run injects on top of it. A cleanup
+     * that fails is added to the report's error, since the fault may be live.
+     */
+    private void cleanUpFault(FaultSpec spec, ResilienceReport report) {
+        // An interrupted thread fails the blocking delete and the retry's sleep at once.
+        boolean wasInterrupted = Thread.interrupted();
+        try {
+            chaosCoordinator.cleanup(spec.experimentName());
+        } catch (RuntimeException e) {
+            String why = "The fault '" + spec.experimentName()
+                    + "' may still be in the cluster: cleaning it up failed: "
+                    + (e.getMessage() != null ? e.getMessage() : e.getClass().getName());
+            LOG.error("Resilience test: " + why, e);
+            addError(report, why);
+        } finally {
+            if (wasInterrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private static void addError(ResilienceReport report, String why) {
+        report.setError(report.getError() != null ? report.getError() + ". " + why : why);
     }
 
     private List<ProbeSpec> resolveProbes(ResilienceTestRequest request) {
