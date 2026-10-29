@@ -58,6 +58,8 @@ several are.`,
 		// 1. Detect and build Helm args
 		helmArgs := []string{"upgrade", "--install", "kates", chartRootPath("charts/kates"),
 			"-n", appNS, "--create-namespace",
+			// Keep what deploy set (Kafka, RBAC scope, images) on the chart's current defaults.
+			"--reset-then-reuse-values",
 			"--set", "kyvernoPolicy.enabled=true",
 			"--set", "kyvernoPolicy.action=" + kyvernoApplyMode}
 
@@ -94,24 +96,17 @@ several are.`,
 			}
 		}
 
-		if kyvernoApplyCosign {
-			helmArgs = append(helmArgs, "--set", "kyvernoPolicy.cosign.enabled=true")
-		}
-		if kyvernoApplyNetpol {
-			helmArgs = append(helmArgs, "--set", "kyvernoPolicy.networkPolicyGeneration.enabled=true")
-		}
-
-		if kyvernoApplyKafka {
-			helmArgs = append(helmArgs, "--set", "kyvernoPolicy.kafka.enabled=true")
-		}
+		// Set each opt-in either way: the reused values would keep a policy an earlier run turned on.
+		helmArgs = append(helmArgs,
+			"--set", fmt.Sprintf("kyvernoPolicy.cosign.enabled=%t", kyvernoApplyCosign),
+			"--set", fmt.Sprintf("kyvernoPolicy.networkPolicyGeneration.enabled=%t", kyvernoApplyNetpol),
+			"--set", fmt.Sprintf("kyvernoPolicy.kafka.enabled=%t", kyvernoApplyKafka))
 
 		// Also check dev namespaces
 		nsOut, _ := kc.Output(ctx, "get", "ns", "-o", "jsonpath={.items[*].metadata.name}")
 		ns := string(nsOut)
 		devNamespaces := strings.Contains(ns, "-dev") || strings.Contains(ns, "-staging") || strings.Contains(ns, "sandbox")
-		if devNamespaces {
-			helmArgs = append(helmArgs, "--set", "kyvernoPolicy.policyExceptions.enabled=true")
-		}
+		helmArgs = append(helmArgs, "--set", fmt.Sprintf("kyvernoPolicy.policyExceptions.enabled=%t", devNamespaces))
 
 		if kyvernoApplyDryRun {
 			helmArgs = append(helmArgs, "--dry-run")

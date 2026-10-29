@@ -226,6 +226,23 @@ func TestKyvernoApplyDryRun(t *testing.T) {
 	}
 }
 
+// The upgrade keeps the release's values: without them Helm reset
+// everything deploy set (Kafka, RBAC scope, images) to chart defaults.
+func TestKyvernoApplyKeepsReleaseValues(t *testing.T) {
+	calls := kyvernoApplyCluster(t, "team-kates", "kind: ClusterPolicy\n", nil)
+	kyvernoApplyDryRun = true
+	if _, _, err := commandOutput(t, func() error { return kyvernoApplyCmd.RunE(kyvernoApplyCmd, nil) }); err != nil {
+		t.Fatalf("apply --dry-run: %v", err)
+	}
+	if len(*calls) != 1 || !strings.Contains((*calls)[0], " --reset-then-reuse-values ") {
+		t.Errorf("helm must reuse the release's values: %q", *calls)
+	}
+	// A reused true would keep Cosign on although --with-cosign was left out.
+	if len(*calls) == 1 && !strings.Contains((*calls)[0], " kyvernoPolicy.cosign.enabled=false ") {
+		t.Errorf("an opt-in left out must be set false: %q", *calls)
+	}
+}
+
 // The policies go to the kates release that is installed; the flags decide
 // when they were given, or when nothing or more than one is installed.
 func TestKyvernoReleaseNamespace(t *testing.T) {
