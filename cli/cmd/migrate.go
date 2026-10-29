@@ -63,6 +63,36 @@ A release build pulls legacy-kafka and mirror-maker2 from the published
 charts and carries the versions.env pins it needs, so no checkout is needed;
 its generated values go under the user state directory. From a checkout (or
 KATES_CHECKOUT) it reads that checkout's charts and versions.env, as before.`,
+	// Cobra runs only the nearest PersistentPreRun, so this one runs the
+	// root's first.
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if rootPreRun := cmd.Root().PersistentPreRunE; rootPreRun != nil {
+			if err := rootPreRun(cmd, args); err != nil {
+				return err
+			}
+		}
+		pinMigrateKubeContext(cmd.Context())
+		return nil
+	},
+}
+
+// pinMigrateKubeContext pins every kubectl and helm call of the command to
+// the kube context current when it starts (pinKubeContext), so a `kubectl
+// config use-context` in another terminal cannot move the rest of an up,
+// a cutover or a down's topic deletes to another cluster. No migrate command
+// switches the context itself (image build's kind load names its cluster),
+// so the start is when the context it means is known. Without a current
+// context nothing is pinned, and a command that needs a cluster says so
+// itself. The pin lasts the process: kates runs one command per invocation.
+func pinMigrateKubeContext(ctx context.Context) (unpin func()) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	current, err := defaultRunner.Run(ctx, "kubectl", "config", "current-context")
+	if err != nil {
+		return func() {}
+	}
+	return pinKubeContext(strings.TrimSpace(current))
 }
 
 func init() {

@@ -398,3 +398,54 @@ func TestMigrateStatusWatchSaysOffsetsAreOff(t *testing.T) {
 		t.Fatal("status --watch read the end offsets")
 	}
 }
+
+// A down pins every kubectl and helm call to the context current when it
+// started: a `kubectl config use-context` in another terminal mid-run must
+// not move the topic deletes and uninstalls to the other cluster.
+func TestMigrateDownStaysOnTheContextItStartedOn(t *testing.T) {
+	migrateTestRepo(t)
+	f := newFakeProc(t)
+	scriptDown(f, true)
+	scriptTargetTopics(f, "m282-430", map[string]int64{"kates.orders": 120})
+	reads := 0
+	f.handle("kubectl config current-context", func([]string, string) (string, error) {
+		if reads++; reads == 1 {
+			return "kind-panda\n", nil
+		}
+		return "kind-other\n", nil
+	})
+	captureOutput(t, "table")
+	downFlags(t, true, false, true)
+
+	// Record what reaches the process seam, then hand the fake the call
+	// without the flag so its scripted command lines still match.
+	var calls []fakeCall
+	fake := runProcFn
+	runProcFn = func(ctx context.Context, stdin, name string, args ...string) (string, error) {
+		calls = append(calls, fakeCall{name: name, args: args})
+		var bare []string
+		for _, a := range args {
+			if !strings.HasPrefix(a, "--context=") && !strings.HasPrefix(a, "--kube-context=") {
+				bare = append(bare, a)
+			}
+		}
+		return fake(ctx, stdin, name, bare...)
+	}
+	t.Cleanup(pinMigrateKubeContext(context.Background()))
+
+	if err := runMigrateDown(context.Background()); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	if !mirroredTopicDeleted(f, "kates.orders") || !f.hasLine("helm uninstall mm2-m282-430 -n kafka") {
+		t.Fatal("down did not run its deletes")
+	}
+	for _, c := range calls[1:] { // the first is the read the pin is taken from
+		flag := map[string]string{"kubectl": "--context=kind-panda", "helm": "--kube-context=kind-panda"}[c.name]
+		if flag != "" && !strings.Contains(" "+c.line()+" ", " "+flag+" ") {
+			t.Errorf("%q is not pinned to kind-panda", c.line())
+		}
+	}
+	if migrateCmd.PersistentPreRunE == nil {
+		t.Error("kates migrate does not pin the kube context before its commands run")
+	}
+}
