@@ -21,9 +21,9 @@ Every version the platform pins, in one place. This table is generated from the 
 | `kafka-cluster` chart | 1.0.23 (app 4.3.1) | `charts/kafka-cluster/Chart.yaml` |
 | `kafka-common` chart | 0.1.1 (library) | `charts/kafka-common/Chart.yaml` |
 | `kafka-ui` chart | 0.3.2 (app v1.5.0) | `charts/kafka-ui/Chart.yaml` |
-| `kates-chaos` chart | 2.3.8 (app 3.28.0) | `charts/kates-chaos/Chart.yaml` |
-| `kates-platform` chart | 0.8.13 (app 1.0.0) | `charts/kates-platform/Chart.yaml` |
-| `kates` chart | 0.15.0 (app 1.32.0) | `charts/kates/Chart.yaml` |
+| `kates-chaos` chart | 2.3.9 (app 3.28.0) | `charts/kates-chaos/Chart.yaml` |
+| `kates-platform` chart | 0.8.14 (app 1.0.0) | `charts/kates-platform/Chart.yaml` |
+| `kates` chart | 0.15.1 (app 1.32.0) | `charts/kates/Chart.yaml` |
 | `legacy-kafka` chart | 0.2.1 (app 3.9.1) | `charts/legacy-kafka/Chart.yaml` |
 | `mirror-maker2` chart | 0.11.16 (app 4.3.1) | `charts/mirror-maker2/Chart.yaml` |
 | `monitoring` chart | 1.7.1 (app 82.4.3) | `charts/monitoring/Chart.yaml` |

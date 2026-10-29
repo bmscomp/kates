@@ -852,6 +852,10 @@ func (dc *deployContext) kyvernoComponent() component {
 				"--set", "cleanupController.replicas=1",
 				"--set", "reportsController.replicas=1",
 				"--set", "global.clusterDomain="+kyvernoDomain,
+				// Off by default, and an empty namespace accepts none: without
+				// both, the kates chart's kyvernoPolicy.exceptions do nothing.
+				"--set", "features.policyExceptions.enabled=true",
+				"--set", "features.policyExceptions.namespace="+dc.ns.app,
 				"--timeout", "5m")...)
 			if err != nil {
 				return err
@@ -1730,13 +1734,16 @@ const (
 	deployKeyKept                                 // the context holds a key kates did not store, which stays
 	deployKeyNoContext                            // --context or KATES_CONTEXT names a context that does not exist
 	deployKeySecretUnread                         // the Secret could not be read
+	deployKeyOtherAPI                             // the context's API did not accept the Secret's key: it is not this cluster's, or cannot be asked
 )
 
 // deployKeySync is what syncActiveContextKey did, for printDeployKeySync.
 type deployKeySync struct {
 	Context   string
 	Key       deployKeyOutcome
-	SecretErr error // why the Secret could not be read (deployKeySecretUnread)
+	SecretErr error    // why the Secret could not be read (deployKeySecretUnread)
+	URL       string   // the context's API (deployKeyOtherAPI)
+	Check     keyCheck // that API's verdict on the Secret's key (deployKeyOtherAPI)
 	SaveErr   error
 }
 
@@ -1749,6 +1756,11 @@ type deployKeySync struct {
 // narrower key for another tool (an MCP server, a CI job) was handed the
 // shared admin key whenever a deploy finished while it was current. It also
 // printed the key's first four characters.
+//
+// The key is stored only when the context's API accepts it, as kates ports
+// checks. Without that check a deploy to one cluster stored its key in a
+// context pointing at another cluster's API (a port-forward to the lab),
+// replacing the key kates had stored there for that API.
 func syncActiveContextKey(ctx context.Context, appNS string) deployKeySync {
 	secretKey, err := fetchKatesAPIKey(ctx, appNS)
 	if err != nil {
@@ -1756,11 +1768,18 @@ func syncActiveContextKey(ctx context.Context, appNS string) deployKeySync {
 	}
 
 	var result deployKeySync
+	cfg := loadConfig()
+	result.Context = cfg.CurrentContext
+	if contextFlag != "" {
+		result.Context = contextFlag
+	}
+	// Ask the API outside updateConfig: the check can take seconds.
+	before, ok := cfg.Contexts[result.Context]
+	if ok && before.APIKey != secretKey && keyReplaceable(before) {
+		result.URL = before.URL
+		result.Check = checkAPIKey(ctx, before.URL, secretKey)
+	}
 	result.SaveErr = updateConfig(func(cfg *Config) error {
-		result.Context = cfg.CurrentContext
-		if contextFlag != "" {
-			result.Context = contextFlag
-		}
 		c, ok := cfg.Contexts[result.Context]
 		switch {
 		case !ok:
@@ -1771,6 +1790,9 @@ func syncActiveContextKey(ctx context.Context, appNS string) deployKeySync {
 			return errConfigUnchanged
 		case !keyReplaceable(c):
 			result.Key = deployKeyKept
+			return errConfigUnchanged
+		case result.Check.Verdict != keyAccepted || c.URL != result.URL:
+			result.Key = deployKeyOtherAPI
 			return errConfigUnchanged
 		}
 		storeSecretKey(&c, secretKey)
@@ -1802,6 +1824,14 @@ func printDeployKeySync(w io.Writer, s deployKeySync, appNS string) {
 			"To use the Secret's key there: kates ctx set %s --url <url> --api-key <key>. kates ports keeps it in context %q instead.", s.Context, portsContextName)))
 	case s.Key == deployKeyNoContext:
 		fmt.Fprintf(w, "    %s Context %q does not exist, so the API key from %s was not stored\n", warnMark, s.Context, secret)
+	case s.Key == deployKeyOtherAPI:
+		detail := s.Check.Detail
+		if detail == "" {
+			detail = "the context changed while kates checked it"
+		}
+		fmt.Fprintf(w, "    %s Context %q was left as it is: its API (%s) did not accept the API key from %s (%s)\n", warnMark, s.Context, s.URL, secret, detail)
+		fmt.Fprintf(w, "      %s\n", output.DimStyle.Render(fmt.Sprintf(
+			"kates ports forwards this cluster's API and stores its key in context %q.", portsContextName)))
 	}
 	fmt.Fprintln(w)
 }

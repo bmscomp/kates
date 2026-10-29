@@ -1,6 +1,8 @@
 package com.bmscomp.kates.chaos;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.util.Arrays;
 import java.util.List;
@@ -15,6 +17,7 @@ import io.fabric8.kubernetes.api.model.DeleteOptions;
 import io.fabric8.kubernetes.api.model.NodeBuilder;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
 import io.fabric8.mockwebserver.http.RecordedRequest;
@@ -41,6 +44,15 @@ class LitmusChaosProviderTest {
     KubernetesClient client;
 
     private LitmusChaosProvider provider;
+
+    @Test
+    void aFailedCleanupIsThrown() {
+        LitmusChaosProvider refused = new LitmusChaosProvider();
+        refused.client = mock(KubernetesClient.class);
+        when(refused.client.resources(ChaosEngine.class)).thenThrow(new KubernetesClientException("forbidden"));
+
+        assertThrows(KubernetesClientException.class, () -> refused.cleanup("engine"));
+    }
 
     @BeforeEach
     void setup() {

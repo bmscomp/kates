@@ -327,6 +327,39 @@ class ScheduleResourceTest {
     }
 
     /**
+     * A PUT that leaves enabled out keeps the stored value. It was a
+     * primitive defaulting to true, so renaming a disabled schedule turned it
+     * back on and it fired at its next minute.
+     */
+    @Test
+    void aPutWithoutEnabledKeepsTheScheduleDisabled() {
+        ScheduledTestRun s = storedSchedule("{\"type\":\"LOAD\"}");
+        s.setEnabled(false);
+        Mockito.when(repository.findById("s1")).thenReturn(Optional.of(s));
+
+        RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"renamed\"}")
+                .when()
+                .put("/api/schedules/s1")
+                .then()
+                .statusCode(200)
+                .body("name", is("renamed"))
+                .body("enabled", is(false));
+        assertFalse(s.isEnabled());
+
+        RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"enabled\":true}")
+                .when()
+                .put("/api/schedules/s1")
+                .then()
+                .statusCode(200)
+                .body("enabled", is(true));
+        assertTrue(s.isEnabled());
+    }
+
+    /**
      * A PUT's testRequest is held to the bean constraints a POST's is, and
      * gets the body a POST gets for it. A PUT ran no bean validation, so it
      * saved what a POST refuses, such as STRESS with 1000 producers, which

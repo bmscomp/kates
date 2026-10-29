@@ -251,7 +251,7 @@ public class ScheduleResource {
         @jakarta.validation.constraints.Size(max = 64)
         public String cronExpression;
 
-        // Null when the body leaves it out: POST then enables, PUT keeps the stored flag.
+        // null when the body leaves it out, so a PUT keeps the stored value and a POST enables
         public Boolean enabled;
 
         @jakarta.validation.Valid

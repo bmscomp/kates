@@ -484,7 +484,7 @@ The summary is computed from the run's task rows, and the example is a LOAD run 
 | `p50LatencyMs`, `p95LatencyMs`, `p99LatencyMs` | The producer's; with several producers, the highest of theirs |
 | `avgLatencyMs` | The producers' mean latency, weighted by their records |
 | `maxLatencyMs` | The slowest producer's |
-| `totalErrors`, `errorRate` | Tasks that ended with an error, and that count divided by `totalRecords` |
+| `totalErrors`, `errorRate` | Tasks that ended with an error, and that count divided by the number of tasks |
 | `p999LatencyMs`, `durationMs` | Always 0 |
 
 A task that has not started is `PENDING` with no records, as a scenario's later phase is until its turn, and the means leave it out. So while a scenario runs, its throughput is that of the phases under way or done, and a phase that has not started reads 0 in `phases`. A task that a cancel or a failure ends before its turn is stored `FAILED`, and counts as a rate of 0.
@@ -1105,7 +1105,7 @@ Get a single schedule, including the ID and time of its last triggered run.
 
 #### PUT /api/schedules/{id}
 
-Update a schedule. Accepts the same body as `POST /api/schedules` (fields you omit keep their current values, except `enabled`, which is always applied). Returns the updated schedule. A `testRequest` in the body that `POST /api/schedules` would refuse gets the same `400`, whatever the reason, and the schedule stays as it was. A body without one leaves the stored request unchecked, so you can rename or disable a schedule whose firings the Kates API refuses.
+Update a schedule. Accepts the same body as `POST /api/schedules` (fields you omit keep their current values, `enabled` included). Returns the updated schedule. A `testRequest` in the body that `POST /api/schedules` would refuse gets the same `400`, whatever the reason, and the schedule stays as it was. A body without one leaves the stored request unchecked, so you can rename or disable a schedule whose firings the Kates API refuses.
 
 #### DELETE /api/schedules/{id}
 

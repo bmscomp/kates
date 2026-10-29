@@ -151,7 +151,7 @@ func TestListContexts_RealFailurePropagates(t *testing.T) {
 // ── Reachability ───────────────────────────────────────────────────────────
 
 func TestCheckReachable_BoundsTheProbe(t *testing.T) {
-	f := newFake().on("kubectl cluster-info", "Kubernetes control plane is running", nil)
+	f := newFake().on("kubectl get --raw /readyz", "Kubernetes control plane is running", nil)
 
 	got := CheckReachable(f, Context{Name: "kind-panda"})
 	if !got.Reachable || !got.Probed {
@@ -167,7 +167,7 @@ func TestCheckReachable_BoundsTheProbe(t *testing.T) {
 }
 
 func TestCheckReachable_Unreachable(t *testing.T) {
-	f := newFake().on("kubectl cluster-info", "connection refused", errors.New("exit status 1"))
+	f := newFake().on("kubectl get --raw /readyz", "connection refused", errors.New("exit status 1"))
 
 	got := CheckReachable(f, Context{Name: "stale"})
 	if got.Reachable {

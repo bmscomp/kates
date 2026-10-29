@@ -98,7 +98,9 @@ public final class MetricUtils {
         double maxLatency = highest(measured, TestResult::getMaxLatencyMs);
 
         long totalErrors = results.stream().filter(r -> r.getError() != null).count();
-        double errorRate = totalRecords > 0 ? (double) totalErrors / totalRecords : 0;
+        // A share of tasks: a row keeps no count of its rejected sends, and dividing
+        // tasks by records let 500,000 of 1,000,000 lost sends read as 1e-6.
+        double errorRate = (double) totalErrors / results.size();
 
         return new ReportSummary(
                 totalRecords,

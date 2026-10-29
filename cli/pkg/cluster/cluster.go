@@ -141,9 +141,11 @@ func isMissingKubeconfig(err error, out string) bool {
 }
 
 // CheckReachable probes one context with a bounded timeout and returns a copy
-// with Reachable and Probed set.
+// with Reachable and Probed set. It reads /readyz, which every account may
+// (system:public-info-viewer); kubectl cluster-info lists Services in
+// kube-system, which an account that is not cluster admin is refused.
 func CheckReachable(exec detect.CommandExecutor, c Context) Context {
-	_, err := exec.Exec("kubectl", "cluster-info",
+	_, err := exec.Exec("kubectl", "get", "--raw", "/readyz",
 		"--context", c.Name,
 		"--request-timeout", reachabilityTimeout)
 	c.Reachable = err == nil
