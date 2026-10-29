@@ -1105,7 +1105,7 @@ Get a single schedule, including the ID and time of its last triggered run.
 
 #### PUT /api/schedules/{id}
 
-Update a schedule. Accepts the same body as `POST /api/schedules` (fields you omit keep their current values, except `enabled`, which is always applied). Returns the updated schedule. A `testRequest` in the body that `POST /api/schedules` would refuse gets the same `400`, whatever the reason, and the schedule stays as it was. A body without one leaves the stored request unchecked, so you can rename or disable a schedule whose firings the Kates API refuses.
+Update a schedule. Accepts the same body as `POST /api/schedules` (fields you omit keep their current values, `enabled` included). Returns the updated schedule. A `testRequest` in the body that `POST /api/schedules` would refuse gets the same `400`, whatever the reason, and the schedule stays as it was. A body without one leaves the stored request unchecked, so you can rename or disable a schedule whose firings the Kates API refuses.
 
 #### DELETE /api/schedules/{id}
 
