@@ -36,6 +36,7 @@ jobs:
       java: ${{ steps.filter.outputs.java }}
       makefile: ${{ steps.filter.outputs.makefile }}
       charts: ${{ steps.filter.outputs.charts }}
+      agents: ${{ steps.filter.outputs.agents }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -69,6 +70,9 @@ jobs:
               - 'charts/**'
               - 'scripts/chart_bumps.py'
               - 'scripts/test_chart_bumps.py'
+              - '.github/workflows/lint.yml'
+            agents:
+              - 'agents/**'
               - '.github/workflows/lint.yml'
 
   workflows:
@@ -234,10 +238,23 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: python3 scripts/chart_bumps.py "origin/${BASE_REF}"
 
+  # The run analyst's unit tests: stdlib only, no model and no Kates needed.
+  agents:
+    name: Agents unit tests
+    needs: changes
+    if: needs.changes.outputs.agents == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run analyst
+        working-directory: agents/run-analyst
+        run: python3 -m unittest discover -p 'test_*.py'
+
   gate:
     name: Gate · Lint
     if: always()
-    needs: [changes, workflows, scripts, dockerfiles, yaml, go, java, makefile, chart-versions]
+    needs: [changes, workflows, scripts, dockerfiles, yaml, go, java, makefile, chart-versions, agents]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
