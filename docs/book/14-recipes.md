@@ -661,7 +661,7 @@ jobs:
   kafka-gates:
     runs-on: ubuntu-latest
     env:
-      KATES_VERSION: v1.32.0
+      KATES_VERSION: v1.33.0
       KATES_NAMESPACE: team
       KATES_URL: http://localhost:8080
       KATES_API_KEY: ${{ secrets.KATES_API_KEY }}

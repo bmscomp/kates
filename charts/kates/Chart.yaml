@@ -2,14 +2,14 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: kyvernoPolicy.exceptions' PolicyException is a pre-install and
-# pre-upgrade hook, so it exists before the workloads it exempts.
-version: 0.15.1
+# Patch: appVersion and the image tag move to 1.33.0, the tag the v1.33.0
+# release publishes.
+version: 0.15.2
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
 # image.tag in values.yaml pinned to that release.
-appVersion: "1.32.0"
+appVersion: "1.33.0"
 keywords:
   - kafka
   - testing
@@ -28,6 +28,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "appVersion 1.33.0 and the image tag move to 1.33.0 (#529 NO_PROXY *.domain wildcards, #537 zones from broker racks, #545 errorRate, #546 resilience probe and fault cleanup, #547 #549 #553 schedules, #548 #552 webhooks, #555 conformity renamed compliance; #530-#532 dependency bumps). Templates are unchanged."
     - kind: fixed
       description: "kyvernoPolicy.exceptions did not exempt a first install from an Enforce policy: Helm applies custom resources after Deployments, so Kyverno refused the Deployment before the PolicyException existed. The PolicyException is now a pre-install and pre-upgrade hook (weight -10, before the migration Job). Helm does not track hooks: helm uninstall, or emptying the list, leaves it, to delete with kubectl"
     - kind: added

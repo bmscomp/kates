@@ -2,8 +2,9 @@ apiVersion: v2
 name: kates-platform
 description: Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure
 type: application
-# Patch: packs kates 0.15.1, whose kyvernoPolicy.exceptions go in first.
-version: 0.8.14
+# Patch: the umbrella packs the subcharts the v1.33.0 release pins: kates
+# 0.15.2, kafka-cluster 1.0.24, connect-cluster 2.1.19, mirror-maker2 0.11.17.
+version: 0.8.15
 appVersion: "1.0.0"
 keywords:
   - kafka
@@ -40,6 +41,8 @@ dependencies:
     condition: connect-cluster.enabled
 annotations:
   artifacthub.io/changes: |
+    - kind: changed
+      description: "The umbrella moves with the v1.33.0 release: it packs kates 0.15.2, kafka-cluster 1.0.24, connect-cluster 2.1.19 and mirror-maker2 0.11.17 as they are on disk. Templates are unchanged."
     - kind: changed
       description: "Packs kates 0.15.1, whose kyvernoPolicy.exceptions PolicyException is a hook that goes in before the workloads. Templates are unchanged."
     - kind: changed
