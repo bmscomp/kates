@@ -124,7 +124,7 @@ flowchart TB
 
 `kates compliance check` lints the file again before it sends anything, and stops on an error. The Kates API then reads what the rules need: the [Strimzi](appendix-a-glossary.md#gl-strimzi) `Kafka` and [`KafkaNodePool`](appendix-a-glossary.md#gl-kafkanodepool) resources, the Kafka pods and the nodes they run on, their [PersistentVolumeClaims](appendix-a-glossary.md#gl-persistentvolumeclaim) and the Kubernetes version. It talks to the Kafka Admin API only when a rule needs a broker's or a topic's own answer, which the dotted edge shows. The API key needs only the `read` scope.
 
-Two properties follow from that shape. Because the check only reads, you can run it against a production cluster at any hour, as often as you like, with nothing to roll back. Because nothing is stored, every run stands alone: the report goes back to the CLI, and your pipeline's log is the history.
+Two properties follow from that shape. Because the check only reads, you can run it against a production cluster at any hour, as often as you like, with nothing to roll back. The Kates API keeps every report, with who ran the check and when, so the history of a cluster's checks is there to show an auditor; [`GET /api/conformity/checks`](11-api-reference.md#get-apiconformitychecks) lists them.
 
 ### Statuses and the Overall Result
 

@@ -649,11 +649,11 @@ Non-default configuration entries for a specific broker.
 
 ### Compliance
 
-One endpoint holds the cluster to a reference architecture; `kates compliance check` wraps it.
+One endpoint holds the cluster to a reference architecture, and `kates compliance check` wraps it. The Kates API keeps every report it answers, and two more endpoints read them back.
 
 #### POST /api/conformity/check
 
-Check the cluster against a reference architecture (scope `read`). The body is a `KafkaReference` as JSON; `kates compliance check` converts the YAML file and sends it. The check reads Kubernetes and the Strimzi resources, and the Kafka Admin API when the reference declares `topics` or sets `kafka.source: brokers`; it writes nothing and stores nothing: it is a POST because the reference is a body.
+Check the cluster against a reference architecture (scope `read`). The body is a `KafkaReference` as JSON; `kates compliance check` converts the YAML file and sends it. The check reads Kubernetes and the Strimzi resources, and the Kafka Admin API when the reference declares `topics` or sets `kafka.source: brokers`; it writes nothing to the cluster. It is a POST because the reference is a body.
 
 The response is 200 whatever the verdict, with one result per declared rule. `verdict` is `FAIL` when a `fail` rule does not hold, `UNKNOWN` when a `fail` rule could not be read, and otherwise `PASS`.
 
@@ -678,6 +678,27 @@ The response is 200 whatever the verdict, with one result per declared rule. `ve
 ```
 
 A reference the check cannot run is a 400 whose `fieldErrors` name each path, as `spec.brokers.cuont: unknown field`. A reference for another cluster than the one Kates watches, or a cluster without its Kafka resource, is a 409; a body over 256 KiB is a 413; an unreachable Kubernetes API, or one that refuses the Kates API the Kafka resource, is a 503.
+
+The Kates API stores each report it answers with, and its `Location` header names it, as `/api/conformity/checks/1f0c…`. A refused reference stores nothing. If the database fails, the caller still gets its report, without a `Location`, and the Kates API logs an error. Each stored check also leaves an audit row (`RUN`, type `compliance`) whose target is the check's id. Nothing deletes stored checks.
+
+#### GET /api/conformity/checks
+
+List the stored checks, newest first (scope `read`). `since` (inclusive) and `until` (exclusive) are ISO-8601 instants and bound the period; anything else is a 400. `page` and `size` (at most 200) page the list, as on `/api/audit`.
+
+```json
+{
+  "items": [{
+    "id": "1f0c6a52-…", "checkedAt": "2026-10-30T09:12:44Z", "reference": "prod-3az",
+    "clusterId": "4L6g3nShT-eMCtK--X86sw", "verdict": "FAIL",
+    "actor": "ci-gate", "principalType": "agent"
+  }],
+  "page": 0, "size": 50, "total": 1, "count": 1
+}
+```
+
+#### GET /api/conformity/checks/{id}
+
+One stored check (scope `read`): the fields the list shows, `referenceSha256`, the SHA-256 of the body the Kates API was sent (the JSON `kates compliance check` made from the file, not the YAML file itself), and `report`, the full report as the check answered it. An unknown id is a 404.
 
 ### Disruption Testing
 
