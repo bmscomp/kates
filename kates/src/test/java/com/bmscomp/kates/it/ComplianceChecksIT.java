@@ -42,7 +42,8 @@ class ComplianceChecksIT {
                 verdict,
                 new ComplianceReport.Summary(1, 0, 0, 0, 0),
                 List.of());
-        return checks.store(report, "{}".getBytes(StandardCharsets.UTF_8), new Actor("ci-gate", "agent"));
+        return checks.store(report, "{}".getBytes(StandardCharsets.UTF_8), new Actor("ci-gate", "agent"))
+                .getId();
     }
 
     @Test

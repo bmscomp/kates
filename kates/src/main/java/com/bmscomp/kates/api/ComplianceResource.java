@@ -100,18 +100,23 @@ public class ComplianceResource {
                     .entity(e.getError())
                     .build();
         }
-        String id;
+        ComplianceCheckEntity stored;
         try {
-            id = checks.store(report, body, actors.current());
+            stored = checks.store(report, body, actors.current());
         } catch (RuntimeException e) {
             // The caller, often a CI gate, still gets its verdict; the missing
             // Location and this line say the evidence was not kept.
             LOG.errorf(e, "Compliance report of %s not stored", report.reference());
             return Response.ok(report).build();
         }
-        auditService.record("RUN", "compliance", id, "verdict " + report.verdict());
+        auditService.record(
+                "RUN",
+                "compliance",
+                stored.getId(),
+                "verdict " + report.verdict() + ", report sha256 " + ComplianceCheckRepository.reportSha256(stored)
+                        + ", reference sha256 " + stored.getReferenceSha256());
         return Response.ok(report)
-                .location(URI.create("/api/conformity/checks/" + id))
+                .location(URI.create("/api/conformity/checks/" + stored.getId()))
                 .build();
     }
 
@@ -153,7 +158,8 @@ public class ComplianceResource {
     @Path("/checks/{id}")
     @Operation(
             summary = "Get a stored compliance check",
-            description = "The check's id, who ran it, the SHA-256 of the reference it was sent, and its full report")
+            description = "The check's id, who ran it, the SHA-256 of the reference it was sent, its full report,"
+                    + " and the SHA-256 of the report as stored now, to compare with the one its audit row recorded")
     @APIResponse(responseCode = "200", description = "The stored check")
     @APIResponse(responseCode = "404", description = "No check has this id")
     public Response get(@Parameter(description = "Check ID") @PathParam("id") String id) {
@@ -165,6 +171,7 @@ public class ComplianceResource {
         }
         Map<String, Object> answer = summary(entity);
         answer.put("referenceSha256", entity.getReferenceSha256());
+        answer.put("reportSha256", ComplianceCheckRepository.reportSha256(entity));
         try {
             answer.put("report", objectMapper.readTree(entity.getReportJson()));
         } catch (JsonProcessingException e) {

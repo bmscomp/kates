@@ -4,6 +4,9 @@ import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 
 import java.nio.charset.StandardCharsets;
@@ -11,8 +14,11 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
+import jakarta.inject.Inject;
+import jakarta.persistence.EntityManager;
 import jakarta.ws.rs.ClientErrorException;
 
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
@@ -35,6 +41,9 @@ class ComplianceResourceTest {
 
     @InjectMock
     ComplianceCheck check;
+
+    @Inject
+    EntityManager em;
 
     private static ComplianceReport report(String checkedAt, ComplianceReport.Verdict verdict) {
         return new ComplianceReport(
@@ -117,6 +126,51 @@ class ComplianceResourceTest {
                 .body("report.summary.fail", equalTo(1))
                 .body("report.target.name", equalTo("krafter"));
         RestAssured.get("/api/audit?type=compliance").then().statusCode(200).body("items.target", hasItem(id));
+    }
+
+    @Test
+    void theAuditRowHoldsTheReportHashSoAnEditInTheDatabaseShows() {
+        Mockito.when(check.check(any())).thenReturn(report("2026-10-19T12:00:00Z", ComplianceReport.Verdict.FAIL));
+        String location = RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body(REFERENCE)
+                .post("/api/conformity/check")
+                .then()
+                .statusCode(200)
+                .extract()
+                .header("Location");
+        String id = location.substring(location.lastIndexOf('/') + 1);
+        String recorded = RestAssured.given()
+                .queryParam("type", "compliance")
+                .queryParam("size", 200)
+                .get("/api/audit")
+                .then()
+                .statusCode(200)
+                .extract()
+                .jsonPath()
+                .getString("items.find { it.target == '" + id + "' }.details");
+
+        String stored = RestAssured.get("/api/conformity/checks/" + id)
+                .then()
+                .statusCode(200)
+                .extract()
+                .path("reportSha256");
+        String referenceSha256 =
+                RestAssured.get("/api/conformity/checks/" + id).then().extract().path("referenceSha256");
+        assertEquals("verdict FAIL, report sha256 " + stored + ", reference sha256 " + referenceSha256, recorded);
+
+        // What a database admin could do by hand: turn the failed rule count to 0.
+        QuarkusTransaction.requiringNew()
+                .run(() -> em.createNativeQuery(
+                                "update compliance_checks set report_json = replace(report_json, '\"fail\":1', '\"fail\":0') where id = ?1")
+                        .setParameter(1, id)
+                        .executeUpdate());
+
+        RestAssured.get("/api/conformity/checks/" + id).then().statusCode(200).body("report.summary.fail", equalTo(0));
+        String after =
+                RestAssured.get("/api/conformity/checks/" + id).then().extract().path("reportSha256");
+        assertNotEquals(stored, after);
+        assertTrue(recorded.contains(stored) && !recorded.contains(after));
     }
 
     @Test

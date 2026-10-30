@@ -607,6 +607,86 @@ WAIVED monitoring.kafkaExporter
 
 `kates compliance` belongs to the `topology` and `deploy` [command profiles](10-cli-reference.md#command-profiles). A context whose profiles leave both out refuses all three subcommands, `lint` and `fmt` included, so a pipeline's context needs one of them or none. The [Compliance](10-cli-reference.md#compliance) entries in the CLI Reference list every flag, and [POST /api/conformity/check](11-api-reference.md#post-apiconformitycheck) documents the report's JSON for callers that skip the CLI.
 
+## Proving the Results Were Not Changed
+
+An auditor who reads a stored check months later needs to know it still says what the check said. Whoever administers the Kates API's database can edit any row by hand. They can turn a failed rule into a passed one, change who ran the check, or delete it. Kates can't stop that, but it makes the change show, as long as you keep one value outside the database on the day the check runs.
+
+Three records stand behind each check, and each one guards the record above it:
+
+| Record | Where it lives | What it holds |
+|:----------|:--------------|:--------------------------------------------|
+| The stored check | The database, read with `GET /api/conformity/checks/{id}` | The full report, the reference's SHA-256, and `reportSha256`, computed from the stored report when you ask |
+| The check's audit row | The database, in the audit log's hash chain | Who ran the check and when, the verdict, the report's SHA-256 and the reference's SHA-256 |
+| The anchor | Outside the database, where its administrators can't write | The audit row's `id` and `rowHash`, kept on the day of the check |
+
+An edited stored report doesn't match the hash in its audit row. An edit to the audit row breaks the chain at that row. A rewrite of the whole chain, every hash recomputed so that it verifies, changes the anchored row's `rowHash`. [Audit Logging](17-security.md#audit-logging) explains how the chain is built.
+
+### Keep the Anchor When the Check Runs
+
+The anchor is the check's own audit row, read right after the check. The command-line check doesn't print the stored check's id, so the step below finds the newest `compliance` row of the pipeline's own principal. Give each gate its own API key, so that its newest row is its own check. Run the step whether the check passed or not, because a failed check is evidence too:
+
+```bash
+curl -s -H "X-API-Key: $KATES_API_KEY" \
+  "http://localhost:30083/api/audit?type=compliance&actor=ci-gate&size=1" \
+  | jq '.items[0] | {check: .target, auditId: .id, rowHash, details}' \
+  > compliance-anchor.json
+```
+
+The file names the stored check, its audit row and that row's hash, and repeats the hashes the row holds:
+
+```json
+{
+  "check": "1f0c6a52-…",
+  "auditId": 4529,
+  "rowHash": "9c1e…",
+  "details": "verdict FAIL, report sha256 5d41…, reference sha256 44136f…"
+}
+```
+
+Keep it where the database's administrators can't change it. Your pipeline's artifacts, a ticket, or a file you sign with your own key all qualify. An anchor inside the same database proves nothing.
+
+### Verify a Stored Check
+
+Verifying a check later takes three answers from the Kates API, and the check holds only if all three agree. The first is the chain: `GET /api/audit/verify` walks the whole audit log and must answer `"intact": true`. The second is the anchor: the audit row named by `auditId` must still have the `rowHash` you kept. The third is the report: the check's `reportSha256` must equal the `report sha256` in that row's details.
+
+This script asks all three for the anchor kept above, and prints the three results:
+
+```bash
+H="X-API-Key: $KATES_API_KEY"; API=http://localhost:30083
+a=compliance-anchor.json
+curl -s -H "$H" "$API/api/audit/verify" | jq '{intact, brokenAt, problem}'
+curl -s -H "$H" "$API/api/audit?type=compliance&size=200" \
+  | jq --argjson a "$(cat $a)" \
+      '.items[] | select(.id == $a.auditId) | {sameRow: (.rowHash == $a.rowHash)}'
+curl -s -H "$H" "$API/api/conformity/checks/$(jq -r .check $a)" \
+  | jq --argjson a "$(cat $a)" \
+      '.reportSha256 as $r | {sameReport: ($a.details | contains("report sha256 " + $r))}'
+```
+
+A clean check prints `"intact": true`, `"sameRow": true` and `"sameReport": true`. Each other answer names a different change:
+
+| What you see | What changed |
+|:------------------------|:------------------------------------------------|
+| `"intact": false` | A row of the audit log was changed, removed or added; `brokenAt` names the first one |
+| No `sameRow` line | The anchored audit row is missing from the newest 200 `compliance` rows, or was deleted |
+| `"sameRow": false` | The audit log was rewritten up to that row, every hash recomputed |
+| `"sameReport": false` | The stored report was changed after the check |
+| A 404 for the check | The stored check was deleted; its audit row still names it |
+
+A deleted audit row breaks the chain as surely as an edited one, so `"intact": false` covers it.
+
+### Limits
+
+The proof covers what the check stored, not what it read. It shows that a report is the one the Kates API wrote, not that the cluster was read truthfully.
+
+An anchor protects the rows up to its own. Rows written after it are covered by the next anchor you keep.
+
+Audit rows written before the Kates API chained its log aren't covered; `GET /api/audit/verify` counts them as `unchained`.
+
+The script reads the newest 200 `compliance` rows. Add `page=1` and `page=2` to reach 500, the most the audit listing returns, newest first. An older check's audit row can't be read back this way, though `GET /api/audit/verify` still covers it.
+
+Someone who can change both the database and the place you keep anchors can hide a change. Keep the anchors where the database's administrators have no access.
+
 ## The Language at a Glance
 
 A reference holds two kinds of field. Settings say which cluster to check and how to read it; they aren't rules, and a waiver can't name one. Every other field is a rule, named by its path under `spec`. The tables below are a summary; the [Compliance Language Reference](appendix-compliance-language.md) gives every field's values, what the check reads for it, and when it's UNKNOWN.
@@ -661,5 +741,6 @@ The check reports what it can read, and some things are deliberately outside it:
 - Lint catches typos and impossible combinations on your machine, before any cluster is involved.
 - A failed rule means fixing the cluster, fixing the file, or recording the gap with an owner and an end date.
 - The exit code makes the check a pipeline step that fails when the cluster drifts from its design.
+- A hash kept outside the database on the day of a check shows whether its stored report was changed since.
 
 The reference checks that every listener authenticates its clients, but not who those clients are or what they may do once connected. [Security & Compliance](17-security.md) covers authentication, authorization, network policies and certificates.

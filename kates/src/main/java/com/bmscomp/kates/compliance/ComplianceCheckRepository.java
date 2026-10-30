@@ -1,5 +1,6 @@
 package com.bmscomp.kates.compliance;
 
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
@@ -30,19 +31,18 @@ public class ComplianceCheckRepository {
 
     /**
      * Stores report, checked against the reference body, as run by actor
-     * (null when no one can be named), and returns the new row's id.
+     * (null when no one can be named), and returns the new row.
      */
     @Transactional
-    public String store(ComplianceReport report, byte[] body, Actor actor) {
+    public ComplianceCheckEntity store(ComplianceReport report, byte[] body, Actor actor) {
         String json;
         try {
             json = objectMapper.writeValueAsString(report);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("cannot serialize the compliance report", e);
         }
-        String id = UUID.randomUUID().toString();
-        em.persist(new ComplianceCheckEntity(
-                id,
+        ComplianceCheckEntity entity = new ComplianceCheckEntity(
+                UUID.randomUUID().toString(),
                 report.checkedAt(),
                 report.reference(),
                 sha256(body),
@@ -50,8 +50,18 @@ public class ComplianceCheckRepository {
                 report.verdict().name(),
                 actor == null ? null : actor.name(),
                 actor == null ? null : actor.type(),
-                json));
-        return id;
+                json);
+        em.persist(entity);
+        return entity;
+    }
+
+    /**
+     * The SHA-256 of the report as stored. The check's audit row records it
+     * when the check runs, and the audit log is a hash chain, so a report
+     * edited in the database no longer matches its row there.
+     */
+    public static String reportSha256(ComplianceCheckEntity entity) {
+        return sha256(entity.getReportJson().getBytes(StandardCharsets.UTF_8));
     }
 
     public Optional<ComplianceCheckEntity> find(String id) {

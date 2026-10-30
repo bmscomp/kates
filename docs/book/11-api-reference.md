@@ -679,7 +679,7 @@ The response is 200 whatever the verdict, with one result per declared rule. `ve
 
 A reference the check cannot run is a 400 whose `fieldErrors` name each path, as `spec.brokers.cuont: unknown field`. A reference for another cluster than the one Kates watches, or a cluster without its Kafka resource, is a 409; a body over 256 KiB is a 413; an unreachable Kubernetes API, or one that refuses the Kates API the Kafka resource, is a 503.
 
-The Kates API stores each report it answers with, and its `Location` header names it, as `/api/conformity/checks/1f0c…`. A refused reference stores nothing. If the database fails, the caller still gets its report, without a `Location`, and the Kates API logs an error. Each stored check also leaves an audit row (`RUN`, type `compliance`) whose target is the check's id. Nothing deletes stored checks.
+The Kates API stores each report it answers with, and its `Location` header names it, as `/api/conformity/checks/1f0c…`. A refused reference stores nothing. If the database fails, the caller still gets its report, without a `Location`, and the Kates API logs an error. Each stored check also leaves an audit row (`RUN`, type `compliance`) whose target is the check's id and whose details hold the verdict and two hashes, as `verdict FAIL, report sha256 5d41…, reference sha256 44136f…`. The audit log is a hash chain, so those hashes are what a later reader compares the stored check against ([Proving the Results Were Not Changed](compliance.md#proving-the-results-were-not-changed)). Nothing deletes stored checks.
 
 #### GET /api/conformity/checks
 
@@ -698,7 +698,7 @@ List the stored checks, newest first (scope `read`). `since` (inclusive) and `un
 
 #### GET /api/conformity/checks/{id}
 
-One stored check (scope `read`): the fields the list shows, `referenceSha256`, the SHA-256 of the body the Kates API was sent (the JSON `kates compliance check` made from the file, not the YAML file itself), and `report`, the full report as the check answered it. An unknown id is a 404.
+One stored check (scope `read`): the fields the list shows, `referenceSha256`, the SHA-256 of the body the Kates API was sent (the JSON `kates compliance check` made from the file, not the YAML file itself), `report`, the full report as the check answered it, and `reportSha256`, the SHA-256 of the report as it is stored now, computed when you ask. It equals the `report sha256` in the check's audit row unless the stored report was changed after the check. An unknown id is a 404.
 
 ### Disruption Testing
 
