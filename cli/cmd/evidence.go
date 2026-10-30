@@ -61,15 +61,20 @@ directory is written all the same, and audit-verify.json says where.`,
 		if err != nil {
 			return cmdErr(err.Error())
 		}
-		if err := os.Mkdir(evidenceOut, 0o750); err != nil {
-			return cmdErr("Cannot create the evidence directory: " + err.Error() + " (it must not exist yet)")
+		// Checked first, created only once everything is read: a failed export leaves no directory to refuse a retry.
+		if _, err := os.Stat(evidenceOut); !errors.Is(err, os.ErrNotExist) {
+			return cmdErr("The evidence directory " + evidenceOut + " exists already, or can't be checked: it must not exist yet")
 		}
 		pack, err := collectEvidence(context.Background(), apiClient, from, to)
 		if err != nil {
 			return cmdErr("Evidence export stopped: " + evidenceHint(err))
 		}
+		if err := os.Mkdir(evidenceOut, 0o750); err != nil {
+			return cmdErr("Cannot create the evidence directory: " + err.Error())
+		}
 		if err := writeEvidence(evidenceOut, pack); err != nil {
-			return cmdErr("Cannot write the evidence: " + err.Error())
+			_ = os.RemoveAll(evidenceOut)
+			return cmdErr("Cannot write the evidence, so nothing was kept: " + err.Error())
 		}
 		if evidenceSign {
 			if err := signEvidence(context.Background(), evidenceOut); err != nil {
@@ -181,7 +186,7 @@ func newestFirstIn(ctx context.Context, c *client.Client, path string, query url
 	kept := []json.RawMessage{}
 	seen := map[string]bool{}
 	for page := 0; ; page++ {
-		items, _, err := listPage(ctx, c, path, query, page)
+		items, err := listPage(ctx, c, path, query, page)
 		if err != nil {
 			return nil, err
 		}
@@ -209,22 +214,23 @@ func newestFirstIn(ctx context.Context, c *client.Client, path string, query url
 	}
 }
 
-// allPages reads every page of a list the Kates API filters itself.
+// allPages reads every page of a list the Kates API filters itself, up to
+// the first short page: a total the answer lacks or gets wrong can't cut it short.
 func allPages(ctx context.Context, c *client.Client, path string, query url.Values) ([]json.RawMessage, error) {
 	all := []json.RawMessage{}
 	for page := 0; ; page++ {
-		items, total, err := listPage(ctx, c, path, query, page)
+		items, err := listPage(ctx, c, path, query, page)
 		if err != nil {
 			return nil, err
 		}
 		all = append(all, items...)
-		if len(items) < evidencePageSize || int64(len(all)) >= total {
+		if len(items) < evidencePageSize {
 			return all, nil
 		}
 	}
 }
 
-func listPage(ctx context.Context, c *client.Client, path string, query url.Values, page int) ([]json.RawMessage, int64, error) {
+func listPage(ctx context.Context, c *client.Client, path string, query url.Values, page int) ([]json.RawMessage, error) {
 	q := url.Values{}
 	for k, v := range query {
 		q[k] = v
@@ -233,16 +239,15 @@ func listPage(ctx context.Context, c *client.Client, path string, query url.Valu
 	q.Set("size", strconv.Itoa(evidencePageSize))
 	data, err := c.GetRaw(ctx, path, q)
 	if err != nil {
-		return nil, 0, fmt.Errorf("GET %s: %w", path, err)
+		return nil, fmt.Errorf("GET %s: %w", path, err)
 	}
 	var paged struct {
 		Items []json.RawMessage `json:"items"`
-		Total int64             `json:"total"`
 	}
 	if err := json.Unmarshal(data, &paged); err != nil {
-		return nil, 0, fmt.Errorf("GET %s: %w", path, err)
+		return nil, fmt.Errorf("GET %s: %w", path, err)
 	}
-	return paged.Items, paged.Total, nil
+	return paged.Items, nil
 }
 
 // eachByID fetches the full item of each listed one from prefix + its id.

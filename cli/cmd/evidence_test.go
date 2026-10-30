@@ -39,7 +39,8 @@ func (a evidenceAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	size, _ := strconv.Atoi(r.URL.Query().Get("size"))
 	start, end := min(page*size, len(list)), min((page+1)*size, len(list))
-	fmt.Fprintf(w, `{"items":[%s],"total":%d}`, strings.Join(list[start:end], ","), len(list))
+	// No total: the export must page on without one.
+	fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(list[start:end], ","))
 }
 
 func evidenceRun(id, createdAt string) string {
@@ -159,6 +160,35 @@ func TestEvidenceExportPagesPastOnePageAndKeepsEachRunOnce(t *testing.T) {
 	}
 	if got := len(readItems(t, dir, "runs.json")); got != 450 {
 		t.Errorf("runs = %d, want each of the 450 once", got)
+	}
+}
+
+func TestEvidenceExportReadsEveryAuditPageWithoutATotal(t *testing.T) {
+	api := evidenceStub(t, `{"intact":true}`)
+	var rows []string
+	for i := 0; i < 401; i++ {
+		rows = append(rows, fmt.Sprintf(`{"id":%d,"timestamp":"2026-08-01T00:00:00Z"}`, 1000-i))
+	}
+	api.lists["/api/audit"] = rows
+
+	dir, err := exportTo(t, api)
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if got := len(readItems(t, dir, "audit.json")); got != 401 {
+		t.Errorf("audit rows = %d, want all 401 across three pages", got)
+	}
+}
+
+func TestEvidenceExportThatFailsLeavesNoDirectory(t *testing.T) {
+	api := evidenceStub(t, `{"intact":true}`)
+	delete(api.lists, "/api/conformity/checks")
+	dir, err := exportTo(t, api)
+	if err == nil {
+		t.Fatal("want the export to fail")
+	}
+	if _, statErr := os.Stat(dir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("a failed export left %s behind, so a retry would be refused: %v", dir, statErr)
 	}
 }
 
