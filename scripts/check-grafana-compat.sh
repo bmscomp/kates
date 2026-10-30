@@ -148,8 +148,10 @@ for version in "${VERSIONS[@]}"; do
   # "Failed to lock and execute the migration of API keys to service accounts"
   # error="database is locked". A lock bad enough to break provisioning would
   # already show up in compat.py as a missing board, so nothing is hidden.
+  # err="context canceled" is a query the browser dropped when it moved on to
+  # the next board; a data source that really failed shows as a panel error.
   errors=$(docker logs kates-compat-grafana 2>&1 \
-    | grep -iE 'level=error' | grep -viE 'grafana\.com|x509|plugin|update|database is locked' | head -3 || true)
+    | grep -iE 'level=error' | grep -viE 'grafana\.com|x509|plugin|update|database is locked|context canceled' | head -3 || true)
   [ -n "$errors" ] && { echo "    Grafana logged:"; echo "$errors" | sed 's/^/      /'; rc=1; }
 done
 
