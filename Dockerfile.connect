@@ -148,6 +148,18 @@ RUN mkdir -p apicurio-converter && \
     curl -sfL "https://repo1.maven.org/maven2/io/apicurio/apicurio-registry-distro-connect-converter/${APICURIO_VERSION}/apicurio-registry-distro-connect-converter-${APICURIO_VERSION}.tar.gz" \
     | tar -xz -C apicurio-converter
 
+# Netty in the bundled plugins: Aiven S3 3.4.3 ships 4.1.115 and Apicurio
+# 3.3.0 ships 4.1.130, both under CVE-2026-75595 (netty-handler, CRITICAL,
+# fixed in 4.1.137). Move every netty 4.1.x jar of those plugins to one patch
+# of the same line, so the modules stay in step with each other.
+ARG NETTY_VERSION=4.1.139.Final
+RUN for jar in aiven-s3-sink/netty-*-4.1.*.Final.jar aiven-s3-source/netty-*-4.1.*.Final.jar \
+               apicurio-converter/netty-*-4.1.*.Final.jar; do \
+        a=$(basename "$jar" | sed -E 's/-4\.1\.[0-9]+\.Final\.jar$//') && \
+        curl -sfL "https://repo1.maven.org/maven2/io/netty/$a/${NETTY_VERSION}/$a-${NETTY_VERSION}.jar" \
+            -o "$(dirname "$jar")/$a-${NETTY_VERSION}.jar" && rm "$jar" || exit 1; \
+    done
+
 # Debezium Scripting SMT and Groovy JSR-223 Engine
 #
 # The scripting archive holds the SMT and nothing else. Alone on its own plugin
@@ -182,12 +194,14 @@ COPY --from=download /plugins/ /opt/kafka/plugins/
 # Exporter for the operator's exporter Deployment. That Deployment runs
 # Strimzi's own image, never this one, and a Connect worker never starts the
 # exporter; its binary is built with Go 1.24.0 (CVE-2025-68121, CRITICAL,
-# crypto/tls). Removing it takes the CVE out of the image.
+# crypto/tls). Removing it takes the CVE out of the image. Cruise Control is
+# the same case: the operator runs it from Strimzi's image, a Connect worker
+# never starts it, and its libs carry netty-handler 4.1.118 (CVE-2026-75595).
 #
 # Its packages also lag Red Hat's errata, and the release gate fails on any
 # CRITICAL CVE that already has a fix (v1.29.2 shipped ca-certificates without
 # the eMudhra distrust, CVE-2026-114406), so they are upgraded here.
-RUN rm -rf /opt/kafka-exporter \
+RUN rm -rf /opt/kafka-exporter /opt/cruise-control \
   && microdnf upgrade -y \
   && microdnf clean all
 USER 1001
