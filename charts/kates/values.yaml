@@ -62,17 +62,17 @@ rbac:
   # -- Create the RBAC objects rbac.scope calls for
   create: true
   # -- cluster: a ClusterRole and ClusterRoleBinding for every feature, chaos
-  # included. namespace: nothing cluster-scoped; tests and compliance checks
+  # included. namespace: nothing cluster-scoped; tests and conformity checks
   # run, chaos is off (KATES_CHAOS_PROVIDER=noop unless chaos.provider is set).
   scope: cluster
   # -- With scope namespace: render the read-only Role and RoleBinding a
-  # compliance check needs in the Kafka namespace (networkPolicy.kafka.namespace,
+  # conformity check needs in the Kafka namespace (networkPolicy.kafka.namespace,
   # which the check then reads). An installer with only edit sets it false, and
   # an account that may grant those reads applies them from
   # `helm template ... --show-only templates/rbac.yaml`.
   kafkaNamespaceRole: true
   # -- With scope namespace: render a ClusterRole and ClusterRoleBinding that
-  # grant get and list on nodes, so a compliance check reads any zoneLabel.
+  # grant get and list on nodes, so a conformity check reads any zoneLabel.
   # It is cluster-scoped: an installer with only edit leaves it false, and a
   # cluster admin applies it from
   # `helm template ... --set rbac.nodeReads=true --show-only templates/rbac.yaml`.
@@ -388,7 +388,7 @@ kafka:
   # so a value may name {{ .Release.Namespace }}, as kates-platform does.
   bootstrapServers: "krafter-kafka-bootstrap.kafka.svc:9092"
   # -- Name of the Strimzi Kafka cluster in networkPolicy.kafka.namespace that
-  # chaos, topology, cluster alerts and compliance act on (kates deploy sets it)
+  # chaos, topology, cluster alerts and conformity act on (kates deploy sets it)
   clusterName: krafter
   # -- Namespace where CDC integration test KafkaTopic CRs are managed (empty = auto-detect)
   topicNamespace: ""
@@ -497,7 +497,7 @@ networkPolicy:
           protocol: TCP
   # -- The namespace Kafka runs in: egress to the brokers on port and Trogdor
   # on 8889, and the namespace the backend's chaos, topology, cluster alerts
-  # and compliance act in, whether or not the policy is enabled (kates deploy
+  # and conformity act in, whether or not the policy is enabled (kates deploy
   # sets namespace)
   kafka:
     namespace: kafka
