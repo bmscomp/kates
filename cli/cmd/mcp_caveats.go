@@ -199,7 +199,7 @@ var mcpCaveatsCore = []mcpCaveat{
 			"it (2), is missing from a topic's configs. Its absence does not mean 1. A current backend reports the " +
 			"value in force wherever it is set, and what set it.",
 		Refs: []string{
-			mcpJava + "service/TopicService.java:182-210",
+			mcpJava + "service/TopicService.java:194-222",
 			"charts/kafka-cluster/values.yaml:137",
 		},
 	},

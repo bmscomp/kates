@@ -23,6 +23,7 @@ import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.config.ConfigResource;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.apache.kafka.common.internals.KafkaFutureImpl;
 import org.junit.jupiter.api.BeforeEach;
@@ -176,6 +177,18 @@ class TopicServiceTest {
 
         assertEquals("fresh", topicService.describeCreatedTopic("fresh").get("name"));
         verify(mockClient, times(3)).describeTopics(anyCollection());
+    }
+
+    @Test
+    void aCreatedTopicThatCannotBeDescribedForAnotherReasonFailsAtOnce() {
+        KafkaFutureImpl<Map<String, TopicDescription>> failed = new KafkaFutureImpl<>();
+        failed.completeExceptionally(new TimeoutException("Timed out waiting for a node assignment"));
+        DescribeTopicsResult unanswered = mock(DescribeTopicsResult.class);
+        when(unanswered.allTopicNames()).thenReturn(failed);
+        when(mockClient.describeTopics(anyCollection())).thenReturn(unanswered);
+
+        assertThrows(RuntimeException.class, () -> topicService.describeCreatedTopic("fresh"));
+        verify(mockClient, times(1)).describeTopics(anyCollection());
     }
 
     private static ConfigEntry entry(String name, String value, ConfigEntry.ConfigSource source) {

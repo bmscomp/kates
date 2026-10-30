@@ -333,8 +333,8 @@ var mcpCaveatsCluster = []mcpCaveat{
 			"last 30 seconds can be missing from it and one deleted in that time can still be listed. Kafka's internal " +
 			"topics, whose names start __, are never listed.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"service/TopicService.java:32", "CACHE_TTL_MS = 30_000"),
-			mcpAnchoredRef(mcpJava+"service/TopicService.java:102-116", "public Set<String> listTopics()", "client.listTopics()"),
+			mcpAnchoredRef(mcpJava+"service/TopicService.java:33", "CACHE_TTL_MS = 30_000"),
+			mcpAnchoredRef(mcpJava+"service/TopicService.java:103-117", "public Set<String> listTopics()", "client.listTopics()"),
 			mcpJava + "api/ClusterResource.java:75-105",
 		},
 	},
