@@ -291,6 +291,7 @@ Find your question in the table below, then follow its link to the family's comm
 | [Health, Status & Diagnostics](#health-status--diagnostics) | `health`, `status`, `version`, `doctor` | Is the Kates API up, does it reach Kafka, and is the cluster ready to test? | Kates API; `doctor` also asks `kubectl` about Kyverno, and `doctor dns` and `doctor network` work through `kubectl` alone |
 | [Cluster Commands](#cluster-commands) | `cluster info`, `check`, `topology`, `alerts`, `watch`, `topics`, `groups`, `broker configs` | What does the Kafka cluster look like, and is it healthy? | Kates API |
 | [Compliance](#compliance) | `compliance check`, `lint`, `fmt` | Is the cluster still built the way a reference file declares? | Kates API for `check`; `lint` and `fmt` work on local files |
+| [Evidence for Auditors](#evidence-for-auditors) | `evidence export` | What did Kates test and record in a period, and can an auditor tell nothing changed since? | Kates API; the pack is a directory you keep |
 | [Test Commands](#test-commands) | `test list`, `create`, `get`, `delete`, `watch`, `apply`, `lint`, `scaffold` | How do you start a performance test, follow it and find it again? | Kates API; `test lint` works on local files, and `test scaffold` uses only templates built into the CLI |
 | [Report Commands](#report-commands) | `report show`, `summary`, `export`, `diff`, `compare`, `brokers` | What did a run measure, and how does it compare with another run? | Kates API |
 | [Trend Analysis](#trend-analysis) | `trend` | How has one metric moved across a test type's runs over recent days? | Kates API |
@@ -677,6 +678,37 @@ kates compliance fmt --check platform/*.yaml
 ```
 
 Without `-w` it prints the result. `--check` lists the files that are not formatted and exits `1`, for CI. It refuses a file that does not parse, or one that sets a key to two different values, since only the author can say which one is meant.
+
+### Evidence for Auditors
+
+An auditor, as under the EU's DORA, asks what was tested in a period, when, by whom, and how it went. `kates evidence export` answers with a directory you can hand over.
+
+#### evidence export
+
+Write what the Kates API recorded in a period to a new directory, each item as the API answered it:
+
+| File | Holds |
+|:--|:--|
+| `export.json` | The period, when the pack was made, and the Kates API's URL |
+| `runs.json` | The test runs created in the period |
+| `disruptions.json` | The full report of each disruption run in the period |
+| `compliance-checks.json` | Each compliance check run in the period, with its report |
+| `audit.json` | The audit rows of the period |
+| `audit-verify.json` | `GET /api/audit/verify`: whether the audit chain holds, and its head hash |
+| `SHA256SUMS` | The SHA-256 of each file above |
+
+```bash
+kates evidence export --from 2026-07-01T00:00:00Z --to 2026-10-01T00:00:00Z --out q3
+kates evidence export --from 2026-10-01T00:00:00Z --out october --sign
+```
+
+The period runs from `--from` up to `--to`, which is excluded and defaults to now. `--out` must not exist yet, so a pack never mixes with older files. Anyone can check that no file changed since with `shasum -a 256 -c SHA256SUMS`, run in the directory.
+
+`--sign` signs `SHA256SUMS` with cosign, keyless: cosign prints a URL, you sign in in the browser, and it writes `SHA256SUMS.sigstore.json`. The auditor checks it with `cosign verify-blob --bundle SHA256SUMS.sigstore.json --certificate-identity <your email> --certificate-oidc-issuer <your issuer> SHA256SUMS`, which proves who signed the pack, and when.
+
+The command exits 1 when the audit chain is broken; the pack is written all the same, and `audit-verify.json` names the first broken row. A Kates API too old to store compliance checks or chain its audit log answers 404, and the command stops and says to upgrade it. So does one that answers audit rows from outside the period, since it reads at most its newest 500 rows.
+
+Runs and disruptions are read newest first and cut to the period. A run deleted during the export, as by the daily retention sweep, can hide another from the pack.
 
 ### Test Commands
 

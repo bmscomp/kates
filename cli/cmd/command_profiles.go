@@ -44,6 +44,7 @@ var commandProfiles = map[string][]string{
 	"diff":          {"topology"},
 	"disruption":    {"chaos"},
 	"docs":          nil,
+	"evidence":      nil,
 	"doctor":        {"deploy", "topology"},
 	"explain":       {"performance", "integrity"},
 	"flow":          {"performance", "chaos"},

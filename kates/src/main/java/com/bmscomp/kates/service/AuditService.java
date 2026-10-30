@@ -101,14 +101,41 @@ public class AuditService {
         }
     }
 
-    public List<Map<String, Object>> list(int limit, String eventType, String since, String actor) {
+    /**
+     * A page of the rows that match, newest first: first and max as for a
+     * query, since a lower bound it ignores when it is not an instant, until
+     * an exclusive upper bound or null.
+     */
+    public List<Map<String, Object>> list(
+            int first, int max, String eventType, String since, Instant until, String actor) {
         var cb = em.getCriteriaBuilder();
         var cq = cb.createQuery(AuditEventEntity.class);
         var root = cq.from(AuditEventEntity.class);
-        cq.orderBy(cb.desc(root.get("createdAt")));
+        cq.where(matching(cb, root, eventType, since, until, actor));
+        // id breaks ties, so a page never repeats or skips a row of the same instant.
+        cq.orderBy(cb.desc(root.get("createdAt")), cb.desc(root.get("id")));
+        return em.createQuery(cq).setFirstResult(first).setMaxResults(max).getResultList().stream()
+                .map(this::toMap)
+                .collect(java.util.stream.Collectors.toList());
+    }
 
+    /** How many rows list matches, over every page. */
+    public long count(String eventType, String since, Instant until, String actor) {
+        var cb = em.getCriteriaBuilder();
+        var cq = cb.createQuery(Long.class);
+        var root = cq.from(AuditEventEntity.class);
+        cq.select(cb.count(root)).where(matching(cb, root, eventType, since, until, actor));
+        return em.createQuery(cq).getSingleResult();
+    }
+
+    private static jakarta.persistence.criteria.Predicate[] matching(
+            jakarta.persistence.criteria.CriteriaBuilder cb,
+            jakarta.persistence.criteria.Root<AuditEventEntity> root,
+            String eventType,
+            String since,
+            Instant until,
+            String actor) {
         var predicates = new java.util.ArrayList<jakarta.persistence.criteria.Predicate>();
-
         if (eventType != null && !eventType.isEmpty()) {
             predicates.add(cb.equal(root.get("eventType"), eventType));
         }
@@ -122,14 +149,10 @@ public class AuditService {
             } catch (Exception ignored) {
             }
         }
-
-        if (!predicates.isEmpty()) {
-            cq.where(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
+        if (until != null) {
+            predicates.add(cb.lessThan(root.get("createdAt"), until));
         }
-
-        return em.createQuery(cq).setMaxResults(Math.min(limit, 500)).getResultList().stream()
-                .map(this::toMap)
-                .collect(java.util.stream.Collectors.toList());
+        return predicates.toArray(new jakarta.persistence.criteria.Predicate[0]);
     }
 
     private Map<String, Object> toMap(AuditEventEntity e) {

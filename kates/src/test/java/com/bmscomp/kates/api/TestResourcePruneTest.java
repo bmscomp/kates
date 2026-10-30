@@ -370,7 +370,7 @@ class TestResourcePruneTest {
      * duplicate key.
      */
     private Map<String, String> auditRows() {
-        return auditService.list(500, "test", started.toString(), null).stream()
+        return auditService.list(0, 500, "test", started.toString(), null, null).stream()
                 .filter(row -> stored.contains((String) row.get("target")))
                 .collect(
                         toMap(row -> (String) row.get("target"), row -> row.get("action") + ": " + row.get("details")));

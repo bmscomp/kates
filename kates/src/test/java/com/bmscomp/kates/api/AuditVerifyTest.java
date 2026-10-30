@@ -2,10 +2,14 @@ package com.bmscomp.kates.api;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -42,6 +46,38 @@ class AuditVerifyTest {
 
     @Inject
     EntityManager em;
+
+    @Test
+    @Order(0)
+    void pagesEveryRowOfAPeriodPastTheOld500Cap() {
+        Instant before = Instant.now();
+        for (int i = 0; i < 520; i++) {
+            auditService.record("RUN", "paging", "row-" + i, null, null);
+        }
+        Set<Object> ids = new HashSet<>();
+        for (int page = 0; page < 3; page++) {
+            List<Object> pageIds = RestAssured.given()
+                    .queryParam("type", "paging")
+                    .queryParam("page", page)
+                    .queryParam("size", 200)
+                    .get("/api/audit")
+                    .then()
+                    .statusCode(200)
+                    .body("total", equalTo(520))
+                    .extract()
+                    .jsonPath()
+                    .getList("items.id");
+            ids.addAll(pageIds);
+        }
+        assertEquals(520, ids.size());
+        RestAssured.given()
+                .queryParam("type", "paging")
+                .queryParam("until", before.toString())
+                .get("/api/audit")
+                .then()
+                .statusCode(200)
+                .body("total", equalTo(0));
+    }
 
     @Test
     @Order(1)

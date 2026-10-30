@@ -93,7 +93,7 @@ type mcpActivityDisruptionRow struct {
 type mcpActivityAudit struct {
 	Available  bool                  `json:"available" jsonschema:"false when the audit rows could not be read"`
 	ErrorCode  mcpErrorCode          `json:"errorCode,omitempty"`
-	Total      int                   `json:"total" jsonschema:"rows since then that the backend read, at most 500"`
+	Total      int                   `json:"total" jsonschema:"rows since then"`
 	Rows       []mcpActivityAuditRow `json:"rows" jsonschema:"newest first"`
 	NextOffset *int                  `json:"nextOffset,omitempty" jsonschema:"pass as offset for the next page of rows; absent on the last page"`
 }
@@ -382,7 +382,7 @@ func mcpActivityDisruptionsSince(ctx context.Context, call *mcpCall, since time.
 func mcpActivityAuditSince(ctx context.Context, call *mcpCall, since time.Time, page mcpActivityPage) (mcpActivityAudit, error) {
 	out := mcpActivityAudit{Rows: []mcpActivityAuditRow{}}
 	// A UTC "Z" instant: the backend ignores a since it cannot parse and
-	// returns every row (AuditService.java:118-123).
+	// returns every row (AuditService.java:145-150).
 	items, total, err := mcpBackendRange(page.offset, page.limit, func(p, size int) ([]client.AuditEntry, int64, error) {
 		pg, err := call.Client().MCPActivityAudit(ctx, since.UTC().Format(time.RFC3339Nano), p, size)
 		if err != nil {
@@ -453,8 +453,7 @@ var mcpCaveatsRunsActivity = []mcpCaveat{
 			"started one. The Kates API's daily retention sweep leaves one as system:scheduler for each finished " +
 			"run it deletes. A call without a valid key, and a dry run, leave none. Rows written before the Kates " +
 			"API recorded actors name no one, and then only the REST test endpoints wrote rows at all. Runs and " +
-			"disruption reports record no owner of their own: who started one shows only in its audit row. The " +
-			"endpoint reads at most the 500 newest matching rows.",
+			"disruption reports record no owner of their own: who started one shows only in its audit row.",
 		Refs: []string{
 			mcpAnchoredRef(mcpJava+"service/RunRetention.java:82",
 				`auditService.record("DELETE", "test", id, auditDetails, actor);`),
@@ -468,7 +467,6 @@ var mcpCaveatsRunsActivity = []mcpCaveat{
 			mcpAnchoredRef(mcpJava+"disruption/DisruptionScheduler.java:109-115", "Actor.SCHEDULER"),
 			mcpAnchoredRef(mcpJava+"disruption/DisruptionResource.java:92", "auditTrail.done();"),
 			"kates/src/main/resources/db/migration/V26__audit_actor.sql:1-8",
-			mcpAnchoredRef(mcpJava+"api/AuditResource.java:71", "auditService.list(500"),
 		},
 	},
 	{

@@ -123,7 +123,7 @@ type MCPActivityDisruptionsPage struct {
 }
 
 // MCPActivityAuditPage is one page of GET /api/audit, newest first. Total
-// counts the rows the backend read, at most 500 (service/AuditService.java).
+// counts every matching row (service/AuditService.java).
 type MCPActivityAuditPage struct {
 	Items []AuditEntry `json:"items"`
 	Page  int          `json:"page"`

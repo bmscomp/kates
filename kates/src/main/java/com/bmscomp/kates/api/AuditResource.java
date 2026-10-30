@@ -1,5 +1,7 @@
 package com.bmscomp.kates.api;
 
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
 import jakarta.annotation.security.RolesAllowed;
@@ -64,21 +66,32 @@ public class AuditResource {
             @Parameter(description = "Filter by event type (test, topic, disruption, resilience)") @QueryParam("type")
                     String type,
             @Parameter(description = "Filter events after this ISO-8601 timestamp") @QueryParam("since") String since,
+            @Parameter(description = "Only events before this ISO-8601 instant") @QueryParam("until") String until,
             @Parameter(description = "Only events by this principal, as GET /api/whoami names it") @QueryParam("actor")
                     String actor) {
 
+        Instant before = null;
+        if (until != null && !until.isBlank()) {
+            try {
+                before = Instant.parse(until);
+            } catch (DateTimeParseException e) {
+                return Response.status(400)
+                        .entity(ApiError.of(400, "Bad Request", "until is an ISO-8601 instant: " + e.getMessage()))
+                        .build();
+            }
+        }
+        int effectivePage = Math.max(page, 0);
         int effectiveSize = Math.min(Math.max(size, 1), 200);
-        List<Map<String, Object>> allEvents = auditService.list(500, type, since, actor);
-        int start = Math.min(page * effectiveSize, allEvents.size());
-        int end = Math.min(start + effectiveSize, allEvents.size());
-        List<Map<String, Object>> paged = allEvents.subList(start, end);
+        List<Map<String, Object>> paged =
+                auditService.list(effectivePage * effectiveSize, effectiveSize, type, since, before, actor);
+        long total = auditService.count(type, since, before, actor);
         return Response.ok(Map.of(
                         "page",
-                        page,
+                        effectivePage,
                         "size",
                         effectiveSize,
                         "total",
-                        allEvents.size(),
+                        total,
                         "count",
                         paged.size(),
                         "items",

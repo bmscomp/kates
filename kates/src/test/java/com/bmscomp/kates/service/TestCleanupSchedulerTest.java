@@ -137,7 +137,7 @@ class TestCleanupSchedulerTest {
 
         assertEquals(5, scheduler.sweep(CUTOFF));
         // Each row names the sweep, as a schedule's firing is named.
-        var bySweep = auditService.list(500, "test", started.toString(), Actor.SCHEDULER.name()).stream()
+        var bySweep = auditService.list(0, 500, "test", started.toString(), null, Actor.SCHEDULER.name()).stream()
                 .map(row -> (String) row.get("target"))
                 .toList();
         assertTrue(bySweep.containsAll(finished), "rows by system:scheduler: " + bySweep);
@@ -336,7 +336,7 @@ class TestCleanupSchedulerTest {
      * duplicate key.
      */
     private Map<String, String> auditRows() {
-        return auditService.list(500, "test", started.toString(), null).stream()
+        return auditService.list(0, 500, "test", started.toString(), null, null).stream()
                 .filter(row -> stored.contains((String) row.get("target")))
                 .collect(
                         toMap(row -> (String) row.get("target"), row -> row.get("action") + ": " + row.get("details")));
