@@ -19,6 +19,7 @@ import java.util.Set;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
+import io.restassured.path.json.JsonPath;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -197,38 +198,45 @@ class SecurityApiIT {
             assertNotBlank(drift.getString("error"), "the no-baseline explanation");
         }
 
-        int checkCount = given().when()
-                .post("/api/security/baseline")
-                .then()
-                .statusCode(200)
-                .body("status", equalTo("saved"))
-                .body("grade", matchesRegex("[A-F]"))
-                .body("timestamp", notNullValue())
-                .extract()
-                .path("checks");
-        assertTrue(checkCount > 0, "a saved baseline captures the checks it was built from");
-
         // Comparing the baseline against a cluster nothing has touched must
         // find every check unchanged — the strongest available signal that the
-        // baseline round-tripped through the V17 table intact. This relies on
-        // two back-to-back audits agreeing, which holds because every check
-        // reads static broker configuration; a check that sampled live traffic
-        // would make this flaky and should be excluded from drift instead.
-        var after = given().when()
-                .get("/api/security/drift")
-                .then()
-                .statusCode(200)
-                .body("hasBaseline", is(true))
-                .body("baselineTimestamp", notNullValue())
-                .body("currentGrade", matchesRegex("[A-F]"))
-                .extract()
-                .jsonPath();
+        // baseline round-tripped through the V17 table intact. But the topic
+        // checks read the live topic list, and this class's broker is fresh:
+        // half a second after start the app's own DLQ consumer joins its group,
+        // which creates __consumer_offsets and auto-creates kates-dlq. A
+        // baseline taken before that and a drift read after it differ (main's
+        // CI, 714c5ec1). So the pair is taken again until the cluster settles;
+        // a baseline that did not round-trip never matches, however long.
+        int[] checkCount = {0};
+        JsonPath[] after = {null};
+        boolean settled = ItSupport.waitUntil(() -> {
+            checkCount[0] = given().when()
+                    .post("/api/security/baseline")
+                    .then()
+                    .statusCode(200)
+                    .body("status", equalTo("saved"))
+                    .body("grade", matchesRegex("[A-F]"))
+                    .body("timestamp", notNullValue())
+                    .extract()
+                    .path("checks");
+            after[0] = given().when()
+                    .get("/api/security/drift")
+                    .then()
+                    .statusCode(200)
+                    .body("hasBaseline", is(true))
+                    .body("baselineTimestamp", notNullValue())
+                    .body("currentGrade", matchesRegex("[A-F]"))
+                    .extract()
+                    .jsonPath();
+            return after[0].getInt("summary.total") == after[0].getInt("summary.unchanged");
+        });
 
-        assertEquals(
-                after.getInt("summary.total"),
-                after.getInt("summary.unchanged"),
-                "an untouched cluster must not drift from its own baseline");
-        assertEquals(0, after.getInt("summary.degraded"), "nothing degraded");
+        assertTrue(checkCount[0] > 0, "a saved baseline captures the checks it was built from");
+        assertTrue(
+                settled,
+                "an untouched cluster must not drift from its own baseline: "
+                        + after[0].getList("drifts.findAll { it.change != 'UNCHANGED' }"));
+        assertEquals(0, after[0].getInt("summary.degraded"), "nothing degraded");
     }
 
     @Test
