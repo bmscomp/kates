@@ -500,7 +500,7 @@ func mcpTopicLayoutFrom(call *mcpCall, d *client.TopicDetail, offset, limit int)
 	t.Leaders = mcpCap(call, leaders, mcpTopologyLeaderSummaries)
 
 	// Topic detail reports the value in force of each key it lists, and in
-	// configSources what set it (TopicService.java:170-198). A backend from
+	// configSources what set it (TopicService.java:182-210). A backend from
 	// before configSources kept only entries set on the topic or left at
 	// Kafka's default: there a present value is also the one in force, but an
 	// absent one is set at broker level and is not in the response.
@@ -578,7 +578,7 @@ const (
 // topic it cannot describe with HTTP 500 whether the topic is missing or Kafka
 // failed: TopicService wraps every failure as "Failed to describe topic", and
 // the resource answers 404 only for a message containing "not found", which
-// that one never does (TopicService.java:138-140,201-203;
+// that one never does (TopicService.java:150-152,213-215;
 // KafkaClientResource.java:115-123). So on a 5xx the topic list decides: a
 // topic missing from it is reported as not found, anything else is passed on.
 func mcpTopicDetailError(ctx context.Context, call *mcpCall, topic string, err error) error {

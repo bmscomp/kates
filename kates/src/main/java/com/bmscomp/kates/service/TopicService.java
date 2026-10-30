@@ -126,6 +126,18 @@ public class TopicService {
         }
     }
 
+    /**
+     * describeTopicDetail for a topic createTopic has just made. CreateTopics
+     * returns once the controller has the topic, and a broker can still answer
+     * it unknown until its metadata catches up: main's CI (d120b8cb) got a 500
+     * from POST /api/kafka/topics for a topic it had created 0.1 s before.
+     */
+    @Retry(maxRetries = 10, delay = 200)
+    @Timeout(35_000)
+    public Map<String, Object> describeCreatedTopic(String topicName) {
+        return describeTopicDetail(topicName);
+    }
+
     @Timeout(35_000)
     public Map<String, Object> describeTopicDetail(String topicName) {
         AdminClient client = adminService.getClient();

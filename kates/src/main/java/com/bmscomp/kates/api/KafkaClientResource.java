@@ -215,7 +215,7 @@ public class KafkaClientResource {
             int partitions = request.partitions() > 0 ? request.partitions() : 1;
             int rf = request.replicationFactor() > 0 ? request.replicationFactor() : 1;
             topicService.createTopic(request.name(), partitions, rf, request.configs());
-            var detail = topicService.describeTopicDetail(request.name());
+            var detail = topicService.describeCreatedTopic(request.name());
             return Response.status(201).entity(detail).build();
         } catch (Exception e) {
             return Response.serverError()

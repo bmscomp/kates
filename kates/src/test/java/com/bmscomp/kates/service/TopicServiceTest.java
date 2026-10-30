@@ -23,6 +23,8 @@ import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.config.ConfigResource;
+import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
+import org.apache.kafka.common.internals.KafkaFutureImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -152,6 +154,28 @@ class TopicServiceTest {
                         "segment.bytes", "DYNAMIC_BROKER_CONFIG",
                         "compression.type", "DEFAULT_CONFIG"),
                 detail.get("configSources"));
+    }
+
+    @Test
+    void aCreatedTopicIsDescribedOnceTheBrokerKnowsIt() {
+        // As on main's CI: the broker answers the new topic unknown at first.
+        Node broker = new Node(0, "b0", 9092);
+        TopicDescription description = new TopicDescription(
+                "fresh", false, List.of(new TopicPartitionInfo(0, broker, List.of(broker), List.of(broker))));
+        KafkaFutureImpl<Map<String, TopicDescription>> failed = new KafkaFutureImpl<>();
+        failed.completeExceptionally(new UnknownTopicOrPartitionException("This server does not host this topic"));
+        DescribeTopicsResult unknown = mock(DescribeTopicsResult.class);
+        when(unknown.allTopicNames()).thenReturn(failed);
+        DescribeTopicsResult known = mock(DescribeTopicsResult.class);
+        when(known.allTopicNames()).thenReturn(KafkaFuture.completedFuture(Map.of("fresh", description)));
+        when(mockClient.describeTopics(anyCollection())).thenReturn(unknown, unknown, known);
+        DescribeConfigsResult configs = mock(DescribeConfigsResult.class);
+        ConfigResource resource = new ConfigResource(ConfigResource.Type.TOPIC, "fresh");
+        when(configs.all()).thenReturn(KafkaFuture.completedFuture(Map.of(resource, new Config(List.of()))));
+        when(mockClient.describeConfigs(anyCollection())).thenReturn(configs);
+
+        assertEquals("fresh", topicService.describeCreatedTopic("fresh").get("name"));
+        verify(mockClient, times(3)).describeTopics(anyCollection());
     }
 
     private static ConfigEntry entry(String name, String value, ConfigEntry.ConfigSource source) {
