@@ -898,7 +898,7 @@ Where your account may not create namespaces at all, [Running Without Cluster Ad
 
 ## Running Without Cluster Admin
 
-On a shared cluster, a team usually gets a namespace and the built-in `edit` role in it, not cluster-admin. That is enough to run performance tests, INTEGRITY tests and [conformity checks](appendix-a-glossary.md#gl-conformity-check) with Kates, once an admin has installed [Strimzi](appendix-a-glossary.md#gl-strimzi) and the Kafka cluster. Performance and INTEGRITY runs make no Kubernetes API call: the [Kates API](appendix-a-glossary.md#gl-kates-api) talks only to Kafka. Two things need care, and the `kates` chart's `rbac.scope=namespace` handles both. The default install creates a ClusterRole, which `edit` can't do, and a conformity check reads the Kafka namespace, where the team has no rights. The full `kates deploy` stays an admin's tool, because it installs Strimzi, cert-manager, monitoring and Litmus; its [admin-less profile](#deploying-without-cluster-admin) installs a whole Kafka stack into the team's namespaces instead.
+On a shared cluster, a team usually gets a namespace and the built-in `edit` role in it, not cluster-admin. That is enough to run performance tests, INTEGRITY tests and [compliance checks](appendix-a-glossary.md#gl-compliance-check) with Kates, once an admin has installed [Strimzi](appendix-a-glossary.md#gl-strimzi) and the Kafka cluster. Performance and INTEGRITY runs make no Kubernetes API call: the [Kates API](appendix-a-glossary.md#gl-kates-api) talks only to Kafka. Two things need care, and the `kates` chart's `rbac.scope=namespace` handles both. The default install creates a ClusterRole, which `edit` can't do, and a compliance check reads the Kafka namespace, where the team has no rights. The full `kates deploy` stays an admin's tool, because it installs Strimzi, cert-manager, monitoring and Litmus; its [admin-less profile](#deploying-without-cluster-admin) installs a whole Kafka stack into the team's namespaces instead.
 
 The work splits between three accounts, and only the team's is used day to day:
 
@@ -918,7 +918,7 @@ The granting account creates a [KafkaUser](appendix-a-glossary.md#gl-kafkauser) 
 - Read on the consumer groups `*`, because the group names Kates picks start with the run's random id, unless the test sets `--consumer-group`.
 - Write and Describe on the transactional ids that start with `kates-`, for tests with transactions on.
 - Create, Describe, Write and Read on the topic `kates-test-events`, and Read on the group `kates-webhooks`, which carry run events to webhooks; Describe and Read on the topic `kates-dlq`, which the Kates API polls.
-- Describe and DescribeConfigs on every topic for a conformity check's `topics` rules, which judge only the topics the user may describe, and DescribeConfigs on the cluster for `kafka.source: brokers`.
+- Describe and DescribeConfigs on every topic for a compliance check's `topics` rules, which judge only the topics the user may describe, and DescribeConfigs on the cluster for `kafka.source: brokers`.
 
 It then renders the Role from the same release name, namespace and values as the team's install, so that it binds the right ServiceAccount, and applies it:
 
@@ -927,9 +927,9 @@ helm template kates oci://ghcr.io/bmscomp/charts/kates -n team \
   --set rbac.scope=namespace --show-only templates/rbac.yaml | kubectl apply -f -
 ```
 
-The Role is `kates-kafka-reader-team` in the `kafka` namespace, and it only reads. Each grant serves part of a conformity check:
+The Role is `kates-kafka-reader-team` in the `kafka` namespace, and it only reads. Each grant serves part of a compliance check:
 
-| Resource | Verbs | What a conformity check reads |
+| Resource | Verbs | What a compliance check reads |
 |:-------------------------------------|:-----|:----------------------------------------------------|
 | `kafkas` | get | The `Kafka` resource every check starts from |
 | `kafkanodepools` | list | Storage types and whether controllers are dedicated |
@@ -937,7 +937,7 @@ The Role is `kates-kafka-reader-team` in the `kafka` namespace, and it only read
 | `podmonitors` | list | Whether a PodMonitor selects the brokers |
 | `endpointslices` | list | Each Kafka pod's zone, since nodes are cluster-scoped |
 
-Without the Role, a conformity check stops before its first rule: the Kates API answers 503 and says which grant is missing.
+Without the Role, a compliance check stops before its first rule: the Kates API answers 503 and says which grant is missing.
 
 Optionally, the cluster admin also lets the check read nodes. Nodes are cluster-scoped, so this is a ClusterRole, `kates-node-reader-team`, with `get` and `list` on `nodes` and nothing else. With it, `zones`, `skew` and `kafka.rackAwareness` read any `zoneLabel` from the nodes themselves:
 
@@ -959,7 +959,7 @@ helm upgrade --install kates oci://ghcr.io/bmscomp/charts/kates -n team \
   --set kafka.sasl.username=team-kates
 ```
 
-The scope also turns chaos off: the chaos provider is `noop` unless `chaos.provider` names another. A conformity check reads `networkPolicy.kafka.namespace`, `kafka` by default, the namespace the Role is granted in. Leave `metrics.serviceMonitor` off: `edit` covers ServiceMonitors only where the Prometheus Operator adds its roles to it, and the repository's `monitoring` chart doesn't.
+The scope also turns chaos off: the chaos provider is `noop` unless `chaos.provider` names another. A compliance check reads `networkPolicy.kafka.namespace`, `kafka` by default, the namespace the Role is granted in. Leave `metrics.serviceMonitor` off: `edit` covers ServiceMonitors only where the Prometheus Operator adds its roles to it, and the repository's `monitoring` chart doesn't.
 
 ### Step 3 — Reach the API and Verify
 
@@ -969,12 +969,12 @@ The scope also turns chaos off: the chaos provider is `noop` unless `chaos.provi
 kates ports --app-ns team
 ```
 
-Then run a LOAD test, an INTEGRITY test and a conformity check:
+Then run a LOAD test, an INTEGRITY test and a compliance check:
 
 ```bash
 kates test create --type LOAD --records 100000 --wait
 kates test create --type INTEGRITY --records 50000 --acks all --wait
-kates conformity check -f team-reference.yaml
+kates compliance check -f team-reference.yaml
 ```
 
 On [`panda`](appendix-a-glossary.md#gl-panda), the lab's three-node Kind cluster, both runs end `DONE` and the INTEGRITY verdict is PASS. A reference whose `spec` is `brokers: {count: {min: 3}, perNode: {max: 1}, zones: {min: 3}}` passes there and exits 0. Its `-o json` report gives `brokers.zones` the detail `alpha: 1, gamma: 1, sigma: 1; zones from the EndpointSlices of kafka/krafter-kafka-brokers`, since the Kates API may not list nodes.
@@ -1005,7 +1005,7 @@ Before installing, it checks two things and stops with what is missing:
 - A Strimzi operator is installed (the `kafka.strimzi.io` resources exist). A cluster admin installs it once, watching the Kafka, Connect and MirrorMaker 2 namespaces.
 - The account may create what the stack needs in each namespace: Strimzi's resources where each is made (the Kafka cluster, its topics and users in the Kafka namespace, Connect's in the Connect namespace, MirrorMaker 2's in its own), and everywhere Deployments, StatefulSets, Services, Secrets, ConfigMaps, ServiceAccounts, NetworkPolicies, Roles and RoleBindings. The built-in `admin` role covers all but Strimzi's. A cluster admin adds those by setting `strimzi-kafka-operator.createAggregateRoles=true` on the Strimzi release, which adds them to `admin` and `edit`.
 
-Conformity checks need the read-only Role the `kates` chart creates in the Kafka namespace ([Step 1](#step-1--grant-the-teams-kates-access-to-kafka) lists its grants). Kubernetes lets an account create a Role only for permissions it holds, so `kates deploy --adminless` first asks whether the account holds each of them there. When it does, the Role is installed and conformity checks work. When it lacks any (PodMonitors are the usual one: the built-in `admin` role doesn't include them), Kates installs without it (`rbac.kafkaNamespaceRole=false`), everything else works, and deploy names the missing reads and prints the command an account that holds them runs to turn conformity checks on:
+Compliance checks need the read-only Role the `kates` chart creates in the Kafka namespace ([Step 1](#step-1--grant-the-teams-kates-access-to-kafka) lists its grants). Kubernetes lets an account create a Role only for permissions it holds, so `kates deploy --adminless` first asks whether the account holds each of them there. When it does, the Role is installed and compliance checks work. When it lacks any (PodMonitors are the usual one: the built-in `admin` role doesn't include them), Kates installs without it (`rbac.kafkaNamespaceRole=false`), everything else works, and deploy names the missing reads and prints the command an account that holds them runs to turn compliance checks on:
 
 ```bash
 helm template kates oci://ghcr.io/bmscomp/charts/kates -n team-kates \
@@ -1396,4 +1396,4 @@ kates test list
 - `make all` drives the whole deployment through `kates deploy`; the per-component targets build the pieces one by one, and put LitmusChaos and monitoring in `kafka`.
 - The JVM image runs ZGC because a benchmarking tool's own GC pauses must not pollute its measurements, with the heap at no more than about 70% of the memory limit. The native image starts in ~0.05s but runs Serial GC, so it suits CI and laptops rather than measurement.
 
-Your stack is running, so check that it is the cluster you meant to build: [Conformity Checks](conformity.md) writes that architecture down as a file and holds `krafter` to it.
+Your stack is running, so check that it is the cluster you meant to build: [Compliance Checks](compliance.md) writes that architecture down as a file and holds `krafter` to it.

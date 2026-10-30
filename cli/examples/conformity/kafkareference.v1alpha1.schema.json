@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/bmscomp/kates/main/cli/examples/conformity/kafkareference.v1alpha1.schema.json",
   "title": "Kates KafkaReference v1alpha1",
-  "description": "A reference architecture for a Kafka platform on Kubernetes. kates conformity check reports every declared constraint the live cluster does not meet.",
+  "description": "A reference architecture for a Kafka platform on Kubernetes. kates compliance check reports every declared constraint the live cluster does not meet.",
   "type": "object",
   "additionalProperties": false,
   "required": ["apiVersion", "kind", "metadata", "spec"],

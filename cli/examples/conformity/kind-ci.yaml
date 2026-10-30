@@ -3,7 +3,7 @@
 # The cluster CI · Integration deploys on kind: the three-zone kind cluster
 # (config/cluster.yaml) with charts/kafka-cluster and values-ci.yaml, which
 # shrinks it to one controller and one broker so it fits a runner.
-# ConformityLiveTest holds that cluster to this reference: every rule must
+# ComplianceLiveTest holds that cluster to this reference: every rule must
 # pass, so a change to the check, or to what it reads from Strimzi, shows up.
 apiVersion: conformity.kates.io/v1alpha1
 kind: KafkaReference

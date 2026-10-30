@@ -1561,7 +1561,7 @@ func (dc *deployContext) katesComponent() component {
 			katesArgs = append(katesArgs,
 				"--set", "kafka.bootstrapServers="+katesBootstrap,
 				"--set", "kafka.topicNamespace="+kafkaNS,
-				// Also the namespace and cluster the API's chaos, topology and conformity act on.
+				// Also the namespace and cluster the API's chaos, topology and compliance act on.
 				"--set", "networkPolicy.kafka.namespace="+kafkaNS,
 				"--set", "kafka.clusterName="+dc.primary.Name,
 				"--set", fmt.Sprintf("monitoring.enabled=%t", deployWithMonitoring))
@@ -1572,7 +1572,7 @@ func (dc *deployContext) katesComponent() component {
 			if deployAdminless {
 				// No ClusterRole: a Role in the namespace, chaos off.
 				katesArgs = append(katesArgs, "--set", "rbac.scope=namespace")
-				if len(adminlessConformityMissing) > 0 {
+				if len(adminlessComplianceMissing) > 0 {
 					katesArgs = append(katesArgs, "--set", "rbac.kafkaNamespaceRole=false")
 				}
 			}

@@ -97,8 +97,8 @@ subjects:
 {{- else if or (not (hasKey .Values.rbac "kafkaNamespaceRole")) .Values.rbac.kafkaNamespaceRole }}
 {{- /*
   rbac.scope=namespace: nothing cluster-scoped. Performance and INTEGRITY runs
-  make no Kubernetes call; a conformity check reads these in the Kafka
-  namespace (ConformityCheck). It lists PodMonitors across namespaces first,
+  make no Kubernetes call; a compliance check reads these in the Kafka
+  namespace (ComplianceCheck). It lists PodMonitors across namespaces first,
   then here when that is refused. Nodes stay unread: zones, skew and
   kafka.rackAwareness with source cr take each pod's zone from the
   EndpointSlices of Strimzi's headless Service, unless rbac.nodeReads grants
@@ -151,7 +151,7 @@ subjects:
 {{- if and (eq .Values.rbac.scope "namespace") .Values.rbac.nodeReads }}
 {{- /*
   rbac.scope=namespace with rbac.nodeReads: the one cluster-scoped grant a
-  conformity check uses, get and list on nodes, so zones, skew and
+  compliance check uses, get and list on nodes, so zones, skew and
   kafka.rackAwareness read any zoneLabel. Scope cluster's ClusterRole holds it
   already. Named after the release namespace, so two teams' grants don't
   collide.

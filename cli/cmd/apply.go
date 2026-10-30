@@ -873,7 +873,7 @@ func init() {
 	testApplyCmd.Flags().StringVar(&applySLAScope, "sla-scope", "", "With --wait, what a validate block is checked against: report, the run as a whole (the default), or task, each task row")
 	testApplyCmd.Flags().StringVar(&applyJUnit, "output-junit", "", "With --wait, also write a JUnit XML report to this file, one test case per scenario")
 	// --junit is the name the enhancement plan gave it; --output-junit is
-	// the one disruption run and conformity check use.
+	// the one disruption run and compliance check use.
 	testApplyCmd.Flags().StringVar(&applyJUnit, "junit", "", "Same as --output-junit")
 	_ = testApplyCmd.Flags().MarkHidden("junit")
 	interruptible(testApplyCmd)

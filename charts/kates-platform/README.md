@@ -24,10 +24,10 @@ Any namespace works: Kafka and Kates both run in the release namespace, and the 
 | `kates.enabled` | `true` | Deploy the Kates application subchart |
 | `kates.*` | subchart defaults | Full pass-through — see `charts/kates/values.yaml` |
 | `kates.kafka.bootstrapServers` | `krafter-kafka-bootstrap.{{ .Release.Namespace }}.svc:9092` | The kafka-cluster subchart's bootstrap Service; rename `krafter` with `kafka-cluster.clusterName` |
-| `kates.kafka.clusterName` | `krafter` | The Kafka cluster the Kates API's chaos, topology, cluster alerts and conformity act on; rename it with `kafka-cluster.clusterName` |
+| `kates.kafka.clusterName` | `krafter` | The Kafka cluster the Kates API's chaos, topology, cluster alerts and compliance act on; rename it with `kafka-cluster.clusterName` |
 | `kates.kafka.topicNamespace` | `{{ .Release.Namespace }}` | Where INTEGRATION_CDC manages its KafkaTopic CRs |
 | `kates.trogdor.coordinatorUrl` | `http://trogdor-coordinator.{{ .Release.Namespace }}.svc:8889` | A Trogdor coordinator next to Kafka, if you run one |
-| `kates.networkPolicy.kafka.namespace` | `{{ .Release.Namespace }}` | Namespace the Kates NetworkPolicy allows egress to for the brokers and Trogdor, and the one the Kates API's chaos, topology, cluster alerts and conformity act in |
+| `kates.networkPolicy.kafka.namespace` | `{{ .Release.Namespace }}` | Namespace the Kates NetworkPolicy allows egress to for the brokers and Trogdor, and the one the Kates API's chaos, topology, cluster alerts and compliance act in |
 | `kafka-cluster.networkPolicy.clients` | `kates` from the release namespace | Overrides the platform profile's `kates` grant (namespace `kates`); a list set here replaces it |
 | `kates.rbac.cdcSecretNamespaces` | `[]` | Namespaces where the Kates API may read the `postgresql` Secret; INTEGRATION_CDC needs its database's namespace here, since the kates ClusterRole grants nothing on Secrets |
 | `apicurio-registry.enabled` | `false` | Deploy Apicurio Registry (KafkaSQL storage against the `kafka-cluster` subchart) |

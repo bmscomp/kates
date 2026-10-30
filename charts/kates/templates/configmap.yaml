@@ -7,7 +7,7 @@ metadata:
 data:
   KATES_KAFKA_BOOTSTRAP_SERVERS: {{ tpl .Values.kafka.bootstrapServers . | quote }}
   KATES_CDC_TOPIC_NAMESPACE: {{ tpl .Values.kafka.topicNamespace . | quote }}
-  {{- /* Also the namespace rbac.scope=namespace grants the conformity check's Role in. */}}
+  {{- /* Also the namespace rbac.scope=namespace grants the compliance check's Role in. */}}
   {{- $kafkaNamespace := tpl (.Values.networkPolicy.kafka.namespace | default "kafka") . }}
   KATES_CHAOS_KAFKA_NAMESPACE: {{ $kafkaNamespace | quote }}
   KATES_TOPOLOGY_KAFKA_NAMESPACE: {{ $kafkaNamespace | quote }}

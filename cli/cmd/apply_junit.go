@@ -10,7 +10,7 @@ import (
 
 // writeApplyJUnit writes kates test apply --wait's JUnit report: one
 // testsuite for the file, one testcase per scenario, as disruption run and
-// conformity check write theirs.
+// compliance check write theirs.
 //
 //   - A run that ended DONE whose gates hold passes; gates that could not be
 //     evaluated, and the run id, go in system-out.

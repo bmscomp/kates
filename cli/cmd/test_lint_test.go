@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bmscomp/kates/cli/internal/conformity"
+	"github.com/bmscomp/kates/cli/internal/compliance"
 	"github.com/bmscomp/kates/cli/output"
 )
 
 // diagKeys reads diagnostics as line:col severity code path, for a table.
-func diagKeys(ds []conformity.Diagnostic) []string {
+func diagKeys(ds []compliance.Diagnostic) []string {
 	keys := make([]string, len(ds))
 	for i, d := range ds {
 		keys[i] = fmt.Sprintf("%d:%d %s %s %s", d.Line, d.Col, d.Severity, d.Code, d.Path)
@@ -112,7 +112,7 @@ func writeLintFile(t *testing.T, name, content string) string {
 	return path
 }
 
-// kates test lint exits as conformity lint does: 0 clean or warnings only, 1
+// kates test lint exits as compliance lint does: 0 clean or warnings only, 1
 // on an error, 2 when a file cannot be read; -o json lists the findings.
 func TestTestLintCommand(t *testing.T) {
 	clean := writeLintFile(t, "clean.yaml", "type: LOAD\nvalidate: {maxErrorRate: 0.1}\n")

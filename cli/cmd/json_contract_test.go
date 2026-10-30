@@ -92,7 +92,7 @@ var jsonContractCases = []struct {
 // jsonContractSkipped names the leaf commands this test does not run, and why.
 var jsonContractSkipped = map[string]string{
 	"gate, benchmark, test apply, tune run": "start runs and poll them: json_output_test.go covers them with the runs backend",
-	"conformity check, detect, versions, operators, deploy, clean, kyverno, auto, migrate, connect, doctor dns, doctor network": "need a cluster through kubectl or helm",
+	"compliance check, detect, versions, operators, deploy, clean, kyverno, auto, migrate, connect, doctor dns, doctor network": "need a cluster through kubectl or helm",
 	"security *":                            "need the API's security endpoints, which the fake does not model",
 	"lab, dashboard, top, watch, kafka tui": "full-screen views with no JSON form; they refuse without a terminal",
 	"test create, test delete, test cancel, prune, webhook add/remove, schedule create/delete": "mutate the API; their JSON forms are tested beside them",

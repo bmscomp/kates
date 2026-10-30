@@ -99,7 +99,7 @@ func adminlessTeamNamespaces() []string {
 // adminlessTeamManifest is the team's namespaces, its ServiceAccount (in
 // home) with a long-lived token, and the built-in admin role in each
 // namespace, which a ClusterRole extends to the monitoring.coreos.com
-// resources: the stack's PodMonitors, and conformity's reads of them.
+// resources: the stack's PodMonitors, and compliance's reads of them.
 func adminlessTeamManifest(account, home string, namespaces []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, `---

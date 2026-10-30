@@ -102,9 +102,9 @@ A Kyverno resource that holds cluster-wide admission rules: mutate, validate, ge
 
 The [offset](#gl-offset) a consumer group has saved for a partition: where a restarted consumer resumes.
 
-### Conformity Check {#gl-conformity-check}
+### Compliance Check {#gl-compliance-check}
 
-A comparison of a running system with a written specification of how it must be built. In Kates, `kates conformity check` sends a `KafkaReference` file to the Kates API, which reads the Kafka cluster without changing it and reports each declared rule as PASS, FAIL, WARN, WAIVED or UNKNOWN. See [Conformity Checks](conformity.md).
+A comparison of a running system with a written specification of how it must be built. In Kates, `kates compliance check` sends a `KafkaReference` file to the Kates API, which reads the Kafka cluster without changing it and reports each declared rule as PASS, FAIL, WARN, WAIVED or UNKNOWN. See [Compliance Checks](compliance.md).
 
 ### Connector {#gl-connector}
 
@@ -204,7 +204,7 @@ A guarantee that each record takes effect once despite retries and crashes; Kafk
 
 ### Exit Code {#gl-exit-code}
 
-The number a command returns to the shell, 0 for success, which a CI step reads to pass or fail. `kates test apply --wait` exits 1 when a scenario fails to submit, fails or violates a gate; `kates gate` exits 1 below `--min-grade`; `kates disruption run --fail-on-sla-breach` exits 1 when the SLA is violated; `kates conformity check` exits 1 when a rule fails and 2 when it can't tell. See [CLI Reference](10-cli-reference.md#exit-codes).
+The number a command returns to the shell, 0 for success, which a CI step reads to pass or fail. `kates test apply --wait` exits 1 when a scenario fails to submit, fails or violates a gate; `kates gate` exits 1 below `--min-grade`; `kates disruption run --fail-on-sla-breach` exits 1 when the SLA is violated; `kates compliance check` exits 1 when a rule fails and 2 when it can't tell. See [CLI Reference](10-cli-reference.md#exit-codes).
 
 ## F
 
@@ -320,7 +320,7 @@ The Strimzi resource that asks Cruise Control for a partition-reassignment propo
 
 ### KafkaReference {#gl-kafkareference}
 
-The kind of document that holds a reference architecture for a conformity check. In Kates, it is a Kubernetes-style YAML file, `conformity.kates.io/v1alpha1`, that stays in your repository and is never applied to the cluster; each value under its `spec` is one rule. See [Your First Reference](conformity.md#your-first-reference).
+The kind of document that holds a reference architecture for a compliance check. In Kates, it is a Kubernetes-style YAML file, `conformity.kates.io/v1alpha1`, that stays in your repository and is never applied to the cluster; each value under its `spec` is one rule. See [Your First Reference](compliance.md#your-first-reference).
 
 ### KafkaTopic {#gl-kafkatopic}
 
@@ -776,7 +776,7 @@ A lightweight Java thread (Java 21) that the JVM schedules onto a few operating-
 
 ### Waiver {#gl-waiver}
 
-A recorded, time-limited exception to a requirement. In Kates, a waiver in a `KafkaReference` names a rule, a reason, an owner and an end date, and the conformity check shows that rule as WAIVED, rather than failing on it, until the date passes. See [When the Cluster Falls Short](conformity.md#when-the-cluster-falls-short).
+A recorded, time-limited exception to a requirement. In Kates, a waiver in a `KafkaReference` names a rule, a reason, an owner and an end date, and the compliance check shows that rule as WAIVED, rather than failing on it, until the date passes. See [When the Cluster Falls Short](compliance.md#when-the-cluster-falls-short).
 
 ### Worker (Kafka Connect) {#gl-connect-worker}
 

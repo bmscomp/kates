@@ -454,7 +454,7 @@ Policy Engine (Kyverno):
 Deployment:
   deploy         Deploy the Kates stack (Kafka, Kates, chaos, monitoring)
   deploy status  Health of the deployed components
-  conformity     Check the cluster against a reference architecture
+  compliance     Check the cluster against a reference architecture
   detect         Deep cluster compatibility report for Kafka
   auto           Auto-detect cluster config and deploy Kafka
   operators      Strimzi operators on this cluster

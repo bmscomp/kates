@@ -48,11 +48,11 @@ class EndpointScopesTest {
             Set.of(POST.class, PUT.class, DELETE.class, PATCH.class);
 
     /**
-     * Writes that read: the cost estimate computes, the conformity check reads
+     * Writes that read: the cost estimate computes, the compliance check reads
      * the cluster, and the disruption POST checks chaos:run in code.
      */
     private static final Set<String> WRITES_THAT_READ =
-            Set.of("CostResource.estimate", "ConformityResource.check", "DisruptionResource.executeDisruption");
+            Set.of("CostResource.estimate", "ComplianceResource.check", "DisruptionResource.executeDisruption");
 
     private static List<Class<?>> resources() throws IOException, URISyntaxException {
         Path root = Path.of(HealthResource.class

@@ -352,7 +352,7 @@
       "scope_blockquotes": 0,
       "broken_handoff": 0
     },
-    "appendix-conformity-language.md": {
+    "appendix-compliance-language.md": {
       "bare_headings": 0,
       "tables_without_lead_in": 0,
       "bold_lead_bullets": 0,
@@ -378,7 +378,7 @@
       "scope_blockquotes": 0,
       "broken_handoff": 0
     },
-    "conformity.md": {
+    "compliance.md": {
       "bare_headings": 0,
       "tables_without_lead_in": 0,
       "bold_lead_bullets": 0,

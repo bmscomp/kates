@@ -16,7 +16,7 @@ Build, `go vet` and the full test suite pass on main. The code is unusually well
 |:--|:--|:--|
 | Functions over the repo's `funlen` limit (100 lines) | 51 of 2,075 | Largest: `RenderPDF` 706, `RenderTUI` 651, `RenderHTML` 616, `runClean` 596, `RenderMarkdown` 471, `runDeploy` 404 |
 | Functions over `gocyclo` 30 | 21 | Top: `RenderTUI` 133, `RenderPDF` 96, `RenderMarkdown` 93, `runClean` 90, `LabModel.Update` 80, `runDeploy` 74 |
-| Test coverage by package | `internal/conformity` 94 %, `pkg/migrate` 97 %, `pkg/kafkaversion` 98 %, `pkg/strimzi` 92 %, `pkg/cluster` 86 %, `client` 73 %, `output` 65 %, `cmd` 61 %, `pkg/detect` 57 %, `tui` 32 %, `internal/kubectl` 31 %, **`internal/helm` 8 %** | `cmd` is 60 % of the code; its number hides that every deploy orchestration test stubs every wait |
+| Test coverage by package | `internal/compliance` 94 %, `pkg/migrate` 97 %, `pkg/kafkaversion` 98 %, `pkg/strimzi` 92 %, `pkg/cluster` 86 %, `client` 73 %, `output` 65 %, `cmd` 61 %, `pkg/detect` 57 %, `tui` 32 %, `internal/kubectl` 31 %, **`internal/helm` 8 %** | `cmd` is 60 % of the code; its number hides that every deploy orchestration test stubs every wait |
 | `context.Background()` in `cmd/` | 488 | `cmd.Context()` is used 31 times; most commands do not see Ctrl-C |
 | `fmt.Print*` in `cmd/` | 575 | Bypassing `output`, so `--plain`, `-o json` and glyph fallbacks do not apply |
 | `exec.Command` call sites in `cmd/` | 14 files | Outside the five exec seams, so untestable and not pinned to the deploy's kube-context |
@@ -72,7 +72,7 @@ Sound and worth keeping as the model: the config file (0600, atomic rename, `flo
 
 Dead code with no non-test caller: `retryableHelmDeploy`/`DeployError` (`deploy_recovery.go`), `detectDeployProxySettings`, `loadProxyConf`, `rewriteLoopbackProxyURLForKind`, `ensureKubernetesNoProxy`, `appendUniqueCommaSeparated` (`deploy_components.go:53-203`), `helm.Client.{Status,DependencyBuild,Install,Upgrade,Uninstall,Test,IsDeployed}`, `kubectl.Client.Namespace`, the `clean.go` "jaeger" entries.
 
-### C. Test, report, gate, chaos, security, conformity
+### C. Test, report, gate, chaos, security, compliance
 
 | Id | Finding | Where | Severity |
 |:--|:--|:--|:--|
@@ -85,12 +85,12 @@ Dead code with no non-test caller: `retryableHelmDeploy`/`DeployError` (`deploy_
 | C7 | `apply` evaluates `minThroughputRecPerSec` per task row (consumer row included) while `latencyOf` excludes the consumer row and `gate` uses the aggregate; the shipped `stress-test.yaml` therefore demands 100,000 rec/s from each of 16 producers. | `cmd/apply.go:559-568`, `cmd/latency.go:45-64`, `cmd/scenarios/stress-test.yaml:6,17` | Medium |
 | C8 | Security audit appends Kyverno checks through raw `exec.Command` (bypassing the `runKubectlFn` seam) but the summary and the exported counts stay the backend's; the HTML and Markdown exports interpolate backend strings unescaped (`report_html.go` escapes; this file was written separately). | `cmd/security.go:38-155, 271-278, 359`, `cmd/security_export.go:35-40, 56-57, 150-151` | Medium |
 | C9 | `truncate` slices bytes and splits UTF-8; used by every `security *` table and `watch`. | `cmd/security.go:335-340`, `cmd/watch.go:307` | Low/medium |
-| C10 | `test list` divides by zero when a page reports `size: 0`; `writeConformityJUnit` indexes `[0]` of an empty split on an empty rule id. | `cmd/test.go:68-70`, `cmd/conformity.go:363` | Low |
+| C10 | `test list` divides by zero when a page reports `size: 0`; `writeComplianceJUnit` indexes `[0]` of an empty split on an empty rule id. | `cmd/test.go:68-70`, `cmd/compliance.go:363` | Low |
 | C11 | Terminal-status sets differ: `gate`/`benchmark` stop on `DONE|FAILED`; `watch`/`apply` also on `COMPLETED|ERROR`. | `gate.go:87`, `benchmark.go:268`, `watch.go:518`, `apply.go:682,766` | Low/medium |
 | C12 | `disruption watch` uses the default 64 KiB scanner buffer (a large `METRICS_CAPTURED` event ends the watch with "token too long") and exits 0 when the stream closes early. | `cmd/disruption_watch.go:58, 84` | Low/medium |
 | C13 | `advisor --apply` help says it generates a tuned scenario; it prints one hint. `cost --producers` is unused and `--replicas 0` yields a negative cost. `changelog --until` ignores its parse error. `snapshot` joins the user's name into a path unsanitised. `badge` builds a shields.io URL whose `N/A` value contains `/`. | `advisor.go:175-177,311`, `cost.go:117`, `changelog.go:45`, `snapshot.go:248,252`, `badge.go:88-90` | Low |
 
-Conformity (`cmd/conformity*.go`, `internal/conformity`) is the model the rest should follow: lint before send, documented exit codes 1/2, clean `-o json`, diagnostics with file:line:col and caret, examples tested against the schema.
+Compliance (`cmd/compliance*.go`, `internal/compliance`) is the model the rest should follow: lint before send, documented exit codes 1/2, clean `-o json`, diagnostics with file:line:col and caret, examples tested against the schema.
 
 ### D. The MCP server (`kates mcp`)
 
@@ -130,7 +130,7 @@ Migration's rails are good: every mutating command confirms unless `--yes`, `pla
 
 ## 3. Cross-cutting themes
 
-1. **Exit codes lie.** `status`, `doctor`, `doctor dns/network`, `clean`, `ports`, `kyverno *`, `disruption watch` (early close) return nil after a failure. Conformity's documented 1 = failed, 2 = could not tell is the policy to generalise.
+1. **Exit codes lie.** `status`, `doctor`, `doctor dns/network`, `clean`, `ports`, `kyverno *`, `disruption watch` (early close) return nil after a failure. Compliance's documented 1 = failed, 2 = could not tell is the policy to generalise.
 2. **Long-running commands cannot be stopped.** Four commands carry the `interruptible` annotation (`test create`, `test apply`, `replay`, `disruption run`); `gate`, `benchmark`, `flow`, `resilience`, `detect`, `dashboard` and every deploy wait use `context.Background()`.
 3. **Five poll loops, four grade scales, six Helm-status parsers, eight exec seams, four CRD lists, four quantity parsers, four hand-written detect renderers.** Each copy has drifted (terminal-status sets, row filters, escaping). The refactors in Wave 3 collapse each family to one.
 4. **Artefacts built by string formatting.** JUnit (`%v` of a duration), HTML (no escaping in two of three writers), PDF (wrong font encoding), Helm values (deprecated schema, overlay merge), JSON patches (`%s`). Each needs its typed writer or template.
@@ -165,7 +165,7 @@ Small, verified, each with a test. All on `cli/`; none changes a command's flags
 | 1.16 | C4 | `client.TestSpec` gains `yaml` tags matching its `json` names; `flow` evaluates `maxP99`, `minThroughput`, `maxErrorRate` (reading the run's report), refuses `expect` and `webhook`/`notify` steps as not implemented instead of pretending, normalises grades to upper case and fails an unknown grade. |
 | 1.17 | C6 | `watch`'s TUI tick uses `pollInterval`; the footer prints it. |
 | 1.18 | C8, C9 | Security HTML export escapes with `html.EscapeString`, Markdown escapes `\|`; `truncate` uses `runewidth.Truncate`. |
-| 1.19 | C10, C12 | `test list` guards `size == 0`; `writeConformityJUnit` guards an empty rule id; `disruption watch` sets a 1 MiB scanner buffer and exits 1 when the stream ends without a terminal event. |
+| 1.19 | C10, C12 | `test list` guards `size == 0`; `writeComplianceJUnit` guards an empty rule id; `disruption watch` sets a 1 MiB scanner buffer and exits 1 when the stream ends without a terminal event. |
 | 1.20 | D1, D3, D5 | `newMCPClient` sets `MaxRetries = 1` and the audit caveat says so; `security_evidence` refuses `offset >= matched` with `KATES_INVALID_ARGUMENT`; `draft_scenario` counts runes. |
 | 1.21 | E1, E2 | HTML detect report renders the measured `LatencyMatrix` (and omits the section when there is none) and escapes every value with `html.EscapeString`. |
 | 1.22 | E3 | PDF renderer installs `UnicodeTranslatorFromDescriptor("")` and truncates by rune. |
@@ -220,8 +220,8 @@ Small, verified, each with a test. All on `cli/`; none changes a command's flags
 
 | Item | Change | Why | Effort |
 |:--|:--|:--|:--|
-| 4.1 | `kates test lint <scenario.yaml>` mirroring `conformity lint`: `parseScenarioFile` + `scenarioSpecProblems` + `validTestTypes` + unknown-key detection (`KnownFields(true)`), with file:line diagnostics; `apply` runs it before the first POST. Same for flow files. | A typo in scenario 3 should not fail after scenarios 1 and 2 ran. | M |
-| 4.2 | `kates apply --junit <file>`: one testcase per scenario, SLA violations as failures. | CI gets the same artefact `disruption` and `conformity` already produce. | M |
+| 4.1 | `kates test lint <scenario.yaml>` mirroring `compliance lint`: `parseScenarioFile` + `scenarioSpecProblems` + `validTestTypes` + unknown-key detection (`KnownFields(true)`), with file:line diagnostics; `apply` runs it before the first POST. Same for flow files. | A typo in scenario 3 should not fail after scenarios 1 and 2 ran. | M |
+| 4.2 | `kates apply --junit <file>`: one testcase per scenario, SLA violations as failures. | CI gets the same artefact `disruption` and `compliance` already produce. | M |
 | 4.3 | `kates migrate down --keep-topics` and a second confirmation when a mirrored topic holds records (end offsets through the existing target client). | Topics are user data; today one `--yes` deletes them. | M |
 | 4.4 | MCP: `list_topics` and `list_consumer_groups` (plain GETs already under `/api/cluster`); shorter schema prose with the long form in `kates://docs/mcp/<tool>` resources (target `tools/list` ≤ 80 KB with a golden size cap); short caveats in results with the full text in `kates://caveats`; `disruption_report.steps` paged; one cursor vocabulary (`offset/limit/nextOffset`); a polling-cadence hint in the `diagnose_run` prompt. | 60k tokens per turn before the first call is the biggest cost an agent user pays. | M |
 | 4.5 | Plugin contract: refuse collisions (done in 1.1), pass `KATES_URL`, `KATES_API_KEY`, `KATES_CONTEXT`, `KATES_OUTPUT` resolved by the pre-run into the plugin's environment, document it in the book. | A plugin today gets none of the context resolution the CLI did. | S |

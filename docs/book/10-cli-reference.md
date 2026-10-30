@@ -211,9 +211,9 @@ A context can enable only the commands its user works with. Each profile enables
 | `performance` | `advisor`, `badge`, `benchmark`, `cost`, `dashboard`, `explain`, `flow`, `gate`, `lab`, `profile`, `replay`, `report`, `scenario-diff`, `schedule`, `test`, `top`, `trend`, `tune`, `watch`, `webhook` |
 | `integrity` | `dashboard`, `explain`, `kafka`, `migrate`, `replay`, `report`, `scenario-diff`, `schedule`, `test`, `top`, `watch`, `webhook` |
 | `chaos` | `chaos`, `cluster`, `disruption`, `flow`, `report`, `resilience`, `test`, `watch` |
-| `topology` | `cluster`, `conformity`, `diff`, `doctor`, `kafka`, `snapshot` |
+| `topology` | `cluster`, `compliance`, `diff`, `doctor`, `kafka`, `snapshot` |
 | `security` | `kyverno`, `security` |
-| `deploy` | `auto`, `charts`, `clean`, `conformity`, `deploy`, `detect`, `doctor`, `kyverno`, `migrate`, `operator`, `operators`, `versions` |
+| `deploy` | `auto`, `charts`, `clean`, `compliance`, `deploy`, `detect`, `doctor`, `kyverno`, `migrate`, `operator`, `operators`, `versions` |
 
 Every profile also enables `audit`, `changelog`, `completion`, `ctx`, `docs`, `health`, `help`, `init`, `mcp`, `plugin`, `ports`, `status`, `theme`, `tldr`, `upgrade`, `version` and plugins. A context with no profiles enables every command, which is how every context starts.
 
@@ -290,7 +290,7 @@ Find your question in the table below, then follow its link to the family's comm
 | [Context Management](#context-management) | `ctx set`, `use`, `show`, `export`, `import`, `profiles` | Which Kates API do your commands call, and with which key? | Local files: `~/.kates.yaml` |
 | [Health, Status & Diagnostics](#health-status--diagnostics) | `health`, `status`, `version`, `doctor` | Is the Kates API up, does it reach Kafka, and is the cluster ready to test? | Kates API; `doctor` also asks `kubectl` about Kyverno, and `doctor dns` and `doctor network` work through `kubectl` alone |
 | [Cluster Commands](#cluster-commands) | `cluster info`, `check`, `topology`, `alerts`, `watch`, `topics`, `groups`, `broker configs` | What does the Kafka cluster look like, and is it healthy? | Kates API |
-| [Conformity](#conformity) | `conformity check`, `lint`, `fmt` | Is the cluster still built the way a reference file declares? | Kates API for `check`; `lint` and `fmt` work on local files |
+| [Compliance](#compliance) | `compliance check`, `lint`, `fmt` | Is the cluster still built the way a reference file declares? | Kates API for `check`; `lint` and `fmt` work on local files |
 | [Test Commands](#test-commands) | `test list`, `create`, `get`, `delete`, `watch`, `apply`, `lint`, `scaffold` | How do you start a performance test, follow it and find it again? | Kates API; `test lint` works on local files, and `test scaffold` uses only templates built into the CLI |
 | [Report Commands](#report-commands) | `report show`, `summary`, `export`, `diff`, `compare`, `brokers` | What did a run measure, and how does it compare with another run? | Kates API |
 | [Trend Analysis](#trend-analysis) | `trend` | How has one metric moved across a test type's runs over recent days? | Kates API |
@@ -626,25 +626,27 @@ kates cluster watch --interval 10
 
 ---
 
-### Conformity
+### Compliance
 
-`kates conformity check` holds the cluster to a reference architecture: a `KafkaReference` file that declares how many brokers and controllers it runs, how big each one is, and how they spread over zones and nodes. The Kates API reads the cluster read-only and reports each declared rule. A `topics` section holds every topic, Kafka's internal ones included, to a replication factor (its smallest replica set across partitions) and a `min.insync.replicas`, so a topic created with two replicas fails even when the broker defaults pass; `exclude` leaves out topics by name prefix. Declaring `topics` makes the Kates API list and describe the topics through the Kafka Admin API, even with `kafka.source: cr`. `cli/examples/conformity` holds the JSON Schema editors validate against, and examples to copy. [Conformity Checks](conformity.md) teaches the language step by step, and the [Conformity Language Reference](appendix-conformity-language.md) lists every field and every lint code.
+`kates compliance check` holds the cluster to a reference architecture: a `KafkaReference` file that declares how many brokers and controllers it runs, how big each one is, and how they spread over zones and nodes. The Kates API reads the cluster read-only and reports each declared rule. A `topics` section holds every topic, Kafka's internal ones included, to a replication factor (its smallest replica set across partitions) and a `min.insync.replicas`, so a topic created with two replicas fails even when the broker defaults pass; `exclude` leaves out topics by name prefix. Declaring `topics` makes the Kates API list and describe the topics through the Kafka Admin API, even with `kafka.source: cr`. `cli/examples/conformity` holds the JSON Schema editors validate against, and examples to copy. [Compliance Checks](compliance.md) teaches the language step by step, and the [Compliance Language Reference](appendix-compliance-language.md) lists every field and every lint code.
 
-#### conformity check
+The command was called `kates conformity` before it was renamed, and that name still runs it. The wire format keeps the old word: references declare `apiVersion: conformity.kates.io/v1alpha1`, the report's `kind` is `ConformityReport`, and the endpoint is `POST /api/conformity/check`.
+
+#### compliance check
 
 Check the cluster against a reference. The table lists every rule that is not `PASS`, with what the reference expects and what the cluster has. The pods, nodes or topics that fall short, the waiver and the detail go on lines under the row, each cut to the terminal's width; `-o json` prints the whole report. A waived rule still shows, as `WAIVED`, with its reason and date.
 
 ```bash
-kates conformity check -f platform/prod-3az.yaml
-kates conformity check -f prod-3az.yaml --output-junit conformity.xml
-kates conformity check -f prod-3az.yaml -o json
+kates compliance check -f platform/prod-3az.yaml
+kates compliance check -f prod-3az.yaml --output-junit compliance.xml
+kates compliance check -f prod-3az.yaml -o json
 ```
 
 It exits `0` when every `fail` rule holds, `1` when one does not, and `2` when it could not tell or could not run. A `warn` rule never fails it. `--output-junit` also writes one test case per rule for a CI report: a failure for `FAIL`, an error for a `fail` rule that is `UNKNOWN`, and skipped for `WAIVED`. A `warn` rule's test case passes, with what it found in the output.
 
-Before it calls the API, it lints the file as `kates conformity lint` does and prints what lint finds to stderr. A warning, such as an expired waiver, does not stop it. An error stops it with exit `2`, and the API is never called. That includes a reference no cluster could pass, such as more zones required than brokers allowed. When a rule at fault is `warn` or waived, the check can still pass, so lint warns instead, with `rule-never-passes`.
+Before it calls the API, it lints the file as `kates compliance lint` does and prints what lint finds to stderr. A warning, such as an expired waiver, does not stop it. An error stops it with exit `2`, and the API is never called. That includes a reference no cluster could pass, such as more zones required than brokers allowed. When a rule at fault is `warn` or waived, the check can still pass, so lint warns instead, with `rule-never-passes`.
 
-#### conformity lint
+#### compliance lint
 
 Check reference files offline, as a compiler does: no Kates API and no cluster. It works phase by phase: YAML syntax, duplicates, the JSON Schema, the checks the Kates API makes beyond the schema, then incoherence between constraints, such as an expired waiver. It also warns when the file's `# yaml-language-server: $schema=` comment links to another schema than the one the check uses. A key set twice is an error, `duplicate-key` when both values are the same and `conflicting-key` when they differ, because the check and the Kates API refuse it. Each finding is a line `file:line:col: severity: path: message [code]`, with the source line under it. A shared corpus keeps it refusing exactly what the API refuses.
 
@@ -654,24 +656,24 @@ prod-3az.yaml:8:5: error: spec.brokers.cuont: unknown field (did you mean "count
     |     ^
 ```
 
-`-o json` lists the findings instead, each with its `file`, `line`, `col`, `severity`, `code`, `path`, `message` and, when `kates conformity fmt` removes the cause, `fixable`.
+`-o json` lists the findings instead, each with its `file`, `line`, `col`, `severity`, `code`, `path`, `message` and, when `kates compliance fmt` removes the cause, `fixable`.
 
 ```bash
-kates conformity lint platform/prod-3az.yaml
-kates conformity lint platform/*.yaml
-kates conformity lint -o json platform/*.yaml
+kates compliance lint platform/prod-3az.yaml
+kates compliance lint platform/*.yaml
+kates compliance lint -o json platform/*.yaml
 ```
 
 It exits `0` when no file has an error (warnings are printed), `1` when one does, and `2` when a file cannot be read.
 
-#### conformity fmt
+#### compliance fmt
 
 Write reference files in one canonical form. Keys follow the schema's order, a broker config's keys are alphabetical, and each constraint takes its shortest form: `{equals: 3}` becomes `3`, and `severity: fail`, the default, goes. Exact duplicates go too: a key set twice to the same value, a value repeated in a list, a waiver or listener listed twice. That fixes lint's `duplicate-key` and `duplicate-item` errors, and its `duplicate-value` warning. Comments stay with what they annotate.
 
 ```bash
-kates conformity fmt prod-3az.yaml
-kates conformity fmt -w platform/*.yaml
-kates conformity fmt --check platform/*.yaml
+kates compliance fmt prod-3az.yaml
+kates compliance fmt -w platform/*.yaml
+kates compliance fmt --check platform/*.yaml
 ```
 
 Without `-w` it prints the result. `--check` lists the files that are not formatted and exits `1`, for CI. It refuses a file that does not parse, or one that sets a key to two different values, since only the author can say which one is meant.
@@ -869,7 +871,7 @@ Ctrl-C while `--wait` waits, or `q` in the spinner, stops the apply. The run it 
 
 #### test lint
 
-Check scenario files offline, as `kates test apply` reads them: no Kates API and no cluster. It checks the YAML or JSON syntax, the `scenarios` list or the one scenario at the top level, every key against the ones `kates test apply` reads, each `type` and `backend`, each `spec` value, and each `validate` gate. A misspelled key is an error, named with the key it is closest to. So is a value apply could not send as written: a quoted number, a unit such as `10m`, `yes` for `true`, or a fraction such as `durationSeconds: 1.5` that would be cut to a whole number. A gate that checks nothing, `maxErrorRate` or a `0` that turns a gate off, is a warning. Each finding is a line `file:line:col: severity: path: message [code]`, with the source line under it, as `kates conformity lint` prints its own.
+Check scenario files offline, as `kates test apply` reads them: no Kates API and no cluster. It checks the YAML or JSON syntax, the `scenarios` list or the one scenario at the top level, every key against the ones `kates test apply` reads, each `type` and `backend`, each `spec` value, and each `validate` gate. A misspelled key is an error, named with the key it is closest to. So is a value apply could not send as written: a quoted number, a unit such as `10m`, `yes` for `true`, or a fraction such as `durationSeconds: 1.5` that would be cut to a whole number. A gate that checks nothing, `maxErrorRate` or a `0` that turns a gate off, is a warning. Each finding is a line `file:line:col: severity: path: message [code]`, with the source line under it, as `kates compliance lint` prints its own.
 
 ```text
 s.yaml:4:3: error: spec.record: unknown field (did you mean "records"?) [unknown-field]
@@ -2810,7 +2812,7 @@ For most commands the exit code is a contract: `0` means the thing you asked for
 |------|---------|
 | `0` | The requested operation completed — a `--wait` test finished successfully, a deploy applied, a deletion was confirmed and performed |
 | `1` | The operation failed, a followed test finished `FAILED`, the connection was lost mid-follow (outcome unknown), or a confirmation was declined or could not be asked |
-| `2` | Kates could not tell, so neither yes nor no: `kates conformity check` could not tell whether a rule holds, or could not run the check; `kates detect --fail-on-error` found failing compatibility checks or could not inspect the cluster; `kates detect`, with or without `--fail-on-error`, could not read its `--values` file, or could not render or write the values `--generate-values` asked for; `kates auto` could not inspect a cluster it reached (an unreachable cluster exits `1`); `kates security audit` and `kates security tls-inspect` got an answer from the Kates API saying the check itself failed; `kates test apply` and `kates flow run` found an error in their file, or `test apply` was given flags that don't go together, and started nothing; `test lint`, `flow lint` and `conformity lint` could not read a file; a command with no JSON form was run with `-o json` (`webhook list`, `theme list`, `plugin list`, `profile list`, `snapshot list`, `changelog`, `test compare`, `test summary`, `test flame`), which prints nothing on stdout and says so on stderr |
+| `2` | Kates could not tell, so neither yes nor no: `kates compliance check` could not tell whether a rule holds, or could not run the check; `kates detect --fail-on-error` found failing compatibility checks or could not inspect the cluster; `kates detect`, with or without `--fail-on-error`, could not read its `--values` file, or could not render or write the values `--generate-values` asked for; `kates auto` could not inspect a cluster it reached (an unreachable cluster exits `1`); `kates security audit` and `kates security tls-inspect` got an answer from the Kates API saying the check itself failed; `kates test apply` and `kates flow run` found an error in their file, or `test apply` was given flags that don't go together, and started nothing; `test lint`, `flow lint` and `compliance lint` could not read a file; a command with no JSON form was run with `-o json` (`webhook list`, `theme list`, `plugin list`, `profile list`, `snapshot list`, `changelog`, `test compare`, `test summary`, `test flame`), which prints nothing on stdout and says so on stderr |
 | `130` | Ctrl-C or SIGTERM stopped a command that starts work and waits for it, after it cancelled the test it started |
 
 Consequences worth knowing in scripts:

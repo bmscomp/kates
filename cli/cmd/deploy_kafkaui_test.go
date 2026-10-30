@@ -12,7 +12,7 @@ import (
 // kates detect's --cluster-name instead, whose default is krafter, so a
 // primary under any other name got a Kafka UI whose KafkaUser and bootstrap
 // address named a cluster that does not exist; the Kates API's chaos,
-// topology and conformity stayed on krafter.
+// topology and compliance stayed on krafter.
 func TestDeployCommand_KafkaUIFollowsKafkaName(t *testing.T) {
 	defer func() {
 		deployTopology = "isolated"

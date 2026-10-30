@@ -28,7 +28,7 @@ type silentErr struct{ msg string }
 func (e *silentErr) Error() string { return e.msg }
 
 // exitError ends a command with its own exit code, after printing msg when
-// there is one: kates conformity check exits 1 on a gap and 2 when it could
+// there is one: kates compliance check exits 1 on a gap and 2 when it could
 // not tell. The codes are in exitcodes.go.
 type exitError struct {
 	code int

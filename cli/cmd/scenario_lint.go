@@ -8,19 +8,19 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/bmscomp/kates/cli/internal/conformity"
+	"github.com/bmscomp/kates/cli/internal/compliance"
 	"gopkg.in/yaml.v3"
 )
 
 // fileLinter collects the diagnostics of one scenario or flow file, each at
-// the line and column of the node it is about, as conformity lint reports
+// the line and column of the node it is about, as compliance lint reports
 // its own.
 type fileLinter struct {
-	ds []conformity.Diagnostic
+	ds []compliance.Diagnostic
 }
 
-func (l *fileLinter) add(n *yaml.Node, sev conformity.Severity, code, path, msg string) {
-	d := conformity.Diagnostic{Severity: sev, Code: code, Path: path, Message: msg}
+func (l *fileLinter) add(n *yaml.Node, sev compliance.Severity, code, path, msg string) {
+	d := compliance.Diagnostic{Severity: sev, Code: code, Path: path, Message: msg}
 	if n != nil {
 		d.Line, d.Col = n.Line, n.Column
 	}
@@ -28,20 +28,20 @@ func (l *fileLinter) add(n *yaml.Node, sev conformity.Severity, code, path, msg 
 }
 
 func (l *fileLinter) errorAt(n *yaml.Node, code, path, msg string) {
-	l.add(n, conformity.Error, code, path, msg)
+	l.add(n, compliance.Error, code, path, msg)
 }
 
 func (l *fileLinter) warnAt(n *yaml.Node, code, path, msg string) {
-	l.add(n, conformity.Warning, code, path, msg)
+	l.add(n, compliance.Warning, code, path, msg)
 }
 
 func (l *fileLinter) hasErrors() bool {
-	return conformity.HasErrors(l.ds)
+	return compliance.HasErrors(l.ds)
 }
 
 // sorted returns the diagnostics in file order.
-func (l *fileLinter) sorted() []conformity.Diagnostic {
-	slices.SortStableFunc(l.ds, func(a, b conformity.Diagnostic) int {
+func (l *fileLinter) sorted() []compliance.Diagnostic {
+	slices.SortStableFunc(l.ds, func(a, b compliance.Diagnostic) int {
 		if a.Line != b.Line {
 			return a.Line - b.Line
 		}
@@ -56,7 +56,7 @@ var yamlErrLineRE = regexp.MustCompile(`line (\d+)`)
 func (l *fileLinter) decodeError(code, path string, err error) {
 	msg := strings.TrimPrefix(err.Error(), "yaml: ")
 	msg = strings.TrimPrefix(msg, "unmarshal errors:\n")
-	d := conformity.Diagnostic{Severity: conformity.Error, Code: code, Path: path, Message: strings.TrimSpace(msg)}
+	d := compliance.Diagnostic{Severity: compliance.Error, Code: code, Path: path, Message: strings.TrimSpace(msg)}
 	if m := yamlErrLineRE.FindStringSubmatch(msg); m != nil {
 		d.Line, _ = strconv.Atoi(m[1])
 		d.Col = 1
@@ -110,7 +110,7 @@ func (l *fileLinter) mapping(n *yaml.Node, path string, known []string, hints ma
 			msg := "unknown field"
 			if hint := hints[k.Value]; hint != "" {
 				msg += " (" + hint + ")"
-			} else if guess := conformity.Closest(k.Value, known); guess != "" {
+			} else if guess := compliance.Closest(k.Value, known); guess != "" {
 				msg += fmt.Sprintf(" (did you mean %q?)", guess)
 			}
 			l.errorAt(k, "unknown-field", p, msg)
@@ -212,7 +212,7 @@ func scenarioSpecKeys() []string {
 // not send as written, and each validate gate. An error means apply would
 // refuse the file, or run something other than what it says; a warning, a
 // gate that checks nothing.
-func lintScenarioFile(name string, src []byte) []conformity.Diagnostic {
+func lintScenarioFile(name string, src []byte) []compliance.Diagnostic {
 	l := &fileLinter{}
 	doc := l.parseNode(src)
 	if doc == nil {

@@ -14,13 +14,13 @@ The chapters fall into four groups. Read the first group in install order, and r
 
 ### Build It
 
-Read these when you stand up a cluster, in the order you install things: the operator, then Kafka, then Kates. Installing Kafka is the step-by-step walkthrough, Kafka Deployment Engineering gives the reasons behind its choices, and the Deployment Guide is about Kates rather than Kafka. Conformity Checks then holds what you built to the architecture you meant to build.
+Read these when you stand up a cluster, in the order you install things: the operator, then Kafka, then Kates. Installing Kafka is the step-by-step walkthrough, Kafka Deployment Engineering gives the reasons behind its choices, and the Deployment Guide is about Kates rather than Kafka. Compliance Checks then holds what you built to the architecture you meant to build.
 
 - [Deploying the Strimzi Operator](deploying-strimzi-operator.md): how do you install, migrate and upgrade the operator that every Kafka cluster here depends on? About 30 minutes.
 - [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md): how do you deploy and verify a Kafka cluster with the chart, step by step? About 70 minutes.
 - [Kafka Deployment Engineering](15-kafka-deployment.md): why is the `krafter` Kafka cluster built the way it is, from node pools to listeners and certificates? About 25 minutes.
 - [Deployment Guide](12-deployment.md): how do you size and deploy the Kates stack, on Kind or on EKS, GKE or AKS? About 30 minutes.
-- [Conformity Checks](conformity.md): does the cluster you run still match the architecture you meant to build? About 25 minutes.
+- [Compliance Checks](compliance.md): does the cluster you run still match the architecture you meant to build? About 25 minutes.
 
 ### Share and Change It
 
@@ -47,7 +47,7 @@ The last chapter closes this Part but draws more on Parts II and III: it combine
 
 ## The Payments Question
 
-This Part moves the payments question from the lab to a cluster you run. Conformity Checks writes the architecture the payments workload needs into `payments-krafter.yaml` and holds `krafter` to it. In Multi-Tenancy a tenant is one block of `kafka-cluster` chart values in `tenants.yaml`, applied with one `helm upgrade`, and the payments workload becomes the `payments` tenant: a `payments-events` topic and a `KafkaUser` with prefix ACLs on `payments`. The Upgrade Playbook's re-test becomes `payments-scenarios.yaml`, run before and after an upgrade, and `kates report compare <pre-id>,<post-id>` compares the two runs. On that cluster, the answer comes from the same gates, grades and verdicts as in Parts II and III.
+This Part moves the payments question from the lab to a cluster you run. Compliance Checks writes the architecture the payments workload needs into `payments-krafter.yaml` and holds `krafter` to it. In Multi-Tenancy a tenant is one block of `kafka-cluster` chart values in `tenants.yaml`, applied with one `helm upgrade`, and the payments workload becomes the `payments` tenant: a `payments-events` topic and a `KafkaUser` with prefix ACLs on `payments`. The Upgrade Playbook's re-test becomes `payments-scenarios.yaml`, run before and after an upgrade, and `kates report compare <pre-id>,<post-id>` compares the two runs. On that cluster, the answer comes from the same gates, grades and verdicts as in Parts II and III.
 
 ## Practice
 

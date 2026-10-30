@@ -40,7 +40,7 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `replicaCount` | `1` | Number of Kates API pods. Must be 1; see [One replica](#one-replica) |
 | `kafka.bootstrapServers` | `krafter-kafka-bootstrap.kafka.svc:9092` | Kafka bootstrap address. This, `kafka.topicNamespace`, `trogdor.coordinatorUrl` and `networkPolicy.kafka.namespace` go through `tpl`, so a value may name `{{ .Release.Namespace }}`, as kates-platform does |
 | `kafka.topicNamespace` | `""` | Namespace for CDC test `KafkaTopic` CRs (`""` = auto-detect) |
-| `kafka.clusterName` | `krafter` | Strimzi Kafka cluster, in `networkPolicy.kafka.namespace`, that chaos, topology, cluster alerts and conformity act on; `kates deploy` sets it |
+| `kafka.clusterName` | `krafter` | Strimzi Kafka cluster, in `networkPolicy.kafka.namespace`, that chaos, topology, cluster alerts and compliance act on; `kates deploy` sets it |
 | `engine.defaultBackend` | `native` | Benchmark engine (`native` or `trogdor`) |
 | `engine.maxDurationMs` | `7200000` | Maximum planned duration accepted for one run |
 | `engine.reaperGraceMs` | `300000` | Grace after a `RUNNING` or `STOPPING` run's planned duration before the reaper fails it |
@@ -62,7 +62,7 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `ingress.certManager.issuerName` | `""` | cert-manager issuer name |
 | `ingress.certManager.issuerKind` | `ClusterIssuer` | Issuer kind |
 | `networkPolicy.enabled` | `true` | Enable NetworkPolicy |
-| `networkPolicy.kafka.namespace` | `kafka` | Namespace the brokers (`networkPolicy.kafka.port`) and the Trogdor coordinator (8889) run in; `kates deploy` sets it. The backend's chaos, topology, cluster alerts and conformity act in it too, with the policy on or off |
+| `networkPolicy.kafka.namespace` | `kafka` | Namespace the brokers (`networkPolicy.kafka.port`) and the Trogdor coordinator (8889) run in; `kates deploy` sets it. The backend's chaos, topology, cluster alerts and compliance act in it too, with the policy on or off |
 | `networkPolicy.kafka.port` | `9092` | Kafka egress target port |
 | `networkPolicy.prometheus.namespace` | `monitoring` | Prometheus egress target namespace: the one `prometheus.url` points into |
 | `networkPolicy.prometheus.port` | `9090` | Prometheus egress target port |
@@ -99,15 +99,15 @@ that namespace (`kates/docs/deployment.md` runs one in `kates`) needs a
 | `serviceAccount.create` | `true` | Create a ServiceAccount |
 | `rbac.create` | `true` | Create the RBAC objects `rbac.scope` calls for |
 | `rbac.scope` | `cluster` | `cluster`: the backend's ClusterRole/ClusterRoleBinding (Litmus CRDs, Strimzi resources, cluster reads; no Secrets). `namespace`: nothing cluster-scoped; see [Namespace-only install](#namespace-only-install) |
-| `rbac.kafkaNamespaceRole` | `true` | With `rbac.scope=namespace`, render the conformity check's read-only Role in the Kafka namespace |
-| `rbac.nodeReads` | `false` | With `rbac.scope=namespace`, render a ClusterRole and ClusterRoleBinding with `get` and `list` on `nodes`, for a conformity check's zones |
+| `rbac.kafkaNamespaceRole` | `true` | With `rbac.scope=namespace`, render the compliance check's read-only Role in the Kafka namespace |
+| `rbac.nodeReads` | `false` | With `rbac.scope=namespace`, render a ClusterRole and ClusterRoleBinding with `get` and `list` on `nodes`, for a compliance check's zones |
 | `rbac.directChaos` | `false` | Grant the writes the direct Kubernetes chaos backend makes; see [Chaos permissions](#chaos-permissions) |
 | `rbac.cdcSecretNamespaces` | `[]` | Namespaces where the `INTEGRATION_CDC` test may read its database's password; see [Secret access](#secret-access) |
 | `rbac.extraRules` | `[]` | Additional RBAC rules to append to the ClusterRole (`rbac.scope=cluster` only) |
 
 ### Namespace-only install
 
-`rbac.scope=namespace` installs Kates with no cluster-scoped object: the chart's Kyverno ClusterPolicies and `kyvernoPolicy.policyExceptions` render nothing, while `kyvernoPolicy.exceptions` renders in the release namespace. Performance and `INTEGRITY` tests make no Kubernetes call. Chaos is off: `KATES_CHAOS_PROVIDER` is `noop` unless `chaos.provider` is set. A conformity check reads the Kafka namespace, `networkPolicy.kafka.namespace` (the chart sets `KATES_TOPOLOGY_KAFKA_NAMESPACE` from it), through one read-only Role:
+`rbac.scope=namespace` installs Kates with no cluster-scoped object: the chart's Kyverno ClusterPolicies and `kyvernoPolicy.policyExceptions` render nothing, while `kyvernoPolicy.exceptions` renders in the release namespace. Performance and `INTEGRITY` tests make no Kubernetes call. Chaos is off: `KATES_CHAOS_PROVIDER` is `noop` unless `chaos.provider` is set. A compliance check reads the Kafka namespace, `networkPolicy.kafka.namespace` (the chart sets `KATES_TOPOLOGY_KAFKA_NAMESPACE` from it), through one read-only Role:
 
 | Resource | Verbs |
 |----------|-------|
@@ -124,7 +124,7 @@ helm template kates oci://ghcr.io/bmscomp/charts/kates -n team -f team-values.ya
   --set rbac.kafkaNamespaceRole=true --show-only templates/rbac.yaml | kubectl apply -f -
 ```
 
-Without node access, a conformity check takes each Kafka pod's zone for `zones`, `skew` and `kafka.rackAwareness` (source `cr`) from the EndpointSlices of Strimzi's headless Service, which carry only `topology.kubernetes.io/zone`. With another `zoneLabel` that is the Kafka CR's `spec.kafka.rack.topologyKey`, it takes the zone from the racks the brokers report; with any other, those rules are `UNKNOWN`. It finds PodMonitors only in the Kafka namespace.
+Without node access, a compliance check takes each Kafka pod's zone for `zones`, `skew` and `kafka.rackAwareness` (source `cr`) from the EndpointSlices of Strimzi's headless Service, which carry only `topology.kubernetes.io/zone`. With another `zoneLabel` that is the Kafka CR's `spec.kafka.rack.topologyKey`, it takes the zone from the racks the brokers report; with any other, those rules are `UNKNOWN`. It finds PodMonitors only in the Kafka namespace.
 
 `rbac.nodeReads=true` lifts that limit with one cluster-scoped grant, `get` and `list` on `nodes`, in a ClusterRole named `<fullname>-node-reader-<release namespace>`. A team installs with it off, and a cluster admin applies it from the same release name, namespace and values:
 

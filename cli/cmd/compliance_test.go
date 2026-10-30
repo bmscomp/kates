@@ -1,0 +1,261 @@
+package cmd
+
+import (
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
+	"github.com/mattn/go-runewidth"
+)
+
+const complianceReference = `apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: prod}
+spec:
+  versions: {kafka: {min: "4.10"}}
+  brokers: {count: {min: 3}}
+  waivers:
+    - {rule: brokers.count, reason: OPS-1, by: me, until: 2026-12-31}
+`
+
+// complianceStub answers POST /api/conformity/check with status and body, and
+// keeps what it was sent.
+func complianceStub(t *testing.T, status int, body string) *map[string]any {
+	t.Helper()
+	sent := map[string]any{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/conformity/check" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		data, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(data, &sent); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(ts.Close)
+	apiClient = client.New(ts.URL)
+	output.ResetForTesting()
+	return &sent
+}
+
+func complianceRun(t *testing.T) (string, error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "prod.yaml")
+	if err := os.WriteFile(path, []byte(complianceReference), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	complianceFile, complianceJUnit = path, filepath.Join(t.TempDir(), "compliance.xml")
+	t.Cleanup(func() { complianceFile, complianceJUnit = "", "" })
+	buf := output.ResetForTesting()
+	var err error
+	captureStdout(t, func() { err = runComplianceCheck(nil, nil) })
+	return buf.String(), err
+}
+
+func exitCode(err error) int {
+	var exit *exitError
+	if errors.As(err, &exit) {
+		return exit.code
+	}
+	if err != nil {
+		return 1
+	}
+	return 0
+}
+
+const complianceFailing = `{"reference":"prod","target":{"namespace":"kafka","name":"krafter"},
+"cluster":{"ready":true,"generation":2,"observedGeneration":1},"verdict":"FAIL",
+"summary":{"pass":1,"fail":3,"warn":0,"waived":1,"unknown":0},"results":[
+{"rule":"versions.kafka","status":"FAIL","severity":"fail","expected":{"min":"4.10"},"observed":"4.3.1"},
+{"rule":"kafka.listeners.require[plain]","status":"FAIL","severity":"fail",
+ "expected":{"port":{"equals":9092},"tls":{"equals":true},"auth":{"oneOf":["tls","scram-sha-512"]}},
+ "observed":{"type":"internal","port":9092,"tls":false,"auth":"scram-sha-512"},"detail":"tls is false"},
+{"rule":"brokers.count","status":"WAIVED","severity":"fail","expected":{"min":3},"observed":2,
+ "waiver":{"status":"FAIL","reason":"OPS-1","by":"me","until":"2026-12-31"}},
+{"rule":"controllers.requests.memory","status":"FAIL","severity":"fail","expected":{"min":"16Gi"},"observed":"11Gi",
+ "subjects":["krafter-controllers-alpha-3","krafter-controllers-gamma-4","krafter-controllers-sigma-5","krafter-controllers-delta-6"],
+ "detail":"the memory request of the kafka container in each pod, which the KafkaNodePool sets under spec.resources.requests"},
+{"rule":"controllers.count","status":"PASS","severity":"fail","expected":{"equals":3},"observed":3}]}`
+
+func TestComplianceCheckSendsDatesAndVersionsAsWritten(t *testing.T) {
+	sent := complianceStub(t, 200, complianceFailing)
+
+	if _, err := complianceRun(t); exitCode(err) != 1 {
+		t.Fatalf("exit %d, want 1 for a FAIL verdict", exitCode(err))
+	}
+	spec := (*sent)["spec"].(map[string]any)
+	if got := spec["waivers"].([]any)[0].(map[string]any)["until"]; got != "2026-12-31" {
+		t.Errorf("until sent as %v", got)
+	}
+	if got := spec["versions"].(map[string]any)["kafka"].(map[string]any)["min"]; got != "4.10" {
+		t.Errorf("a quoted version sent as %v", got)
+	}
+}
+
+// Each file the API's strict reader would refuse, but a node walk would send
+// with a rule missing, is refused before it is sent.
+func TestComplianceJSONRefusesWhatItWouldDrop(t *testing.T) {
+	for _, tc := range []struct{ name, yaml, want string }{
+		{"repeated key", "spec:\n  brokers: {count: {min: 3}}\n  brokers: {zones: {min: 3}}\n", `line 3: mapping key "brokers" already defined at line 2`},
+		{"second document", "kind: KafkaReference\n---\nkind: KafkaReference\n", "line 2: a second document; one KafkaReference per file"},
+		{"merge key", "role: &role {count: {min: 3}}\nspec: {brokers: {<<: *role}}\n", "line 2: merge keys (<<) are not read"},
+		{"anchor in itself", "x: &a [1, *a]\n", "anchor 'a' value contains itself"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := complianceJSON([]byte(tc.yaml)); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want %q", err, tc.want)
+			}
+		})
+	}
+	if v, err := complianceJSON([]byte("kind: KafkaReference\n---\n")); err != nil || v.(map[string]any)["kind"] != "KafkaReference" {
+		t.Errorf("a trailing --- gives %v, %v", v, err)
+	}
+}
+
+func TestComplianceCheckShowsTheGaps(t *testing.T) {
+	complianceStub(t, 200, complianceFailing)
+
+	out, _ := complianceRun(t)
+	for _, want := range []string{
+		"versions.kafka", "min 4.10", "4.3.1", "waived until 2026-12-31 by me: OPS-1", "reconcile pending", "1 passing rules not shown",
+		"port 9092, tls true, auth one of tls, scram-sha-512", "type internal, port 9092, tls false, auth scram-sha-512",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "controllers.count") {
+		t.Error("a passing rule is listed")
+	}
+	// The subjects and detail go on a line of their own under the row, and no
+	// line runs past the terminal, so a long pod list cannot widen the table.
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		if w := runewidth.StringWidth(line); w > output.TermWidth() {
+			t.Errorf("line %d is %d wide, past the terminal's %d: %q", i, w, output.TermWidth(), line)
+		}
+		if strings.Contains(line, "controllers.requests.memory") && strings.Contains(line, "krafter-controllers") {
+			t.Errorf("the pods share the rule's row: %q", line)
+		}
+	}
+	if !strings.Contains(out, "krafter-controllers-alpha-3, krafter-controllers-gamma-4") {
+		t.Errorf("the note under the row lacks the pods:\n%s", out)
+	}
+}
+
+func TestComplianceCheckJUnit(t *testing.T) {
+	complianceStub(t, 200, complianceFailing)
+	path := filepath.Join(t.TempDir(), "prod.yaml")
+	if err := os.WriteFile(path, []byte(complianceReference), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	junit := filepath.Join(t.TempDir(), "compliance.xml")
+	complianceFile, complianceJUnit = path, junit
+	defer func() { complianceFile, complianceJUnit = "", "" }()
+	captureStdout(t, func() { _ = runComplianceCheck(nil, nil) })
+
+	data, err := os.ReadFile(junit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	xml := string(data)
+	for _, want := range []string{
+		`<testsuite name="compliance.brokers" tests="1" failures="0" errors="0" skipped="1"`,
+		`<skipped message="FAIL, waived until 2026-12-31 by me: OPS-1">`,
+		`<failure message="expected min 4.10, observed 4.3.1" type="fail">`,
+		`<failure message="expected min 16Gi, observed 11Gi (krafter-controllers-alpha-3, krafter-controllers-gamma-4, krafter-controllers-sigma-5 +1)" type="fail">`,
+		`<failure message="expected port 9092, tls true, auth one of tls, scram-sha-512, observed type internal, port 9092, tls false, auth scram-sha-512" type="fail">`,
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("JUnit lacks %s:\n%s", want, xml)
+		}
+	}
+}
+
+// A warn rule cannot fail the check, so a CI report must not count it as an
+// error when it could not be read.
+func TestComplianceJUnitPassesAnUnknownWarnRule(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "compliance.xml")
+	report := &client.ComplianceReport{Verdict: "UNKNOWN", Results: []client.ComplianceResult{
+		{Rule: "monitoring.podMonitor", Status: "UNKNOWN", Severity: "warn", Detail: "podmonitors is forbidden"},
+		{Rule: "kafka.authorization", Status: "UNKNOWN", Severity: "fail", Detail: "Kubernetes API not available"},
+	}}
+	if err := writeComplianceJUnit(report, path, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`<testsuite name="compliance.monitoring" tests="1" failures="0" errors="0"`,
+		`<system-out>UNKNOWN (warn): podmonitors is forbidden</system-out>`,
+		`<testsuite name="compliance.kafka" tests="1" failures="0" errors="1"`,
+		`<error message="Kubernetes API not available" type="unknown"></error>`,
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("JUnit lacks %s:\n%s", want, data)
+		}
+	}
+}
+
+// A result with no rule id (a malformed report) used to panic the JUnit
+// writer on the empty split; it goes under an "unknown" section.
+func TestComplianceJUnitEmptyRuleID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "compliance.xml")
+	report := &client.ComplianceReport{Verdict: "FAIL", Results: []client.ComplianceResult{
+		{Rule: "", Status: "FAIL", Severity: "fail", Detail: "no rule id"},
+	}}
+	if err := writeComplianceJUnit(report, path, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `<testsuite name="compliance.unknown" tests="1" failures="1"`) {
+		t.Errorf("JUnit lacks the unknown section:\n%s", data)
+	}
+}
+
+func TestComplianceCheckExitCodes(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		want   int
+	}{
+		{"pass", 200, `{"verdict":"PASS","results":[]}`, 0},
+		{"unknown", 200, `{"verdict":"UNKNOWN","results":[]}`, 2},
+		{"invalid reference", 400, `{"status":400,"error":"Validation Failed","message":"spec.brokers.cuont: unknown field"}`, 2},
+		{"another cluster", 409, `{"status":409,"error":"Conflict","message":"The reference is for Kafka x/y"}`, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			complianceStub(t, tc.status, tc.body)
+			_, err := complianceRun(t)
+			if got := exitCode(err); got != tc.want {
+				t.Errorf("exit %d, want %d (%v)", got, tc.want, err)
+			}
+			if tc.status == 400 && !strings.Contains(err.Error(), "spec.brokers.cuont: unknown field") {
+				t.Errorf("the refusal does not name the path: %v", err)
+			}
+		})
+	}
+}
+
+func TestComplianceCheckRefusesWithoutAFile(t *testing.T) {
+	if got := exitCode(runComplianceCheck(nil, nil)); got != 2 {
+		t.Errorf("exit %d, want 2", got)
+	}
+}

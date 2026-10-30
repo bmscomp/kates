@@ -393,9 +393,9 @@ func configureDeploySelection(cmd *cobra.Command, wizard bool) error {
 		if err := checkAdminlessPrerequisites(context.Background(), resolveNamespaces()); err != nil {
 			return err
 		}
-		adminlessConformityMissing = missingConformityGrants(context.Background(), resolveNamespaces().kafka)
-		if len(adminlessConformityMissing) > 0 {
-			output.Warn(conformityRoleHandoff(resolveNamespaces(), adminlessConformityMissing))
+		adminlessComplianceMissing = missingComplianceGrants(context.Background(), resolveNamespaces().kafka)
+		if len(adminlessComplianceMissing) > 0 {
+			output.Warn(complianceRoleHandoff(resolveNamespaces(), adminlessComplianceMissing))
 		}
 	}
 
@@ -641,8 +641,8 @@ func runDeployPipeline(dc *deployContext, sharedEntries []DeploySummaryEntry, st
 func finishDeploy(ctx context.Context, target string, ns resolvedNamespaces, entries []DeploySummaryEntry, elapsed time.Duration) {
 	RenderDeployDashboard(ctx, entries, elapsed)
 	// Said again here, where the deploy ends, so it isn't lost above the dashboard.
-	if deployAdminless && len(adminlessConformityMissing) > 0 {
-		output.Warn(conformityRoleHandoff(ns, adminlessConformityMissing))
+	if deployAdminless && len(adminlessComplianceMissing) > 0 {
+		output.Warn(complianceRoleHandoff(ns, adminlessComplianceMissing))
 	}
 
 	// Store the key from Secret kates-api-key in the active context,

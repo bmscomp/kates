@@ -53,9 +53,9 @@
     - health
     - cluster check
 
-- name: conformity check
+- name: compliance check
   category: Cluster
-  synopsis: "kates conformity check -f <reference.yaml> [--output-junit <file>]"
+  synopsis: "kates compliance check -f <reference.yaml> [--output-junit <file>]"
   short: "Check the cluster against a reference architecture"
   description: |
     Lints a KafkaReference file (cli/examples/conformity) first, and stops
@@ -65,16 +65,16 @@
     holds, 1 when one does not, and 2 when the check could not tell or
     could not run. --output-junit also writes a JUnit report for CI.
   examples:
-    - "kates conformity check -f prod-3az.yaml"
-    - "kates conformity check -f prod-3az.yaml --output-junit conformity.xml"
-    - "kates conformity check -f prod-3az.yaml -o json"
+    - "kates compliance check -f prod-3az.yaml"
+    - "kates compliance check -f prod-3az.yaml --output-junit compliance.xml"
+    - "kates compliance check -f prod-3az.yaml -o json"
   see_also:
     - cluster check
     - cluster topology
 
-- name: conformity lint
+- name: compliance lint
   category: Cluster
-  synopsis: "kates conformity lint <reference.yaml>..."
+  synopsis: "kates compliance lint <reference.yaml>..."
   short: "Check reference files offline, as a compiler does"
   description: |
     Checks KafkaReference files without a Kates API or a cluster: YAML
@@ -83,16 +83,16 @@
     with the source line under each; -o json lists them instead.
     Exits 1 on an error, 0 with warnings only, 2 on an unreadable file.
   examples:
-    - "kates conformity lint prod-3az.yaml"
-    - "kates conformity lint platform/*.yaml"
-    - "kates conformity lint -o json platform/*.yaml"
+    - "kates compliance lint prod-3az.yaml"
+    - "kates compliance lint platform/*.yaml"
+    - "kates compliance lint -o json platform/*.yaml"
   see_also:
-    - conformity check
-    - conformity fmt
+    - compliance check
+    - compliance fmt
 
-- name: conformity fmt
+- name: compliance fmt
   category: Cluster
-  synopsis: "kates conformity fmt [-w | --check] <reference.yaml>..."
+  synopsis: "kates compliance fmt [-w | --check] <reference.yaml>..."
   short: "Format reference files canonically, removing duplicates"
   description: |
     Writes KafkaReference files in one canonical form, each constraint in
@@ -100,12 +100,12 @@
     file that does not parse or sets a key to two values. -w writes back;
     --check lists unformatted files and exits 1.
   examples:
-    - "kates conformity fmt prod-3az.yaml"
-    - "kates conformity fmt -w platform/*.yaml"
-    - "kates conformity fmt --check platform/*.yaml"
+    - "kates compliance fmt prod-3az.yaml"
+    - "kates compliance fmt -w platform/*.yaml"
+    - "kates compliance fmt --check platform/*.yaml"
   see_also:
-    - conformity lint
-    - conformity check
+    - compliance lint
+    - compliance check
 
 - name: cluster info
   category: Cluster

@@ -47,7 +47,7 @@ class NativeReflectionRegistryTest {
             "com/bmscomp/kates/disruption",
             "com/bmscomp/kates/chaos",
             "com/bmscomp/kates/resilience",
-            "com/bmscomp/kates/conformity");
+            "com/bmscomp/kates/compliance");
 
     /**
      * Classes that live in those packages but never get serialized: CDI beans,

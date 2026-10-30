@@ -386,10 +386,10 @@ admin either sets strimzi-kafka-operator.createAggregateRoles=true on the Strimz
 }
 
 // The reads the kates chart's Kafka-reader Role grants in the Kafka namespace
-// (charts/kates/templates/rbac.yaml), which a conformity check needs. RBAC lets
+// (charts/kates/templates/rbac.yaml), which a compliance check needs. RBAC lets
 // an account create a Role only for permissions it holds, so the install
 // creates it only when the account holds all of them.
-var conformityReaderGrants = [][2]string{
+var complianceReaderGrants = [][2]string{
 	{"get", "kafkas.kafka.strimzi.io"},
 	{"list", "kafkanodepools.kafka.strimzi.io"},
 	{"list", "pods"},
@@ -398,13 +398,13 @@ var conformityReaderGrants = [][2]string{
 	{"list", "endpointslices.discovery.k8s.io"},
 }
 
-// adminlessConformityMissing holds the reads the account lacks in the Kafka
+// adminlessComplianceMissing holds the reads the account lacks in the Kafka
 // namespace; when it is not empty Kates installs without the Role.
-var adminlessConformityMissing []string
+var adminlessComplianceMissing []string
 
-func missingConformityGrants(ctx context.Context, kafkaNS string) []string {
+func missingComplianceGrants(ctx context.Context, kafkaNS string) []string {
 	var missing []string
-	for _, g := range conformityReaderGrants {
+	for _, g := range complianceReaderGrants {
 		answer, _ := runExecOutputFn(ctx, "kubectl", "auth", "can-i", g[0], g[1], "-n", kafkaNS)
 		if strings.TrimSpace(string(answer)) != "yes" {
 			missing = append(missing, g[0]+" "+g[1])
@@ -413,12 +413,12 @@ func missingConformityGrants(ctx context.Context, kafkaNS string) []string {
 	return missing
 }
 
-// conformityRoleHandoff tells the user how an admin turns conformity checks on
+// complianceRoleHandoff tells the user how an admin turns compliance checks on
 // when the install had to leave the Role out.
-func conformityRoleHandoff(ns resolvedNamespaces, missing []string) string {
-	return fmt.Sprintf(`Conformity checks are off: Kates needs a read-only Role in namespace %s, and this account
+func complianceRoleHandoff(ns resolvedNamespaces, missing []string) string {
+	return fmt.Sprintf(`Compliance checks are off: Kates needs a read-only Role in namespace %s, and this account
 may not create it because it lacks: %s.
-Everything else works. To turn conformity checks on, an account that holds those reads there
+Everything else works. To turn compliance checks on, an account that holds those reads there
 (a cluster admin) runs:
 
   helm template kates %s -n %s --set rbac.scope=namespace \

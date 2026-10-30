@@ -29,7 +29,7 @@ var legacySharedFlags = map[string]bool{
 	"kates test apply --file":       true,
 	"kates flow run --file":         true,
 	"kates resilience run --file":   true,
-	"kates conformity check --file": true,
+	"kates compliance check --file": true,
 	"kates ctx import --file":       true,
 	// Command families another wave moves: a --timeout in whole seconds or
 	// a Helm duration, a --records that sizes an estimate, scaffold's

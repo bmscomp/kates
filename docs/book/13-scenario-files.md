@@ -449,7 +449,7 @@ The library covers the common cases: `quick-load` (fast smoke test), `production
 
 ## Checking a File Before It Runs
 
-`kates test lint` checks scenario files without a Kates API or a cluster, as `kates conformity lint` checks a reference. It reads each file as `kates test apply` reads it and reports every finding as `file:line:col: severity: path: message [code]`, with the source line and a caret under it:
+`kates test lint` checks scenario files without a Kates API or a cluster, as `kates compliance lint` checks a reference. It reads each file as `kates test apply` reads it and reports every finding as `file:line:col: severity: path: message [code]`, with the source line and a caret under it:
 
 ```bash
 kates test lint regression-suite.yaml

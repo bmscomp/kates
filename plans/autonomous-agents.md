@@ -40,9 +40,9 @@ Rules that hold at every step:
 | Agent | Trigger | Step | Blocked on |
 | --- | --- | --- | --- |
 | **Run Analyst** (§2) | `test.completed` webhook | 0 | nothing |
-| Drift Watcher: conformity, `kyverno check`, `security_evidence`, diffed with the day before | cron | 0 | nothing |
+| Drift Watcher: compliance, `kyverno check`, `security_evidence`, diffed with the day before | cron | 0 | nothing |
 | Was-it-us triage: `kates_activity`, lag and topology around a Prometheus alert | Alertmanager webhook | 0 | nothing |
-| Upgrade Rehearser: published charts on a kind lab, smoke, conformity, baseline run, go/no-go | release tag | 0 on the lab under test; deploys with its own kubeconfig, not a Kates key | a throwaway cluster |
+| Upgrade Rehearser: published charts on a kind lab, smoke, compliance, baseline run, go/no-go | release tag | 0 on the lab under test; deploys with its own kubeconfig, not a Kates key | a throwaway cluster |
 | Capacity Explorer: a series of load steps up to the knee | on request | 2 | agent policy (plan §5.5) |
 | Game-day Conductor: `plan_game_day` → `preview_disruption` → proposal → person approves → `debrief_disruption` | on request | 1, then 3 through a person | plan Phases 5a and 5b |
 

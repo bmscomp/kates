@@ -164,10 +164,10 @@ jobs:
           scripts/retry.sh 3 docker build -t "${image}" tester/
           kind load docker-image "${image}" --name ci-test
 
-      # The conformity check against a live Strimzi cluster. The deploy is the
+      # The compliance check against a live Strimzi cluster. The deploy is the
       # migration e2e's: the operator chart and the kafka-cluster chart the repo
       # ships, with values-ci.yaml's one controller and one broker so it fits
-      # the runner. ConformityLiveTest then runs the check's code through this
+      # the runner. ComplianceLiveTest then runs the check's code through this
       # job's kubeconfig against cli/examples/conformity/kind-ci.yaml, and every
       # rule must pass. No Kates API is deployed: kafka.source cr reads only
       # Kubernetes.
@@ -181,7 +181,7 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           cache: maven
 
-      # ConformityNamespacedLiveTest impersonates the ServiceAccount kates as a
+      # ComplianceNamespacedLiveTest impersonates the ServiceAccount kates as a
       # rbac.scope=namespace install grants it: in team, the Kafka-namespace
       # Role only; in team-nodes, rbac.nodeReads too.
       - name: Apply the kates chart's namespace-scope RBAC
@@ -196,12 +196,12 @@ jobs:
           helm template kates charts/kates/ -n team-nodes --set rbac.scope=namespace --set rbac.nodeReads=true \
               --show-only templates/rbac.yaml | kubectl apply -f -
 
-      - name: Conformity check against the live cluster
-        id: conformity
+      - name: Compliance check against the live cluster
+        id: compliance
         working-directory: kates
         env:
-          KATES_CONFORMITY_LIVE: "true"
-        run: ./mvnw test -q -B -ntp -Dtest='ConformityLiveTest,ConformityNamespacedLiveTest'
+          KATES_COMPLIANCE_LIVE: "true"
+        run: ./mvnw test -q -B -ntp -Dtest='ComplianceLiveTest,ComplianceNamespacedLiveTest'
 
       # Reads each step's real outcome. The previous table printed ✅ on every
       # row under `if: always()`, so a failed run still summarised as green.
@@ -214,7 +214,7 @@ jobs:
           NETPOL: ${{ steps.netpol.outcome }}
           MONITORING: ${{ steps.monitoring.outcome }}
           KAFKA: ${{ steps.kafka.outcome }}
-          CONFORMITY: ${{ steps.conformity.outcome }}
+          COMPLIANCE: ${{ steps.compliance.outcome }}
         run: |
           mark() { case "$1" in success) echo "✅" ;; skipped) echo "⏭️" ;; *) echo "❌" ;; esac; }
           {
@@ -228,7 +228,7 @@ jobs:
             echo "| NetworkPolicies | $(mark "$NETPOL") |"
             echo "| Jaeger manifests | $(mark "$MONITORING") |"
             echo "| Strimzi + Kafka deploy | $(mark "$KAFKA") |"
-            echo "| Conformity (kind-ci.yaml) | $(mark "$CONFORMITY") |"
+            echo "| Compliance (kind-ci.yaml) | $(mark "$COMPLIANCE") |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # No explicit teardown: helm/kind-action registers a post step that deletes

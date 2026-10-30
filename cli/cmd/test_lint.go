@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/bmscomp/kates/cli/client"
-	"github.com/bmscomp/kates/cli/internal/conformity"
+	"github.com/bmscomp/kates/cli/internal/compliance"
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/bmscomp/kates/cli/pkg/grade"
 	"github.com/spf13/cobra"
@@ -62,13 +62,13 @@ when there is an error.
   kates flow lint -o json flows/*.yaml`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(_ *cobra.Command, files []string) error {
-		return runFileLint(files, func(_ string, src []byte) []conformity.Diagnostic { return lintFlowFile(src) })
+		return runFileLint(files, func(_ string, src []byte) []compliance.Diagnostic { return lintFlowFile(src) })
 	},
 }
 
-// runFileLint prints what lint finds in each file, as kates conformity lint
+// runFileLint prints what lint finds in each file, as kates compliance lint
 // does, and exits 1 when a file has an error.
-func runFileLint(files []string, lint func(name string, src []byte) []conformity.Diagnostic) error {
+func runFileLint(files []string, lint func(name string, src []byte) []compliance.Diagnostic) error {
 	errs, warns := 0, 0
 	findings := []lintFinding{}
 	for _, f := range files {
@@ -82,7 +82,7 @@ func runFileLint(files []string, lint func(name string, src []byte) []conformity
 			if outputMode != "json" {
 				fmt.Fprintln(output.Out, d.Report(f, lines))
 			}
-			if d.Severity == conformity.Error {
+			if d.Severity == compliance.Error {
 				errs++
 			} else {
 				warns++
@@ -105,12 +105,12 @@ func runFileLint(files []string, lint func(name string, src []byte) []conformity
 // lintBefore prints what lint found in a file about to run, to stderr since
 // stdout may carry the JSON summary, and stops on an error with exit 2:
 // nothing has started.
-func lintBefore(file string, src []byte, ds []conformity.Diagnostic, command string) error {
+func lintBefore(file string, src []byte, ds []compliance.Diagnostic, command string) error {
 	lines := strings.Split(string(src), "\n")
 	errs := 0
 	for _, d := range ds {
 		fmt.Fprintln(output.Err, d.Report(file, lines))
-		if d.Severity == conformity.Error {
+		if d.Severity == compliance.Error {
 			errs++
 		}
 	}
@@ -140,7 +140,7 @@ var (
 
 // lintFlowFile checks a flow file as kates flow run reads it, after the
 // environment expansion it makes.
-func lintFlowFile(src []byte) []conformity.Diagnostic {
+func lintFlowFile(src []byte) []compliance.Diagnostic {
 	src = []byte(os.ExpandEnv(string(src)))
 	l := &fileLinter{}
 	doc := l.parseNode(src)
@@ -219,7 +219,7 @@ func (l *fileLinter) flowAction(n *yaml.Node, path string) {
 		l.errorAt(n, "not-implemented", path, "the action "+n.Value+" is not implemented: kates flow run fails the step")
 	default:
 		msg := fmt.Sprintf("there is no action %s; it is %s", nodeKind(n), strings.Join(flowActions, " or "))
-		if guess := conformity.Closest(n.Value, flowActions); guess != "" {
+		if guess := compliance.Closest(n.Value, flowActions); guess != "" {
 			msg += fmt.Sprintf(" (did you mean %q?)", guess)
 		}
 		l.errorAt(n, "unknown-action", path, msg)

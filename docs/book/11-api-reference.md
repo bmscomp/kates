@@ -647,13 +647,13 @@ Non-default configuration entries for a specific broker.
 
 ---
 
-### Conformity
+### Compliance
 
-One endpoint holds the cluster to a reference architecture; `kates conformity check` wraps it.
+One endpoint holds the cluster to a reference architecture; `kates compliance check` wraps it.
 
 #### POST /api/conformity/check
 
-Check the cluster against a reference architecture (scope `read`). The body is a `KafkaReference` as JSON; `kates conformity check` converts the YAML file and sends it. The check reads Kubernetes and the Strimzi resources, and the Kafka Admin API when the reference declares `topics` or sets `kafka.source: brokers`; it writes nothing and stores nothing: it is a POST because the reference is a body.
+Check the cluster against a reference architecture (scope `read`). The body is a `KafkaReference` as JSON; `kates compliance check` converts the YAML file and sends it. The check reads Kubernetes and the Strimzi resources, and the Kafka Admin API when the reference declares `topics` or sets `kafka.source: brokers`; it writes nothing and stores nothing: it is a POST because the reference is a body.
 
 The response is 200 whatever the verdict, with one result per declared rule. `verdict` is `FAIL` when a `fail` rule does not hold, `UNKNOWN` when a `fail` rule could not be read, and otherwise `PASS`.
 

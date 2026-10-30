@@ -227,7 +227,7 @@ func TestApplyAdminlessProfile_RefusesClusterScopedFlags(t *testing.T) {
 	}
 }
 
-func TestRunDeploy_AdminlessConformityRoleFollowsTheGrants(t *testing.T) {
+func TestRunDeploy_AdminlessComplianceRoleFollowsTheGrants(t *testing.T) {
 	for _, tc := range []struct {
 		name, refuse string
 		withRole     bool

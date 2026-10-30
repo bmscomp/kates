@@ -35,7 +35,7 @@ var commandProfiles = map[string][]string{
 	"clean":         {"deploy"},
 	"cluster":       {"topology", "chaos"},
 	"completion":    nil,
-	"conformity":    {"deploy", "topology"},
+	"compliance":    {"deploy", "topology"},
 	"cost":          {"performance"},
 	"ctx":           nil,
 	"dashboard":     {"performance", "integrity"},
