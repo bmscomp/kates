@@ -66,7 +66,7 @@ API tests run against a Quarkus test instance started with the `test` profile. T
 ```properties
 %test.quarkus.datasource.db-kind=h2
 %test.quarkus.datasource.jdbc.url=jdbc:h2:mem:kates-test
-%test.quarkus.hibernate-orm.database.generation=drop-and-create
+%test.quarkus.hibernate-orm.schema-management.strategy=drop-and-create
 %test.kates.kafka.bootstrap-servers=localhost:9092
 %test.kates.trogdor.coordinator-url=http://localhost:8889
 ```

@@ -309,7 +309,7 @@ class KafkaProbeChecksTest {
     }
 
     private static MockProducer<byte[], byte[]> producer(boolean autoComplete) {
-        return new MockProducer<>(autoComplete, new ByteArraySerializer(), new ByteArraySerializer());
+        return new MockProducer<>(autoComplete, null, new ByteArraySerializer(), new ByteArraySerializer());
     }
 
     private void topics(TopicDescription... descriptions) {

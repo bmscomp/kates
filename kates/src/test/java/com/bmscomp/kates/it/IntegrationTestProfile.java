@@ -18,7 +18,7 @@ public class IntegrationTestProfile implements QuarkusTestProfile {
     public Map<String, String> getConfigOverrides() {
         return Map.of(
                 "quarkus.datasource.db-kind", "postgresql",
-                "quarkus.hibernate-orm.database.generation", "none",
+                "quarkus.hibernate-orm.schema-management.strategy", "none",
                 "quarkus.flyway.migrate-at-start", "true");
     }
 }

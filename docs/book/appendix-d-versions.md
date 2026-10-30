@@ -12,7 +12,7 @@ Every version the platform pins, in one place. This table is generated from the 
 | Jaeger chart | 3.4.1 | `versions.env` |
 | cert-manager | v1.17.1 | `versions.env` |
 | Java (backend) | 21 | `kates/pom.xml` |
-| Quarkus | 3.20.6 | `kates/pom.xml` |
+| Quarkus | 3.40.1.1 | `kates/pom.xml` |
 | Go (CLI) | 1.26.0 | `cli/go.mod` |
 | `apicurio-registry` chart | 0.4.1 (app 3.3.0) | `charts/apicurio-registry/Chart.yaml` |
 | `cdc-postgresql` chart | 0.2.0 (app 16.15) | `charts/cdc-postgresql/Chart.yaml` |

@@ -15,13 +15,11 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.20.6</quarkus.platform.version>
+        <quarkus.platform.version>3.40.1.1</quarkus.platform.version>
         <surefire-plugin.version>3.6.1</surefire-plugin.version>
-        <kafka.version>3.9.2</kafka.version>
         <lz4.version>1.12.1</lz4.version>
         <snappy.version>1.1.10.10</snappy.version>
         <zstd.version>1.5.7-24</zstd.version>
-        <netty.version>4.1.138.Final</netty.version>
         <spotless.version>3.10.3</spotless.version>
         <palantir-format.version>2.89.0</palantir-format.version>
     </properties>
@@ -35,33 +33,12 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <!-- Override Quarkus-managed kafka-clients to fix CVE-2026-33557 (CRITICAL) + CVE-2026-35554,
-                 GHSA-5qcv-4rpc-jp93, GHSA-wf66-mphr-4c4r (fixed in 3.9.2) -->
-            <dependency>
-                <groupId>org.apache.kafka</groupId>
-                <artifactId>kafka-clients</artifactId>
-                <version>${kafka.version}</version>
-            </dependency>
             <dependency>
                 <groupId>org.testcontainers</groupId>
                 <artifactId>testcontainers-bom</artifactId>
                 <version>2.0.5</version>
                 <type>pom</type>
                 <scope>import</scope>
-            </dependency>
-            <!-- Override Quarkus-managed Netty to fix CVE-2026-33871 + CVE-2026-33870 and the
-                 4.1.135-4.1.137 codec-http/http2 advisories (SPDY, HTTP/2, CORS). Only the two
-                 codec modules move: netty-handler and friends stay on the platform's version
-                 because moving them breaks the native image (see .trivyignore.yaml). -->
-            <dependency>
-                <groupId>io.netty</groupId>
-                <artifactId>netty-codec-http</artifactId>
-                <version>${netty.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.netty</groupId>
-                <artifactId>netty-codec-http2</artifactId>
-                <version>${netty.version}</version>
             </dependency>
             <!-- org.lz4:lz4-java is abandoned (1.8.1 is a relocation stub); the maintained fork
                  keeps the net.jpountz packages. Managed here so the copy quarkus-messaging-kafka
@@ -224,13 +201,12 @@
         <dependency>
             <groupId>org.hdrhistogram</groupId>
             <artifactId>HdrHistogram</artifactId>
-            <version>2.2.2</version>
         </dependency>
 
         <!-- Testing -->
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-junit5</artifactId>
+            <artifactId>quarkus-junit</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -240,7 +216,7 @@
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-junit5-mockito</artifactId>
+            <artifactId>quarkus-junit-mockito</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -281,12 +257,12 @@
              jsonb query path are actually exercised. -->
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>postgresql</artifactId>
+            <artifactId>testcontainers-postgresql</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>kafka</artifactId>
+            <artifactId>testcontainers-kafka</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -337,6 +313,7 @@
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                         <maven.home>${maven.home}</maven.home>
                     </systemPropertyVariables>
+                    <argLine>@{argLine}</argLine>
                 </configuration>
             </plugin>
             <plugin>
@@ -381,6 +358,7 @@
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                     </systemPropertyVariables>
+                    <argLine>@{argLine}</argLine>
                 </configuration>
             </plugin>
             <plugin>

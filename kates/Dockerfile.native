@@ -18,7 +18,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
   -o /kates-cli .
 
 # Stage 2: Build the native executable (Mandrel)
-FROM quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-21 AS builder
+# jdk-25: Quarkus 3.40 refuses Mandrel older than 25.0.
+FROM quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-25 AS builder
 USER root
 WORKDIR /build
 

@@ -36,7 +36,7 @@ class NativeKafkaBackendStartTest {
             props -> {
                 producersMade.incrementAndGet();
                 madeAtMs.set(System.currentTimeMillis());
-                return new MockProducer<>(true, new ByteArraySerializer(), new ByteArraySerializer());
+                return new MockProducer<>(true, null, new ByteArraySerializer(), new ByteArraySerializer());
             },
             props -> {
                 throw new AssertionError("a produce task makes no consumer");

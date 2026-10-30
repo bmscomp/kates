@@ -104,7 +104,7 @@ class NativeKafkaBackendRoundTripTest {
     private MockProducer<byte[], byte[]> producerFeeding(
             MockConsumer<byte[], byte[]> consumer, long firstOffset, LongFunction<List<byte[]>> before) {
         AtomicLong nextOffset = new AtomicLong(firstOffset);
-        return new MockProducer<>(true, new ByteArraySerializer(), new ByteArraySerializer()) {
+        return new MockProducer<>(true, null, new ByteArraySerializer(), new ByteArraySerializer()) {
             @Override
             public synchronized Future<RecordMetadata> send(ProducerRecord<byte[], byte[]> record, Callback callback) {
                 Future<RecordMetadata> acked = super.send(record, callback);
