@@ -18,6 +18,7 @@ import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import com.bmscomp.kates.audit.AuditChain;
 import com.bmscomp.kates.security.Scopes;
 import com.bmscomp.kates.service.AuditService;
 
@@ -30,6 +31,23 @@ public class AuditResource {
 
     @Inject
     AuditService auditService;
+
+    @Inject
+    AuditChain auditChain;
+
+    @GET
+    @Path("/verify")
+    @Operation(
+            summary = "Verify the audit chain",
+            description = "Walks every audit row, oldest first, and checks that each one follows the row before it"
+                    + " and matches its hash, up to the chain's head. intact is false, with the first broken row"
+                    + " and why, when a row was changed, removed or added in the database. Rows written before"
+                    + " the chain began are counted as unchained. headHash is the hash to keep outside Kates, to"
+                    + " compare with later.")
+    @APIResponse(responseCode = "200", description = "What the walk found, intact or not")
+    public AuditChain.Verification verify() {
+        return auditChain.verify();
+    }
 
     @GET
     @Operation(

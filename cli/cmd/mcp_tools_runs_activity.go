@@ -382,7 +382,7 @@ func mcpActivityDisruptionsSince(ctx context.Context, call *mcpCall, since time.
 func mcpActivityAuditSince(ctx context.Context, call *mcpCall, since time.Time, page mcpActivityPage) (mcpActivityAudit, error) {
 	out := mcpActivityAudit{Rows: []mcpActivityAuditRow{}}
 	// A UTC "Z" instant: the backend ignores a since it cannot parse and
-	// returns every row (AuditService.java:110-115).
+	// returns every row (AuditService.java:118-123).
 	items, total, err := mcpBackendRange(page.offset, page.limit, func(p, size int) ([]client.AuditEntry, int64, error) {
 		pg, err := call.Client().MCPActivityAudit(ctx, since.UTC().Format(time.RFC3339Nano), p, size)
 		if err != nil {
@@ -468,7 +468,7 @@ var mcpCaveatsRunsActivity = []mcpCaveat{
 			mcpAnchoredRef(mcpJava+"disruption/DisruptionScheduler.java:109-115", "Actor.SCHEDULER"),
 			mcpAnchoredRef(mcpJava+"disruption/DisruptionResource.java:92", "auditTrail.done();"),
 			"kates/src/main/resources/db/migration/V26__audit_actor.sql:1-8",
-			mcpAnchoredRef(mcpJava+"api/AuditResource.java:53", "auditService.list(500"),
+			mcpAnchoredRef(mcpJava+"api/AuditResource.java:71", "auditService.list(500"),
 		},
 	},
 	{

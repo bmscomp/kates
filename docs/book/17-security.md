@@ -393,6 +393,18 @@ Turn `DEBUG` on for an investigation, then set the logger back to `INFO`. The au
 For lighter-weight auditing, Kates records every change made through the Kates API, over REST or gRPC, in its audit log: what was done, to what, and who did it. Who is the principal of the API key used (see `GET /api/whoami`), marked as a person, an agent, or `system:scheduler` for a schedule's firing. A refused or failed change leaves a row too, with how it ended; a request without a valid key leaves none. When a change started a test run or a disruption, its row's target is that run's or report's id, which is how to find who started it: runs and reports record no owner of their own. Inspect the trail with `kates audit`, filtering with `--type`, `--since` and `--actor`. Rows written before the Kates API recorded actors name no one.
 :::
 
+The audit log is a hash chain. Each row holds the hash of the row before it and a SHA-256 over that hash and its own fields, so a row that someone with database access changes, removes or adds breaks the chain at that row. `GET /api/audit/verify` (scope `read`) walks every row, oldest first, and answers what it found:
+
+```json
+{
+  "intact": false, "chained": 4211, "unchained": 318,
+  "headId": 4529, "headHash": "9c1e…", "brokenAt": 2077,
+  "problem": "row 2077 does not match its hash: it was changed"
+}
+```
+
+`unchained` counts the rows written before the Kates API chained its log; the chain starts after them. Removing the newest rows shows as a chain that ends before `headId`. The chain can't stop someone who can rewrite the whole table, hashes included, so keep a `headHash` and its `headId` outside Kates, in a ticket or a signed report. Later, `GET /api/audit` lists each chained row's `rowHash`: if row `headId` now holds another hash than the one you kept, the chain was rewritten, however intact it looks. The walk reads the whole table, so on a large log it takes a while.
+
 ## Network Policies
 
 Network policies decide which pods can open a socket to the brokers at all, so that a compromised pod elsewhere in the cluster cannot even try a stolen password. Know what the shipped ones do before you rely on them: as the charts ship, the client listeners are open to every pod in the cluster.

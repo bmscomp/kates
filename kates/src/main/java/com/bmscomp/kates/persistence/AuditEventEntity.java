@@ -1,6 +1,7 @@
 package com.bmscomp.kates.persistence;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -39,6 +40,14 @@ public class AuditEventEntity {
     @Column(name = "principal_type", length = 16)
     private String principalType;
 
+    /** The row_hash of the row before this one in the chain (V28); null on older rows. */
+    @Column(name = "prev_hash", length = 64)
+    private String prevHash;
+
+    /** SHA-256 over prev_hash and this row's fields (V28); null on older rows. */
+    @Column(name = "row_hash", length = 64)
+    private String rowHash;
+
     public AuditEventEntity() {}
 
     public AuditEventEntity(String action, String eventType, String target, String details) {
@@ -46,7 +55,8 @@ public class AuditEventEntity {
         this.eventType = eventType;
         this.target = target;
         this.details = details;
-        this.createdAt = Instant.now();
+        // The database keeps microseconds, so the hash covers what is read back.
+        this.createdAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
     }
 
     public Long getId() {
@@ -111,5 +121,21 @@ public class AuditEventEntity {
 
     public void setPrincipalType(String principalType) {
         this.principalType = principalType;
+    }
+
+    public String getPrevHash() {
+        return prevHash;
+    }
+
+    public void setPrevHash(String prevHash) {
+        this.prevHash = prevHash;
+    }
+
+    public String getRowHash() {
+        return rowHash;
+    }
+
+    public void setRowHash(String rowHash) {
+        this.rowHash = rowHash;
     }
 }

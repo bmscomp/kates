@@ -16,6 +16,7 @@ import io.smallrye.mutiny.infrastructure.Infrastructure;
 
 import com.bmscomp.kates.audit.Actor;
 import com.bmscomp.kates.audit.Actors;
+import com.bmscomp.kates.audit.AuditChain;
 import com.bmscomp.kates.audit.AuditTrail;
 import com.bmscomp.kates.persistence.AuditEventEntity;
 
@@ -33,6 +34,9 @@ public class AuditService {
     @Inject
     Instance<AuditTrail> trail;
 
+    @Inject
+    AuditChain chain;
+
     /**
      * Records a change made by the current REST request's principal, and
      * tells the request's {@link AuditTrail} that it has its row.
@@ -45,7 +49,11 @@ public class AuditService {
         record(action, eventType, target, details, actors.current());
     }
 
-    /** Records a change made by actor, which is null when no one can be named. */
+    /**
+     * Records a change made by actor, which is null when no one can be named,
+     * chained after the newest row ({@link AuditChain}). The chain head stays
+     * locked until the caller's transaction ends.
+     */
     @Transactional
     public void record(String action, String eventType, String target, String details, Actor actor) {
         int maxRetries = 3;
@@ -56,7 +64,7 @@ public class AuditService {
                     event.setActor(actor.name());
                     event.setPrincipalType(actor.type());
                 }
-                em.persist(event);
+                chain.append(event);
                 return;
             } catch (Exception e) {
                 if (attempt == maxRetries) {
@@ -136,6 +144,9 @@ public class AuditService {
             m.put("principalType", e.getPrincipalType());
         }
         m.put("timestamp", e.getCreatedAt().toString());
+        if (e.getRowHash() != null) {
+            m.put("rowHash", e.getRowHash());
+        }
         return m;
     }
 }
