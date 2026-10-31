@@ -111,6 +111,7 @@ Every workflow also shares three conventions: a `concurrency` group per branch (
 | **Build & Test** | Java 21 (Temurin) | Compiles the Kates API, a Quarkus application, and runs the test suite with `./mvnw verify`, publishes the surefire *and* failsafe JUnit reports as a check, uploads the JaCoCo report and writes its totals to the run summary |
 | **Dependency CVE scan** | — | Trivy over the Maven tree and `govulncheck` over the Go module, as its own job so a new CVE and a failing test are two different red checks |
 | **CLI Tests** | Go 1.25 | Runs `go test -race` across all CLI packages, then the terminal-compatibility and CLI style harnesses |
+| **Editor Extensions** | Node 22 | Runs `scripts/package-editors.sh --check` and `--package` to verify JSON Schema parity, compile the VS Code extension, and build `.vsix` and Visual Studio bundles |
 | **Helm Lint** | Helm v3.17.0 | Lints, renders and schema-validates every chart under `charts/`, and runs the repository's cross-file consistency checks |
 | **Kyverno Policy Validation** | Kyverno CLI v1.17.2 | Holds every chart to the cluster policies in `.github/kyverno/`, then applies the `kates`, `kafka-cluster` and `kates-chaos` charts' own policies to their workloads |
 | **YAML Validation** | Python + PyYAML | Parses every YAML file under `config/` to catch syntax errors |

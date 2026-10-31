@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="JsonSchemaMappingsProjectConfiguration">
+    <state>
+      <map>
+        <entry key="Kates Performance Scenario (v1)">
+          <value>
+            <SchemaInfo>
+              <option name="name" value="Kates Performance Scenario (v1)" />
+              <option name="relativePathToSchema" value="$PROJECT_DIR$/schemas/scenario.v1.schema.json" />
+              <option name="schemaVersion" value="JSON Schema 2020-12" />
+              <option name="patterns">
+                <list>
+                  <Item>
+                    <option name="path" value="scenarios/*.yaml" />
+                    <option name="mappingKind" value="Pattern" />
+                  </Item>
+                  <Item>
+                    <option name="path" value="*.scenario.yaml" />
+                    <option name="mappingKind" value="Pattern" />
+                  </Item>
+                  <Item>
+                    <option name="path" value="perf-*.yaml" />
+                    <option name="mappingKind" value="Pattern" />
+                  </Item>
+                </list>
+              </option>
+            </SchemaInfo>
+          </value>
+        </entry>
+        <entry key="Kates Phased Test Request (v1)">
+          <value>
+            <SchemaInfo>
+              <option name="name" value="Kates Phased Test Request (v1)" />
+              <option name="relativePathToSchema" value="$PROJECT_DIR$/schemas/test-request.v1.schema.json" />
+              <option name="schemaVersion" value="JSON Schema 2020-12" />
+              <option name="patterns">
+                <list>
+                  <Item>
+                    <option name="path" value="test-request*.yaml" />
+                    <option name="mappingKind" value="Pattern" />
+                  </Item>
+                  <Item>
+                    <option name="path" value="*.test-request.yaml" />
+                    <option name="mappingKind" value="Pattern" />
+                  </Item>
+                </list>
+              </option>
+            </SchemaInfo>
+          </value>
+        </entry>
+        <entry key="Kates Flow Pipeline (v1)">
+          <value>
+            <SchemaInfo>
+              <option name="name" value="Kates Flow Pipeline (v1)" />
+              <option name="relativePathToSchema" value="$PROJECT_DIR$/schemas/flow.v1.schema.json" />
+              <option name="schemaVersion" value="JSON Schema 2020-12" />
+              <option name="patterns">
+                <list>
+                  <Item>
+                    <option name="path" value="flows/*.yaml" />
+                    <option name="mappingKind" value="Pattern" />
+                  </Item>
+                  <Item>
+                    <option name="path" value="flow-*.yaml" />
+                    <option name="mappingKind" value="Pattern" />
+                  </Item>
+                  <Item>
+                    <option name="path" value="*.flow.yaml" />
+                    <option name="mappingKind" value="Pattern" />
+                  </Item>
+                </list>
+              </option>
+            </SchemaInfo>
+          </value>
+        </entry>
+        <entry key="Kates Resilience Chaos Test (v1)">
+          <value>
+            <SchemaInfo>
+              <option name="name" value="Kates Resilience Chaos Test (v1)" />
+              <option name="relativePathToSchema" value="$PROJECT_DIR$/schemas/resilience.v1.schema.json" />
+              <option name="schemaVersion" value="JSON Schema 2020-12" />
+              <option name="patterns">
+                <list>
+                  <Item>
+                    <option name="path" value="resilience-*.yaml" />
+                    <option name="mappingKind" value="Pattern" />
+                  </Item>
+                  <Item>
+                    <option name="path" value="*.resilience.yaml" />
+                    <option name="mappingKind" value="Pattern" />
+                  </Item>
+                </list>
+              </option>
+            </SchemaInfo>
+          </value>
+        </entry>
+        <entry key="Kates Disruption Plan (v1)">
+          <value>
+            <SchemaInfo>
+              <option name="name" value="Kates Disruption Plan (v1)" />
+              <option name="relativePathToSchema" value="$PROJECT_DIR$/schemas/disruption.v1.schema.json" />
+              <option name="schemaVersion" value="JSON Schema 2020-12" />
+              <option name="patterns">
+                <list>
+                  <Item>
+                    <option name="path" value="playbooks/*.yaml" />
+                    <option name="mappingKind" value="Pattern" />
+                  </Item>
+                  <Item>
+                    <option name="path" value="disruption-*.yaml" />
+                    <option name="mappingKind" value="Pattern" />
+                  </Item>
+                  <Item>
+                    <option name="path" value="*.disruption.yaml" />
+                    <option name="mappingKind" value="Pattern" />
+                  </Item>
+                </list>
+              </option>
+            </SchemaInfo>
+          </value>
+        </entry>
+        <entry key="Kates Compliance KafkaReference (v1alpha1)">
+          <value>
+            <SchemaInfo>
+              <option name="name" value="Kates Compliance KafkaReference (v1alpha1)" />
+              <option name="relativePathToSchema" value="$PROJECT_DIR$/schemas/kafkareference.v1alpha1.schema.json" />
+              <option name="schemaVersion" value="JSON Schema 2020-12" />
+              <option name="patterns">
+                <list>
+                  <Item>
+                    <option name="path" value="conformity/*.yaml" />
+                    <option name="mappingKind" value="Pattern" />
+                  </Item>
+                  <Item>
+                    <option name="path" value="compliance/*.yaml" />
+                    <option name="mappingKind" value="Pattern" />
+                  </Item>
+                  <Item>
+                    <option name="path" value="*.kafkareference.yaml" />
+                    <option name="mappingKind" value="Pattern" />
+                  </Item>
+                </list>
+              </option>
+            </SchemaInfo>
+          </value>
+        </entry>
+      </map>
+    </state>
+  </component>
+</project>

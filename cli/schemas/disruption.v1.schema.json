@@ -1,0 +1,403 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/bmscomp/kates/main/schemas/disruption.v1.schema.json",
+  "title": "Kates Disruption Plan & Playbook v1",
+  "description": "Multi-step Kubernetes & Kafka disruption plan or playbook with blast-radius safety guards, ISR/lag recovery tracking, and SLA grading.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "steps"],
+  "properties": {
+    "name": {
+      "description": "Unique name of the disruption plan or playbook (e.g., az-failure, leader-cascade).",
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "description": "Human-readable summary of the failure mode and hypothesis.",
+      "type": "string"
+    },
+    "category": {
+      "description": "Playbook classification category.",
+      "type": "string",
+      "enum": ["infrastructure", "network", "compute", "storage", "operations", "kafka", "general"],
+      "default": "general"
+    },
+    "steps": {
+      "description": "Sequential fault injection steps executed by the DisruptionOrchestrator.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/disruptionStep" }
+    },
+    "sla": {
+      "description": "SLA thresholds graded across the disruption run.",
+      "$ref": "#/$defs/slaDefinition"
+    },
+    "testType": {
+      "description": "Background workload test type executed during the disruption plan.",
+      "$ref": "#/$defs/testType",
+      "default": "LOAD"
+    },
+    "baselineDurationSec": {
+      "description": "Initial baseline traffic duration in seconds before Step 1 starts (>= 1).",
+      "type": "integer",
+      "minimum": 1,
+      "default": 60
+    },
+    "isrTrackingTopic": {
+      "description": "Kafka topic monitored for ISR shrinkage and recovery time (RTO).",
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9._-]{1,249}$"
+    },
+    "lagTrackingGroupId": {
+      "description": "Consumer group ID monitored for consumer lag spikes and recovery.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "isrPollIntervalMs": {
+      "description": "Polling interval in milliseconds for ISR state tracking (>= 100).",
+      "type": "integer",
+      "minimum": 100,
+      "default": 2000
+    },
+    "lagPollIntervalMs": {
+      "description": "Polling interval in milliseconds for consumer group lag tracking (>= 100).",
+      "type": "integer",
+      "minimum": 100,
+      "default": 2000
+    },
+    "maxAffectedBrokers": {
+      "description": "Maximum number of Kafka brokers this plan is allowed to disrupt simultaneously (-1 for no cap, though DisruptionSafetyGuard always refuses plans that take down all brokers).",
+      "type": "integer",
+      "minimum": -1,
+      "not": { "const": 0 },
+      "default": -1
+    },
+    "autoRollback": {
+      "description": "Automatically roll back faults (e.g., NetworkPolicies or KafkaNodePool scale-downs) when recovery times out.",
+      "type": "boolean",
+      "default": true
+    }
+  },
+  "$defs": {
+    "testType": {
+      "type": "string",
+      "enum": [
+        "LOAD",
+        "STRESS",
+        "SPIKE",
+        "ENDURANCE",
+        "VOLUME",
+        "CAPACITY",
+        "ROUND_TRIP",
+        "INTEGRITY",
+        "TUNE_REPLICATION",
+        "TUNE_ACKS",
+        "TUNE_BATCHING",
+        "TUNE_COMPRESSION",
+        "TUNE_PARTITIONS",
+        "INTEGRATION_CDC"
+      ]
+    },
+    "disruptionType": {
+      "type": "string",
+      "enum": [
+        "POD_KILL",
+        "POD_DELETE",
+        "NETWORK_PARTITION",
+        "NETWORK_LATENCY",
+        "CPU_STRESS",
+        "MEMORY_STRESS",
+        "IO_STRESS",
+        "DNS_ERROR",
+        "DISK_FILL",
+        "ROLLING_RESTART",
+        "LEADER_ELECTION",
+        "SCALE_DOWN",
+        "NODE_DRAIN"
+      ]
+    },
+    "disruptionStep": {
+      "description": "A single fault injection and recovery observation step within a DisruptionPlan.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "faultSpec"],
+      "properties": {
+        "name": {
+          "description": "Unique step name shown in dry-run previews, progress events, and JUnit reports.",
+          "type": "string",
+          "minLength": 1
+        },
+        "faultSpec": {
+          "description": "Fault injection specification for this step.",
+          "$ref": "#/$defs/faultSpec"
+        },
+        "steadyStateSec": {
+          "description": "Steady-state duration in seconds before injecting this step's fault (>= 0).",
+          "type": "integer",
+          "minimum": 0,
+          "default": 30
+        },
+        "observationWindowSec": {
+          "description": "Post-fault observation window in seconds to wait for ISR and lag recovery (>= 1).",
+          "type": "integer",
+          "minimum": 1,
+          "default": 60
+        },
+        "requireRecovery": {
+          "description": "When true, the step fails (and triggers autoRollback if enabled) if ISR and lag do not recover within observationWindowSec.",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "faultSpec": {
+      "description": "Parameters defining a Kubernetes or Kafka chaos fault injection.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["experimentName"],
+      "properties": {
+        "experimentName": {
+          "description": "Unique identifier or Litmus ChaosExperiment name for this fault (e.g., broker-hard-crash, pod-network-loss).",
+          "type": "string",
+          "minLength": 1
+        },
+        "disruptionType": {
+          "description": "Chaos fault injection type.",
+          "$ref": "#/$defs/disruptionType",
+          "default": "POD_DELETE"
+        },
+        "targetNamespace": {
+          "description": "Kubernetes namespace containing the target pods.",
+          "type": "string",
+          "minLength": 1,
+          "default": "kafka"
+        },
+        "targetLabel": {
+          "description": "Kubernetes label selector (e.g., 'strimzi.io/component-type=kafka,strimzi.io/broker-role=true'). Must not be empty.",
+          "type": "string",
+          "minLength": 1,
+          "default": "strimzi.io/component-type=kafka"
+        },
+        "targetPod": {
+          "description": "Specific pod name to target instead of selecting by targetLabel.",
+          "type": "string"
+        },
+        "targetAll": {
+          "description": "When true, injects the fault into all pods matching targetLabel rather than selecting one.",
+          "type": "boolean",
+          "default": false
+        },
+        "chaosDurationSec": {
+          "description": "Fault duration in seconds (0..3600). Must be >= 1 for NETWORK_PARTITION, NETWORK_LATENCY, CPU_STRESS, MEMORY_STRESS, IO_STRESS, DNS_ERROR, DISK_FILL, and NODE_DRAIN.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600,
+          "default": 30
+        },
+        "delayBeforeSec": {
+          "description": "Delay in seconds before fault injection begins (0..600).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600,
+          "default": 0
+        },
+        "envOverrides": {
+          "description": "Litmus ChaosEngine environment overrides. Only TARGET_NODE and NODE_LABEL are permitted.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "TARGET_NODE": {
+              "description": "Explicit Kubernetes node name to drain during NODE_DRAIN.",
+              "type": "string"
+            },
+            "NODE_LABEL": {
+              "description": "Kubernetes node label selector used by Litmus to pick a node to drain.",
+              "type": "string"
+            }
+          }
+        },
+        "targetBrokerId": {
+          "description": "Specific Kafka broker ID to target (>= 0), or -1 for any matching broker.",
+          "type": "integer",
+          "minimum": -1,
+          "default": -1
+        },
+        "networkLatencyMs": {
+          "description": "Injected egress network latency in milliseconds for NETWORK_LATENCY (1..30,000).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000,
+          "default": 100
+        },
+        "fillPercentage": {
+          "description": "Target disk fill percentage for DISK_FILL or IO_STRESS (1..100).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 80
+        },
+        "cpuCores": {
+          "description": "Number of CPU cores to saturate for CPU_STRESS (1..64).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 2
+        },
+        "memoryMb": {
+          "description": "Amount of memory in MiB to consume for MEMORY_STRESS (1..32,768).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32768,
+          "default": 512
+        },
+        "ioWorkers": {
+          "description": "Number of concurrent I/O worker threads for IO_STRESS (1..64).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 4
+        },
+        "gracePeriodSec": {
+          "description": "Pod termination grace period in seconds for POD_DELETE / POD_KILL (0..300).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300,
+          "default": 0
+        },
+        "targetTopic": {
+          "description": "Kafka topic name for leader-aware targeting in disruption plans (1..249 ASCII chars).",
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9._-]{1,249}$"
+        },
+        "targetPartition": {
+          "description": "Partition index (>= 0) whose leader broker is targeted when targetTopic is set.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "probes": {
+          "description": "Fault-scoped probes. Note: cmdProbe is forbidden inside FaultSpec.probes; use kafkaProbe or k8sProbe.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/faultProbeSpec" }
+        }
+      }
+    },
+    "probeSpec": {
+      "description": "Health probe evaluated during a disruption step.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "command", "expectedOutput"],
+      "properties": {
+        "name": {
+          "description": "Unique probe identifier.",
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "description": "Probe execution mechanism: kafkaProbe (Kates AdminClient check), k8sProbe (Kubernetes resource check), or cmdProbe (pod exec).",
+          "type": "string",
+          "enum": ["kafkaProbe", "k8sProbe", "cmdProbe"],
+          "default": "cmdProbe"
+        },
+        "mode": {
+          "description": "Litmus probe evaluation mode: SOT, EOT, Continuous, Edge, or OnChaos.",
+          "type": "string",
+          "enum": ["SOT", "EOT", "Continuous", "Edge", "OnChaos"],
+          "default": "Continuous"
+        },
+        "command": {
+          "description": "For kafkaProbe: 'under-replicated-partitions', 'unavailable-partitions', 'produce <topic>', or 'consumer-lag [<group>]'. For k8sProbe: 'kafka Ready'. For cmdProbe: shell command.",
+          "type": "string",
+          "minLength": 1
+        },
+        "expectedOutput": {
+          "description": "Expected output string or number compared against the actual probe output.",
+          "type": "string"
+        },
+        "comparator": {
+          "description": "Comparison operator: text ('equal', 'contains', 'notContains') or numeric ('==', '!=', '>=', '<=', '>', '<').",
+          "type": "string",
+          "enum": ["equal", "contains", "notContains", "==", "!=", ">=", "<=", ">", "<"],
+          "default": "contains"
+        },
+        "intervalSec": {
+          "description": "Polling interval in seconds between probe evaluations (>= 1).",
+          "type": "integer",
+          "minimum": 1,
+          "default": 5
+        },
+        "timeoutSec": {
+          "description": "Maximum execution time in seconds for a single probe evaluation (>= 1).",
+          "type": "integer",
+          "minimum": 1,
+          "default": 10
+        }
+      }
+    },
+    "faultProbeSpec": {
+      "allOf": [{ "$ref": "#/$defs/probeSpec" }],
+      "properties": {
+        "type": {
+          "description": "FaultSpec.probes only permits kafkaProbe or k8sProbe (cmdProbe is refused inside FaultSpec).",
+          "type": "string",
+          "enum": ["kafkaProbe", "k8sProbe"]
+        }
+      }
+    },
+    "slaDefinition": {
+      "description": "Service Level Agreement thresholds used by Kates SlaGrader to grade a disruption run.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxP99LatencyMs": {
+          "description": "Maximum allowed p99 latency in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxP999LatencyMs": {
+          "description": "Maximum allowed p99.9 latency in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxAvgLatencyMs": {
+          "description": "Maximum allowed average latency in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "minThroughputRecPerSec": {
+          "description": "Minimum required throughput in records/second (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxErrorRate": {
+          "description": "Maximum allowed error rate as a fraction between 0.0 and 1.0.",
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "minRecordsProcessed": {
+          "description": "Minimum total records processed (>= 1).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxDataLossPercent": {
+          "description": "Maximum allowed data loss percentage (0.0..100.0).",
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 100.0
+        },
+        "maxRtoMs": {
+          "description": "Maximum allowed Recovery Time Objective (RTO) in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxRpoMs": {
+          "description": "Maximum allowed Recovery Point Objective (RPO) in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    }
+  }
+}

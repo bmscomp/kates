@@ -119,6 +119,7 @@ book:
     - appendix-c-cicd.md
     - appendix-d-versions.md
     - appendix-compliance-language.md
+    - appendix-ide-extensions.md
     # Unnumbered, after the appendices: the list of works cited.
     - references.md
     # Unnumbered, last: the index, generated from index-terms.txt by

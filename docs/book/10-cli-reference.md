@@ -1115,16 +1115,16 @@ Disruption commands run [disruption plans](appendix-a-glossary.md#gl-disruption-
 Run a disruption plan from a JSON file and wait for its report.
 
 ```bash
-kates disruption run --config plan.json
+kates disruption run --config plan.yaml
 kates disruption run --config plan.json --dry-run
-kates disruption run --config plan.json --fail-on-sla-breach --output-junit results.xml
+kates disruption run --config plan.yaml --fail-on-sla-breach --output-junit results.xml
 ```
 
 Its flags name the plan and turn its result into an exit code:
 
 | Flag | Description |
 |------|-------------|
-| `--config` | Path to disruption plan JSON file (required) |
+| `--config` | Path to disruption plan YAML or JSON file (required) |
 | `--dry-run` | Validate plan without executing; exits 1 when the verdict is UNSAFE |
 | `--fail-on-sla-breach` | Exit 1 when the plan's `sla` is breached |
 | `--output-junit` | Write JUnit XML to file |
@@ -1225,7 +1225,16 @@ One flag previews it:
 
 Run a playbook and wait for its report; the command prints the disruption ID as soon as the playbook is accepted, and the final status, or with `-o json` the ID and the report as JSON. Ctrl-C stops the wait and leaves the plan running, as for `disruption run`. With `--dry-run` it fetches the playbook's plan and sends it to the same dry run as `disruption run --dry-run`, which resolves partition leaders, lists the pods each step would hit, and checks the blast radius. It starts nothing. It prints the dry-run result, as JSON with `-o json`, and exits 1 when the verdict is UNSAFE, which is when running the playbook would be refused. The dry run checks RBAC for some disruption types only, and reports a missing permission as a step warning, not in the verdict; [Chaos Engineering in Practice](07-chaos-practice.md) lists which.
 
-See also [Chaos Engineering Theory](06-chaos-theory.md) for the principles behind chaos engineering, [Chaos Engineering in Practice](07-chaos-practice.md) for step-by-step walkthroughs of disruption plans and resilience runs.
+#### disruption lint
+
+Check disruption plan YAML or JSON files offline without connecting to a cluster. It validates every top-level key, `steps[].faultSpec`, `probes`, Kubernetes label selectors, `kafkaProbe` commands, and blast-radius bounds, printing findings in `file:line:col: severity: path: message [code]` format or as JSON with `-o json`. It exits `0` when no file has an error, `1` when one does, and `2` when a file cannot be read.
+
+```bash
+kates disruption lint playbooks/single-broker-failure.yaml
+kates disruption lint -o json playbooks/*.yaml
+```
+
+See also [Chaos Engineering Theory](06-chaos-theory.md) for the principles behind chaos engineering, [Chaos Engineering in Practice](07-chaos-practice.md) for step-by-step walkthroughs of disruption plans and resilience runs, and [IDE Extensions & Language Server](appendix-ide-extensions.md) for real-time editor validation.
 
 ### Chaos Experiment History
 
@@ -1293,7 +1302,16 @@ Unlike a disruption plan, a resilience run has no rollback or grade, and the [sa
 
 A `testRequest` spec field the Kates API cannot apply to the test type fails the command with `[400] Validation Failed:` and the field's name, as `kates test create` does, before any fault is injected. A report with status `ERROR` prints its reason on an `Error` line. A test that failed or finished before the fault gets no fault, and the line names the run and quotes the errors its tasks reported.
 
-See also [Chaos Engineering in Practice](07-chaos-practice.md) for configuring a resilience run.
+#### resilience lint
+
+Check resilience YAML or JSON files offline before running them. It validates `testRequest`, `chaosSpec`, `probes`, Kubernetes label selectors, `kafkaProbe` syntax, and whether `steadyStateSec + chaosDurationSec` fits inside the workload's expected duration (`steady-state-race`). It exits `0` when no file has an error, `1` when one does, and `2` when a file cannot be read.
+
+```bash
+kates resilience lint resilience-test.yaml
+kates resilience lint -o json resilience-*.yaml
+```
+
+See also [Chaos Engineering in Practice](07-chaos-practice.md) for configuring a resilience run, and [IDE Extensions & Language Server](appendix-ide-extensions.md) for real-time editor validation.
 
 ### Schedule Commands
 
@@ -2801,6 +2819,20 @@ Cursor, in `.cursor/mcp.json` for one project or `~/.cursor/mcp.json` for all of
 The server speaks every MCP protocol revision from 2024-11-05 to 2026-07-28, so it works with clients that still use the `initialize` handshake and with those that use the stateless 2026-07-28 revision. It reads one JSON-RPC message per line on stdin. A line that is not JSON, or a JSON-RPC batch in a session on 2025-06-18 or later, ends the server with exit code 1 instead of an error response. The MCP Go SDK's stdio transport closes the session on it, and MCP clients send neither.
 
 See also [Tutorial 14: Using Kates from an AI Agent](../tutorials/14-using-kates-from-an-ai-agent.md), which sets up the server against a lab and asks the agent three questions.
+
+### Language Server for IDEs
+
+`kates lsp` runs the built-in Language Server Protocol (LSP 3.17) server over standard input and output for Visual Studio Code (`editors/vscode-kates`), Visual Studio 2022 (`editors/visualstudio-kates`), Neovim, Helix, and JetBrains IDEs. It embeds all six Kates YAML JSON Schemas and the offline AST linters (`kates test lint`, `kates flow lint`, `kates resilience lint`, `kates disruption lint`, and `kates compliance lint`), providing real-time diagnostics, context-aware completions, hover cards, inlay hints, quick-fix code actions, and live cluster pre-flight checks.
+
+#### lsp
+
+Start the Kates Language Server over stdio.
+
+```bash
+kates lsp --stdio
+```
+
+See also [IDE Extensions & Language Server](appendix-ide-extensions.md) for the dialect detection rules, diagnostic codes, refactoring actions, and editor setup.
 
 ### Developer & Help Commands {#developer--help-commands}
 

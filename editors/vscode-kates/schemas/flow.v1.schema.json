@@ -1,0 +1,275 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/bmscomp/kates/main/schemas/flow.v1.schema.json",
+  "title": "Kates Declarative Flow Pipeline v1",
+  "description": "Declarative multi-step test orchestration pipeline for kates flow run and kates flow lint.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["steps"],
+  "properties": {
+    "name": {
+      "description": "Flow pipeline display name.",
+      "type": "string",
+      "minLength": 1
+    },
+    "steps": {
+      "description": "Ordered list of pipeline steps executed sequentially by kates flow run.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/flowStep" }
+    }
+  },
+  "$defs": {
+    "testType": {
+      "type": "string",
+      "enum": [
+        "LOAD",
+        "STRESS",
+        "SPIKE",
+        "ENDURANCE",
+        "VOLUME",
+        "CAPACITY",
+        "ROUND_TRIP",
+        "INTEGRITY",
+        "TUNE_REPLICATION",
+        "TUNE_ACKS",
+        "TUNE_BATCHING",
+        "TUNE_COMPRESSION",
+        "TUNE_PARTITIONS",
+        "INTEGRATION_CDC"
+      ]
+    },
+    "flowStep": {
+      "description": "A single step in a Kates flow pipeline.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action"],
+      "properties": {
+        "name": {
+          "description": "Step display name.",
+          "type": "string"
+        },
+        "action": {
+          "description": "Step action to execute: 'test' (runs a Kates test) or 'wait' (pauses execution).",
+          "type": "string",
+          "enum": ["test", "wait"]
+        },
+        "scenario": {
+          "description": "Scenario preset name or wait duration expression (e.g., 'wait:10s' for wait steps).",
+          "type": "string"
+        },
+        "type": {
+          "description": "Test type for a 'test' action step.",
+          "$ref": "#/$defs/testType"
+        },
+        "records": {
+          "description": "Shorthand record count for 'test' steps (or fallback wait seconds for 'wait' steps).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "playbook": {
+          "description": "Playbook name reference.",
+          "type": "string"
+        },
+        "config": {
+          "description": "Step configuration map.",
+          "type": "object"
+        },
+        "url": {
+          "description": "Target endpoint URL.",
+          "type": "string"
+        },
+        "template": {
+          "description": "Notification or step template name.",
+          "type": "string"
+        },
+        "gate": {
+          "description": "SLA quality gate evaluated after a 'test' step completes.",
+          "$ref": "#/$defs/flowGate"
+        },
+        "onFail": {
+          "description": "Behavior when this step fails: 'stop' (default, halts pipeline) or 'continue'.",
+          "type": "string",
+          "enum": ["stop", "continue"],
+          "default": "stop"
+        },
+        "spec": {
+          "description": "Wire-format TestSpec overrides for a 'test' step (uses numRecords, numProducers, recordSize, durationMs).",
+          "$ref": "#/$defs/wireTestSpec"
+        }
+      }
+    },
+    "flowGate": {
+      "description": "Pass/fail gate criteria for a flow test step.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "minGrade": {
+          "description": "Minimum required SLA letter grade (A, B, C, D, or F).",
+          "type": "string",
+          "enum": ["A", "B", "C", "D", "F"]
+        },
+        "maxP99": {
+          "description": "Maximum allowed p99 latency in milliseconds.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "minThroughput": {
+          "description": "Minimum required throughput in records/second.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxErrorRate": {
+          "description": "Maximum allowed error rate (0.0..1.0).",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "wireTestSpec": {
+      "description": "Kates API wire-format TestSpec. Uses numRecords, numProducers, recordSize, durationMs, and throughput.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "numRecords": {
+          "description": "Number of records each producer task sends (1..100,000,000).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000000,
+          "default": 50000
+        },
+        "recordSize": {
+          "description": "Payload size of each record in bytes (1..10,485,760).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10485760,
+          "default": 512
+        },
+        "numProducers": {
+          "description": "Number of concurrent producer tasks (1..64).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 2
+        },
+        "numConsumers": {
+          "description": "Number of concurrent consumer tasks (1..64).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 1
+        },
+        "durationMs": {
+          "description": "Maximum test duration in milliseconds (0 for record-count bounded, or 1,000..86,400,000).",
+          "type": "integer",
+          "anyOf": [{ "const": 0 }, { "minimum": 1000, "maximum": 86400000 }],
+          "default": 0
+        },
+        "throughput": {
+          "description": "Target producer throughput in records/sec per producer, or -1 for unlimited.",
+          "type": "integer",
+          "minimum": -1,
+          "not": { "const": 0 },
+          "default": -1
+        },
+        "targetThroughput": {
+          "description": "Alias for throughput: target producer rate in records/sec, or -1 for unlimited.",
+          "type": "integer",
+          "minimum": -1,
+          "not": { "const": 0 }
+        },
+        "topic": {
+          "description": "Kafka topic name (1..249 ASCII alphanumeric, '.', '_', or '-' chars).",
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9._-]{1,249}$"
+        },
+        "partitions": {
+          "description": "Number of topic partitions (1..1,000).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 6
+        },
+        "replicationFactor": {
+          "description": "Topic replication factor (1..10). Must be >= minInsyncReplicas.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1
+        },
+        "minInsyncReplicas": {
+          "description": "Topic min.insync.replicas (1..10). Must be <= replicationFactor.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1
+        },
+        "acks": {
+          "description": "Producer acknowledgment mode: \"all\", \"-1\", \"1\", or \"0\".",
+          "oneOf": [
+            { "type": "string", "enum": ["all", "-1", "0", "1"] },
+            { "type": "integer", "enum": [-1, 0, 1] }
+          ],
+          "default": "all"
+        },
+        "compressionType": {
+          "description": "Producer compression codec: none, gzip, snappy, lz4, or zstd.",
+          "type": "string",
+          "enum": ["none", "gzip", "snappy", "lz4", "zstd"],
+          "default": "none"
+        },
+        "batchSize": {
+          "description": "Producer batch.size in bytes (1..16,777,216).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216,
+          "default": 16384
+        },
+        "lingerMs": {
+          "description": "Producer linger.ms in milliseconds (0..60,000).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "default": 5
+        },
+        "consumerGroup": {
+          "description": "Consumer group ID (1..255 printable ASCII chars).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[ -~]{1,255}$"
+        },
+        "fetchMinBytes": {
+          "description": "Consumer fetch.min.bytes (1..16,777,216).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216,
+          "default": 1
+        },
+        "fetchMaxWaitMs": {
+          "description": "Consumer fetch.max.wait.ms (1..60,000).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000,
+          "default": 500
+        },
+        "enableIdempotence": {
+          "description": "Enable producer idempotence (requires acks: \"all\").",
+          "type": "boolean",
+          "default": false
+        },
+        "enableTransactions": {
+          "description": "Enable Kafka transactions (requires acks: \"all\", enableIdempotence: true, and backend: native).",
+          "type": "boolean",
+          "default": false
+        },
+        "enableCrc": {
+          "description": "Enable CRC32 payload validation.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    }
+  }
+}

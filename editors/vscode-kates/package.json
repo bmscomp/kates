@@ -1,0 +1,198 @@
+{
+  "name": "vscode-kates",
+  "displayName": "Kates YAML Studio (Tests, Chaos, Flows & Compliance)",
+  "description": "Auto-completion, syntax & semantic highlighting, real-time unknown-attribute & cross-field error detection, quick-fixes, and test execution for Kates YAML files.",
+  "version": "1.0.0",
+  "publisher": "kates",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bmscomp/kates.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Languages",
+    "Linters",
+    "Snippets",
+    "Testing"
+  ],
+  "keywords": [
+    "kafka",
+    "strimzi",
+    "kates",
+    "chaos-engineering",
+    "compliance",
+    "yaml",
+    "performance-testing"
+  ],
+  "activationEvents": [
+    "onLanguage:yaml"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Kates YAML Studio",
+      "properties": {
+        "kates.executablePath": {
+          "type": "string",
+          "default": "kates",
+          "description": "Path to the 'kates' CLI binary used to run the Kates Language Server ('kates lsp --stdio') and execute tests."
+        },
+        "kates.enableCodeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline CodeLens actions (Run Scenario, Dry-Run Disruption Plan, Check Compliance, Lint) at the top of Kates YAML files."
+        },
+        "kates.enableInlayHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline ghost-text inlay hints for TestTypeDefaults, estimated data footprint (GiB), aggregate producer rate, chaos timeline windows, and compliance rule counts."
+        },
+        "kates.enableTestExplorer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Register the native VS Code Test Explorer controller for discovering, linting, and executing Kates YAML files."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "kates.runScenario",
+        "title": "Kates: Run Scenario File (kates test apply)"
+      },
+      {
+        "command": "kates.runFlow",
+        "title": "Kates: Run Flow Pipeline (kates flow run)"
+      },
+      {
+        "command": "kates.runResilience",
+        "title": "Kates: Run Resilience Test (kates resilience run)"
+      },
+      {
+        "command": "kates.dryRunDisruption",
+        "title": "Kates: Dry-Run Disruption Plan (kates disruption run --dry-run)"
+      },
+      {
+        "command": "kates.runDisruption",
+        "title": "Kates: Execute Disruption Plan (kates disruption run)"
+      },
+      {
+        "command": "kates.checkCompliance",
+        "title": "Kates: Check Cluster Compliance (kates compliance check)"
+      },
+      {
+        "command": "kates.formatCompliance",
+        "title": "Kates: Format KafkaReference Canonically (kates compliance fmt)"
+      },
+      {
+        "command": "kates.lintFile",
+        "title": "Kates: Lint Current YAML File Offline"
+      },
+      {
+        "command": "kates.switchDialect",
+        "title": "Kates: Set YAML Schema Dialect Directive (# kates-schema: ...)"
+      },
+      {
+        "command": "kates.newFromTemplate",
+        "title": "Kates: New YAML File from Template (Scenario, Chaos, Flow, Compliance)..."
+      },
+      {
+        "command": "kates.diffScenarios",
+        "title": "Kates: Compare / Diff Scenario Workload & SLA Gates..."
+      },
+      {
+        "command": "kates.clusterPreflight",
+        "title": "Kates: Run Live Cluster Preflight & Blast-Radius Preview"
+      }
+    ],
+    "grammars": [
+      {
+        "injectTo": [
+          "source.yaml"
+        ],
+        "scopeName": "kates.yaml.injection",
+        "path": "./syntaxes/kates-yaml.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "yaml",
+        "path": "./snippets/kates-yaml.json"
+      }
+    ],
+    "yamlValidation": [
+      {
+        "fileMatch": [
+          "**/scenarios/*.yaml",
+          "**/scenarios/*.yml",
+          "**/perf-*.yaml",
+          "**/perf-*.yml",
+          "**/load-test.yaml",
+          "**/load-test.yml",
+          "**/*.scenario.yaml"
+        ],
+        "url": "./schemas/scenario.v1.schema.json"
+      },
+      {
+        "fileMatch": [
+          "**/test-request*.yaml",
+          "**/test-request*.yml",
+          "**/*.test-request.yaml"
+        ],
+        "url": "./schemas/test-request.v1.schema.json"
+      },
+      {
+        "fileMatch": [
+          "**/flow-*.yaml",
+          "**/flow-*.yml",
+          "**/flows/*.yaml",
+          "**/*.flow.yaml"
+        ],
+        "url": "./schemas/flow.v1.schema.json"
+      },
+      {
+        "fileMatch": [
+          "**/resilience-*.yaml",
+          "**/resilience-*.yml",
+          "**/*.resilience.yaml"
+        ],
+        "url": "./schemas/resilience.v1.schema.json"
+      },
+      {
+        "fileMatch": [
+          "**/playbooks/*.yaml",
+          "**/playbooks/*.yml",
+          "**/disruption-*.yaml",
+          "**/disruption-*.yml",
+          "**/*.disruption.yaml"
+        ],
+        "url": "./schemas/disruption.v1.schema.json"
+      },
+      {
+        "fileMatch": [
+          "**/conformity/*.yaml",
+          "**/conformity/*.yml",
+          "**/compliance/*.yaml",
+          "**/compliance/*.yml",
+          "**/*.kafkareference.yaml"
+        ],
+        "url": "./schemas/kafkareference.v1alpha1.schema.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}

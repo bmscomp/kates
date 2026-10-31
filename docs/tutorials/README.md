@@ -23,6 +23,7 @@ The table gives each tutorial's level, a rough duration, and the tutorials it bu
 | 12 | [Migrating Kafka 3.x to 4.x](12-migrating-kafka-3x-to-4x.md) | Intermediate | 40 min | Tutorial 10 |
 | 13 | [Using the Grafana Dashboards](13-using-the-dashboards.md) | Intermediate | 45 min | Tutorial 1 |
 | 14 | [Using Kates from an AI Agent](14-using-kates-from-an-ai-agent.md) | Intermediate | 20 min | Tutorial 1 |
+| 15 | [Authoring & Debugging YAML Suites in VS Code](15-ide-authoring-and-lsp.md) | Intermediate | 20 min | Tutorial 1 |
 
 Tutorials 10–12 rehearse a migration on Kind, where nothing costs anything if
 it goes wrong. When you are ready to migrate a real cluster, the chart's own
@@ -42,6 +43,7 @@ Tutorial 1 (Getting Started)
     ├── Tutorial 8 (Deploy & Detect)
     ├── Tutorial 9 (Kafka Connect)
     ├── Tutorial 14 (AI agent over MCP, read-only)
+    ├── Tutorial 15 (IDE authoring & kates lsp)
     └── Tutorial 10 (MirrorMaker 2) ──── Tutorials 11–12 (cross-version migration)
 ```
 

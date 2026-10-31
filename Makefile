@@ -522,6 +522,15 @@ cli-clean:  ## Remove CLI build artifacts
 	@echo "🧹 Removing CLI build artifacts..."
 	rm -rf cli/dist
 
+editors-sync:  ## Sync canonical JSON schemas and TextMate grammar into editor extensions
+	@./scripts/package-editors.sh --sync
+
+editors-check:  ## Verify schema parity, editor manifests, and VS Code TypeScript build
+	@./scripts/package-editors.sh --check
+
+editors-package:  ## Package VS Code VSIX and Visual Studio extension bundle into dist/
+	@./scripts/package-editors.sh --package $(KATES_APP_VERSION)
+
 # Kates Application (Docker + Kind)
 
 ##@ Kates Application (Docker + Kind)

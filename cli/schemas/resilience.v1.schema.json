@@ -1,0 +1,610 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/bmscomp/kates/main/schemas/resilience.v1.schema.json",
+  "title": "Kates Resilience Test Specification v1",
+  "description": "Combined performance + chaos resilience test configuration for kates resilience run and kates resilience lint.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["testRequest", "chaosSpec"],
+  "properties": {
+    "testRequest": {
+      "description": "Background Kafka load test executed during the resilience experiment.",
+      "$ref": "#/$defs/createTestRequest"
+    },
+    "chaosSpec": {
+      "description": "Chaos fault specification injected after steadyStateSec.",
+      "$ref": "#/$defs/faultSpec"
+    },
+    "steadyStateSec": {
+      "description": "Baseline steady-state observation window in seconds before injecting the chaos fault.",
+      "type": "integer",
+      "minimum": 1,
+      "default": 30
+    },
+    "maxRecoveryWaitSec": {
+      "description": "Maximum time in seconds to wait for cluster recovery and post-chaos probes after the fault ends.",
+      "type": "integer",
+      "minimum": 1,
+      "default": 120
+    },
+    "probes": {
+      "description": "Resilience health probes evaluated before and after chaos injection (supports kafkaProbe, k8sProbe, and cmdProbe).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/probeSpec" }
+    }
+  },
+  "$defs": {
+    "testType": {
+      "type": "string",
+      "enum": [
+        "LOAD",
+        "STRESS",
+        "SPIKE",
+        "ENDURANCE",
+        "VOLUME",
+        "CAPACITY",
+        "ROUND_TRIP",
+        "INTEGRITY",
+        "TUNE_REPLICATION",
+        "TUNE_ACKS",
+        "TUNE_BATCHING",
+        "TUNE_COMPRESSION",
+        "TUNE_PARTITIONS",
+        "INTEGRATION_CDC"
+      ]
+    },
+    "backendType": {
+      "type": "string",
+      "enum": ["native", "trogdor"],
+      "default": "native"
+    },
+    "phaseType": {
+      "type": "string",
+      "enum": ["WARMUP", "RAMP", "STEADY", "SPIKE", "COOLDOWN"]
+    },
+    "createTestRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [
+        { "required": ["type"] },
+        { "required": ["scenario"] }
+      ],
+      "properties": {
+        "type": { "$ref": "#/$defs/testType" },
+        "backend": { "$ref": "#/$defs/backendType" },
+        "spec": { "$ref": "#/$defs/wireTestSpec" },
+        "scenario": { "$ref": "#/$defs/multiPhaseScenario" }
+      }
+    },
+    "wireTestSpec": {
+      "description": "Kates API wire-format TestSpec. Uses numRecords, numProducers, recordSize, durationMs, and throughput.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "numRecords": {
+          "description": "Number of records each producer task sends (1..100,000,000).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000000,
+          "default": 50000
+        },
+        "recordSize": {
+          "description": "Payload size of each record in bytes (1..10,485,760).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10485760,
+          "default": 512
+        },
+        "numProducers": {
+          "description": "Number of concurrent producer tasks (1..64).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 2
+        },
+        "numConsumers": {
+          "description": "Number of concurrent consumer tasks (1..64).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 1
+        },
+        "durationMs": {
+          "description": "Maximum test duration in milliseconds (0 for record-count bounded, or 1,000..86,400,000).",
+          "type": "integer",
+          "anyOf": [{ "const": 0 }, { "minimum": 1000, "maximum": 86400000 }],
+          "default": 0
+        },
+        "throughput": {
+          "description": "Target producer throughput in records/sec per producer, or -1 for unlimited.",
+          "type": "integer",
+          "minimum": -1,
+          "not": { "const": 0 },
+          "default": -1
+        },
+        "targetThroughput": {
+          "description": "Alias for throughput: target producer rate in records/sec, or -1 for unlimited.",
+          "type": "integer",
+          "minimum": -1,
+          "not": { "const": 0 }
+        },
+        "topic": {
+          "description": "Kafka topic name (1..249 ASCII alphanumeric, '.', '_', or '-' chars).",
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9._-]{1,249}$"
+        },
+        "partitions": {
+          "description": "Number of topic partitions (1..1,000).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 6
+        },
+        "replicationFactor": {
+          "description": "Topic replication factor (1..10). Must be >= minInsyncReplicas.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1
+        },
+        "minInsyncReplicas": {
+          "description": "Topic min.insync.replicas (1..10). Must be <= replicationFactor.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1
+        },
+        "acks": {
+          "description": "Producer acknowledgment mode: \"all\", \"-1\", \"1\", or \"0\".",
+          "oneOf": [
+            { "type": "string", "enum": ["all", "-1", "0", "1"] },
+            { "type": "integer", "enum": [-1, 0, 1] }
+          ],
+          "default": "all"
+        },
+        "compressionType": {
+          "description": "Producer compression codec: none, gzip, snappy, lz4, or zstd.",
+          "type": "string",
+          "enum": ["none", "gzip", "snappy", "lz4", "zstd"],
+          "default": "none"
+        },
+        "batchSize": {
+          "description": "Producer batch.size in bytes (1..16,777,216).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216,
+          "default": 16384
+        },
+        "lingerMs": {
+          "description": "Producer linger.ms in milliseconds (0..60,000).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "default": 5
+        },
+        "consumerGroup": {
+          "description": "Consumer group ID (1..255 printable ASCII chars).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[ -~]{1,255}$"
+        },
+        "fetchMinBytes": {
+          "description": "Consumer fetch.min.bytes (1..16,777,216).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216,
+          "default": 1
+        },
+        "fetchMaxWaitMs": {
+          "description": "Consumer fetch.max.wait.ms (1..60,000).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000,
+          "default": 500
+        },
+        "enableIdempotence": {
+          "description": "Enable producer idempotence (requires acks: \"all\").",
+          "type": "boolean",
+          "default": false
+        },
+        "enableTransactions": {
+          "description": "Enable Kafka transactions (requires acks: \"all\", enableIdempotence: true, and backend: native).",
+          "type": "boolean",
+          "default": false
+        },
+        "enableCrc": {
+          "description": "Enable CRC32 payload validation.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "multiPhaseScenario": {
+      "description": "Multi-phase scenario envelope with baseSpec, ordered execution phases, SLA definition, and metadata labels.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "description": "Scenario name (1..128 characters).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "description": {
+          "description": "Human-readable description of the multi-phase scenario.",
+          "type": "string"
+        },
+        "type": {
+          "description": "Primary test type for the scenario.",
+          "$ref": "#/$defs/testType",
+          "default": "LOAD"
+        },
+        "backend": {
+          "description": "Benchmark execution engine: native or trogdor.",
+          "$ref": "#/$defs/backendType"
+        },
+        "baseSpec": {
+          "description": "Base TestSpec inherited by all phases unless overridden.",
+          "$ref": "#/$defs/wireTestSpec"
+        },
+        "phases": {
+          "description": "Ordered sequence of execution phases (WARMUP, RAMP, STEADY, SPIKE, COOLDOWN).",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/scenarioPhase" }
+        },
+        "sla": {
+          "description": "SLA definition evaluated across the scenario run.",
+          "$ref": "#/$defs/slaDefinition"
+        },
+        "labels": {
+          "description": "Arbitrary key/value string labels attached to the scenario.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "scenarioPhase": {
+      "description": "A single execution phase within a multi-phase TestScenario.",
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [
+        { "required": ["type"] },
+        { "required": ["phaseType"] }
+      ],
+      "properties": {
+        "name": {
+          "description": "Phase display name (1..100 characters).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "type": {
+          "description": "Execution phase behavior: WARMUP, RAMP (supports rampSteps), STEADY, SPIKE, or COOLDOWN.",
+          "$ref": "#/$defs/phaseType"
+        },
+        "phaseType": {
+          "description": "Alias for type: execution phase behavior (WARMUP, RAMP, STEADY, SPIKE, or COOLDOWN).",
+          "$ref": "#/$defs/phaseType"
+        },
+        "durationMs": {
+          "description": "Phase duration in milliseconds (0 or 1,000..86,400,000).",
+          "type": "integer",
+          "anyOf": [{ "const": 0 }, { "minimum": 1000, "maximum": 86400000 }],
+          "default": 30000
+        },
+        "targetThroughput": {
+          "description": "Target producer throughput for this phase in records/sec, or -1 for unlimited.",
+          "type": "integer",
+          "minimum": -1,
+          "not": { "const": 0 },
+          "default": -1
+        },
+        "rampSteps": {
+          "description": "Number of incremental throughput steps (2..100). Only used when phase type is RAMP.",
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 100,
+          "default": 4
+        },
+        "spec": {
+          "description": "Phase-specific TestSpec overrides merged onto scenario.baseSpec.",
+          "$ref": "#/$defs/wireTestSpec"
+        },
+        "specOverrides": {
+          "description": "Phase-specific TestSpec overrides merged onto scenario.baseSpec.",
+          "$ref": "#/$defs/wireTestSpec"
+        }
+      }
+    },
+    "slaDefinition": {
+      "description": "Service Level Agreement thresholds used by Kates SlaGrader to grade a test or disruption run.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "p95LatencyMs": {
+          "description": "Maximum allowed p95 latency in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "p99LatencyMs": {
+          "description": "Maximum allowed p99 latency in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "avgLatencyMs": {
+          "description": "Maximum allowed average latency in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxP99LatencyMs": {
+          "description": "Maximum allowed p99 latency in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxP999LatencyMs": {
+          "description": "Maximum allowed p99.9 latency in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxAvgLatencyMs": {
+          "description": "Maximum allowed average latency in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "minThroughputRecPerSec": {
+          "description": "Minimum required throughput in records/second (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxErrorRate": {
+          "description": "Maximum allowed error rate as a fraction between 0.0 and 1.0.",
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "maxErrorRatePercent": {
+          "description": "Maximum allowed error rate percentage (0.0..100.0).",
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 100.0
+        },
+        "minRecordsProcessed": {
+          "description": "Minimum total records processed (>= 1).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxDataLossPercent": {
+          "description": "Maximum allowed data loss percentage (0.0..100.0).",
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 100.0
+        },
+        "maxRtoMs": {
+          "description": "Maximum allowed Recovery Time Objective (RTO) in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxRpoMs": {
+          "description": "Maximum allowed Recovery Point Objective (RPO) in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "disruptionType": {
+      "description": "Chaos fault injection type.",
+      "type": "string",
+      "enum": [
+        "POD_KILL",
+        "POD_DELETE",
+        "NETWORK_PARTITION",
+        "NETWORK_LATENCY",
+        "CPU_STRESS",
+        "MEMORY_STRESS",
+        "IO_STRESS",
+        "DNS_ERROR",
+        "DISK_FILL",
+        "ROLLING_RESTART",
+        "LEADER_ELECTION",
+        "SCALE_DOWN",
+        "NODE_DRAIN"
+      ]
+    },
+    "faultSpec": {
+      "description": "Parameters defining a Kubernetes or Kafka chaos fault injection.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["experimentName"],
+      "properties": {
+        "experimentName": {
+          "description": "Unique identifier or Litmus ChaosExperiment name for this fault (e.g., broker-hard-crash, pod-network-loss).",
+          "type": "string",
+          "minLength": 1
+        },
+        "disruptionType": {
+          "$ref": "#/$defs/disruptionType",
+          "default": "POD_DELETE"
+        },
+        "targetNamespace": {
+          "description": "Kubernetes namespace containing the target pods.",
+          "type": "string",
+          "minLength": 1,
+          "default": "kafka"
+        },
+        "targetLabel": {
+          "description": "Kubernetes label selector (e.g., 'strimzi.io/component-type=kafka,strimzi.io/broker-role=true'). Must not be empty.",
+          "type": "string",
+          "minLength": 1,
+          "default": "strimzi.io/component-type=kafka"
+        },
+        "targetPod": {
+          "description": "Specific pod name to target instead of selecting by targetLabel.",
+          "type": "string"
+        },
+        "targetAll": {
+          "description": "When true, injects the fault into all pods matching targetLabel rather than selecting one.",
+          "type": "boolean",
+          "default": false
+        },
+        "chaosDurationSec": {
+          "description": "Fault duration in seconds (0..3600). Must be >= 1 for NETWORK_PARTITION, NETWORK_LATENCY, CPU_STRESS, MEMORY_STRESS, IO_STRESS, DNS_ERROR, DISK_FILL, and NODE_DRAIN.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600,
+          "default": 30
+        },
+        "delayBeforeSec": {
+          "description": "Delay in seconds before fault injection begins (0..600).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600,
+          "default": 0
+        },
+        "envOverrides": {
+          "description": "Litmus ChaosEngine environment overrides. Only TARGET_NODE and NODE_LABEL are permitted.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "TARGET_NODE": {
+              "description": "Explicit Kubernetes node name to drain during NODE_DRAIN.",
+              "type": "string"
+            },
+            "NODE_LABEL": {
+              "description": "Kubernetes node label selector used by Litmus to pick a node to drain.",
+              "type": "string"
+            }
+          }
+        },
+        "targetBrokerId": {
+          "description": "Specific Kafka broker ID to target (>= 0), or -1 for any matching broker.",
+          "type": "integer",
+          "minimum": -1,
+          "default": -1
+        },
+        "networkLatencyMs": {
+          "description": "Injected egress network latency in milliseconds for NETWORK_LATENCY (1..30,000).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000,
+          "default": 100
+        },
+        "fillPercentage": {
+          "description": "Target disk fill percentage for DISK_FILL or IO_STRESS (1..100).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 80
+        },
+        "cpuCores": {
+          "description": "Number of CPU cores to saturate for CPU_STRESS (1..64).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 2
+        },
+        "memoryMb": {
+          "description": "Amount of memory in MiB to consume for MEMORY_STRESS (1..32,768).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32768,
+          "default": 512
+        },
+        "ioWorkers": {
+          "description": "Number of concurrent I/O worker threads for IO_STRESS (1..64).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 4
+        },
+        "gracePeriodSec": {
+          "description": "Pod termination grace period in seconds for POD_DELETE / POD_KILL (0..300).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300,
+          "default": 0
+        },
+        "targetTopic": {
+          "description": "Kafka topic name for leader-aware targeting in disruption plans (1..249 ASCII chars).",
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9._-]{1,249}$"
+        },
+        "targetPartition": {
+          "description": "Partition index (>= 0) whose leader broker is targeted when targetTopic is set.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "probes": {
+          "description": "Fault-scoped probes. Note: cmdProbe is forbidden inside FaultSpec.probes; use kafkaProbe or k8sProbe.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/faultProbeSpec" }
+        }
+      }
+    },
+    "probeSpec": {
+      "description": "Health probe evaluated during a resilience test.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "command", "expectedOutput"],
+      "properties": {
+        "name": {
+          "description": "Unique probe identifier.",
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "description": "Probe execution mechanism: kafkaProbe (Kates AdminClient check), k8sProbe (Kubernetes resource check), or cmdProbe (pod exec).",
+          "type": "string",
+          "enum": ["kafkaProbe", "k8sProbe", "cmdProbe"],
+          "default": "cmdProbe"
+        },
+        "mode": {
+          "description": "Litmus probe evaluation mode: SOT, EOT, Continuous, Edge, or OnChaos.",
+          "type": "string",
+          "enum": ["SOT", "EOT", "Continuous", "Edge", "OnChaos"],
+          "default": "Continuous"
+        },
+        "command": {
+          "description": "For kafkaProbe: 'under-replicated-partitions', 'unavailable-partitions', 'produce <topic>', or 'consumer-lag [<group>]'. For k8sProbe: 'kafka Ready'. For cmdProbe: shell command.",
+          "type": "string",
+          "minLength": 1
+        },
+        "expectedOutput": {
+          "description": "Expected output string or number compared against the actual probe output.",
+          "type": "string"
+        },
+        "comparator": {
+          "description": "Comparison operator: text ('equal', 'contains', 'notContains') or numeric ('==', '!=', '>=', '<=', '>', '<').",
+          "type": "string",
+          "enum": ["equal", "contains", "notContains", "==", "!=", ">=", "<=", ">", "<"],
+          "default": "contains"
+        },
+        "intervalSec": {
+          "description": "Polling interval in seconds between probe evaluations (>= 1).",
+          "type": "integer",
+          "minimum": 1,
+          "default": 5
+        },
+        "timeoutSec": {
+          "description": "Maximum execution time in seconds for a single probe evaluation (>= 1).",
+          "type": "integer",
+          "minimum": 1,
+          "default": 10
+        }
+      }
+    },
+    "faultProbeSpec": {
+      "allOf": [{ "$ref": "#/$defs/probeSpec" }],
+      "properties": {
+        "type": {
+          "description": "FaultSpec.probes only permits kafkaProbe or k8sProbe (cmdProbe is refused inside FaultSpec).",
+          "type": "string",
+          "enum": ["kafkaProbe", "k8sProbe"]
+        }
+      }
+    }
+  }
+}

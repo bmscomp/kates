@@ -1,0 +1,110 @@
+{
+  "scopeName": "kates.yaml.injection",
+  "injectionSelector": "L:source.yaml -comment",
+  "patterns": [
+    {
+      "include": "#directives"
+    },
+    {
+      "include": "#api-headers"
+    },
+    {
+      "include": "#test-and-phase-types"
+    },
+    {
+      "include": "#disruption-types"
+    },
+    {
+      "include": "#probe-keywords"
+    },
+    {
+      "include": "#compliance-operators"
+    },
+    {
+      "include": "#k8s-quantities"
+    },
+    {
+      "include": "#env-variables"
+    },
+    {
+      "include": "#strimzi-labels"
+    }
+  ],
+  "repository": {
+    "directives": {
+      "match": "^\\s*(#\\s*(?:kates-schema|yaml-language-server):)\\s*(\\S+).*$",
+      "captures": {
+        "1": {
+          "name": "keyword.control.directive.kates.yaml"
+        },
+        "2": {
+          "name": "entity.name.tag.schema.kates.yaml"
+        }
+      }
+    },
+    "api-headers": {
+      "match": "(?<=:\\s*)(conformity\\.kates\\.io/v1alpha1|kates\\.io/v1alpha1|KafkaReference)\\b",
+      "captures": {
+        "1": {
+          "name": "entity.name.type.kates.yaml"
+        }
+      }
+    },
+    "test-and-phase-types": {
+      "match": "(?<=:\\s*[\"']?)(LOAD|STRESS|SPIKE|ENDURANCE|VOLUME|CAPACITY|ROUND_TRIP|INTEGRITY|TUNE_REPLICATION|TUNE_ACKS|TUNE_BATCHING|TUNE_COMPRESSION|TUNE_PARTITIONS|INTEGRATION_CDC|WARMUP|RAMP|STEADY|COOLDOWN)(?=[\"']?\\s*(?:$|#))",
+      "captures": {
+        "1": {
+          "name": "support.constant.test-type.kates.yaml"
+        }
+      }
+    },
+    "disruption-types": {
+      "match": "(?<=:\\s*[\"']?)(POD_KILL|POD_DELETE|GRACEFUL_STOP|NETWORK_PARTITION|NETWORK_LATENCY|DISK_FILL|CPU_STRESS|MEMORY_STRESS|IO_STRESS|DNS_ERROR|ROLLING_RESTART|SCALE_DOWN|LEADER_ELECTION|NODE_DRAIN)(?=[\"']?\\s*(?:$|#))",
+      "captures": {
+        "1": {
+          "name": "entity.name.function.chaos-fault.kates.yaml"
+        }
+      }
+    },
+    "probe-keywords": {
+      "match": "(?<=:\\s*[\"']?)(kafkaProbe|k8sProbe|cmdProbe|SOT|EOT|Continuous|Edge|OnChaos|under-replicated-partitions|unavailable-partitions)(?=[\"']?\\s*(?:$|#))",
+      "captures": {
+        "1": {
+          "name": "support.type.probe.kates.yaml"
+        }
+      }
+    },
+    "compliance-operators": {
+      "match": "^\\s*(?:(-)\\s+)?(equals|min|max|oneOf|severity|comparator|validate|sla|waivers|chaosSpec|faultSpec|testRequest|scenarios)(?=:)",
+      "captures": {
+        "2": {
+          "name": "keyword.operator.constraint.kates.yaml"
+        }
+      }
+    },
+    "k8s-quantities": {
+      "match": "(?<=:\\s*[\"']?)([0-9]+(?:\\.[0-9]+)?(?:m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei))(?=[\"']?\\s*(?:$|#|,|\\}))",
+      "captures": {
+        "1": {
+          "name": "constant.numeric.quantity.kates.yaml"
+        }
+      }
+    },
+    "env-variables": {
+      "match": "(\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}|\\$[A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": {
+          "name": "variable.other.env.kates.yaml"
+        }
+      }
+    },
+    "strimzi-labels": {
+      "match": "(strimzi\\.io/[A-Za-z0-9_.-]+|topology\\.kubernetes\\.io/[A-Za-z0-9_.-]+)",
+      "captures": {
+        "1": {
+          "name": "entity.other.attribute-name.label.kates.yaml"
+        }
+      }
+    }
+  }
+}

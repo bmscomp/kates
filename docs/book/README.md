@@ -74,6 +74,7 @@ Reading order is defined by [`_quarto.yml`](_quarto.yml) — filenames are stabl
 | [CI/CD Pipeline](appendix-c-cicd.md) | GitHub Actions workflows, build validation, and release automation |
 | [Version & Compatibility Matrix](appendix-d-versions.md) | Every pinned version, generated from the repo's own pins |
 | [Compliance Language Reference](appendix-compliance-language.md) | Every field, value, rule and lint finding of a `KafkaReference` file |
+| [IDE Extensions & Language Server](appendix-ide-extensions.md) | JSON Schemas, offline linters, `kates lsp`, and the VS Code and Visual Studio 2022 plugins |
 | [References](references.md) | The works the book cites, numbered alphabetically by first author |
 
 ## Tutorials
@@ -97,6 +98,7 @@ Hands-on step-by-step guides for specific workflows. The tutorials are for pract
 | 12 | [Migrating Kafka 3.x to 4.x with MirrorMaker 2](../tutorials/12-migrating-kafka-3x-to-4x.md) | The same migration from a 3.x cluster |
 | 13 | [Using the Grafana Dashboards](../tutorials/13-using-the-dashboards.md) | Install the Grafana boards, read them, and diagnose an empty panel |
 | 14 | [Using Kates from an AI Agent](../tutorials/14-using-kates-from-an-ai-agent.md) | Connect an AI agent to the lab through the read-only `kates mcp` server |
+| 15 | [Authoring & Debugging YAML Suites in VS Code](../tutorials/15-ide-authoring-and-lsp.md) | Install `vscode-kates`, use `kates lsp` quick-fixes and inlay hints, refactor scenarios into chaos tests, and run live cluster pre-flight |
 
 ## Who This Book Is For
 

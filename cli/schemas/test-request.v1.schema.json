@@ -1,0 +1,411 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/bmscomp/kates/main/schemas/test-request.v1.schema.json",
+  "title": "Kates CreateTestRequest & Multi-Phase TestScenario v1",
+  "description": "API request and advanced multi-phase scenario specification (WARMUP, RAMP, STEADY, SPIKE, COOLDOWN) with SLA grading.",
+  "type": "object",
+  "additionalProperties": false,
+  "anyOf": [
+    { "required": ["type"] },
+    { "required": ["scenario"] }
+  ],
+  "properties": {
+    "type": {
+      "description": "Test type for a single-phase run (or fallback if scenario.type is omitted).",
+      "$ref": "#/$defs/testType"
+    },
+    "backend": {
+      "description": "Execution backend: native (default) or trogdor.",
+      "$ref": "#/$defs/backendType"
+    },
+    "spec": {
+      "description": "Wire-format TestSpec parameters (uses numRecords, numProducers, recordSize, durationMs, throughput).",
+      "$ref": "#/$defs/wireTestSpec"
+    },
+    "scenario": {
+      "description": "Multi-phase scenario envelope with baseSpec, ordered execution phases, SLA definition, and metadata labels.",
+      "$ref": "#/$defs/multiPhaseScenario"
+    }
+  },
+  "$defs": {
+    "testType": {
+      "type": "string",
+      "enum": [
+        "LOAD",
+        "STRESS",
+        "SPIKE",
+        "ENDURANCE",
+        "VOLUME",
+        "CAPACITY",
+        "ROUND_TRIP",
+        "INTEGRITY",
+        "TUNE_REPLICATION",
+        "TUNE_ACKS",
+        "TUNE_BATCHING",
+        "TUNE_COMPRESSION",
+        "TUNE_PARTITIONS",
+        "INTEGRATION_CDC"
+      ]
+    },
+    "backendType": {
+      "type": "string",
+      "enum": ["native", "trogdor"],
+      "default": "native"
+    },
+    "phaseType": {
+      "description": "Execution phase behavior: WARMUP, RAMP (supports rampSteps), STEADY, SPIKE, or COOLDOWN.",
+      "type": "string",
+      "enum": ["WARMUP", "RAMP", "STEADY", "SPIKE", "COOLDOWN"]
+    },
+    "wireTestSpec": {
+      "description": "Kates API wire-format TestSpec. Uses numRecords, numProducers, recordSize, durationMs, and throughput.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "numRecords": {
+          "description": "Number of records each producer task sends (1..100,000,000).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000000,
+          "default": 50000
+        },
+        "recordSize": {
+          "description": "Payload size of each record in bytes (1..10,485,760).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10485760,
+          "default": 512
+        },
+        "numProducers": {
+          "description": "Number of concurrent producer tasks (1..64).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 2
+        },
+        "numConsumers": {
+          "description": "Number of concurrent consumer tasks (1..64).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 1
+        },
+        "durationMs": {
+          "description": "Maximum test duration in milliseconds (0 for record-count bounded, or 1,000..86,400,000).",
+          "type": "integer",
+          "anyOf": [
+            { "const": 0 },
+            { "minimum": 1000, "maximum": 86400000 }
+          ],
+          "default": 0
+        },
+        "throughput": {
+          "description": "Target producer throughput in records/sec per producer, or -1 for unlimited.",
+          "type": "integer",
+          "minimum": -1,
+          "not": { "const": 0 },
+          "default": -1
+        },
+        "targetThroughput": {
+          "description": "Alias for throughput: target producer rate in records/sec, or -1 for unlimited.",
+          "type": "integer",
+          "minimum": -1,
+          "not": { "const": 0 }
+        },
+        "topic": {
+          "description": "Kafka topic name (1..249 ASCII alphanumeric, '.', '_', or '-' chars).",
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9._-]{1,249}$"
+        },
+        "partitions": {
+          "description": "Number of topic partitions (1..1,000).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 6
+        },
+        "replicationFactor": {
+          "description": "Topic replication factor (1..10). Must be >= minInsyncReplicas.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1
+        },
+        "minInsyncReplicas": {
+          "description": "Topic min.insync.replicas (1..10). Must be <= replicationFactor.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1
+        },
+        "acks": {
+          "description": "Producer acknowledgment mode: \"all\", \"-1\", \"1\", or \"0\".",
+          "oneOf": [
+            { "type": "string", "enum": ["all", "-1", "0", "1"] },
+            { "type": "integer", "enum": [-1, 0, 1] }
+          ],
+          "default": "all"
+        },
+        "compressionType": {
+          "description": "Producer compression codec: none, gzip, snappy, lz4, or zstd.",
+          "type": "string",
+          "enum": ["none", "gzip", "snappy", "lz4", "zstd"],
+          "default": "none"
+        },
+        "batchSize": {
+          "description": "Producer batch.size in bytes (1..16,777,216).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216,
+          "default": 16384
+        },
+        "lingerMs": {
+          "description": "Producer linger.ms in milliseconds (0..60,000).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "default": 5
+        },
+        "consumerGroup": {
+          "description": "Consumer group ID (1..255 printable ASCII chars). Allowed only on single-phase LOAD, ENDURANCE, and INTEGRITY runs.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[ -~]{1,255}$"
+        },
+        "fetchMinBytes": {
+          "description": "Consumer fetch.min.bytes (1..16,777,216). Allowed only on single-phase LOAD, ENDURANCE, and INTEGRITY runs.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216,
+          "default": 1
+        },
+        "fetchMaxWaitMs": {
+          "description": "Consumer fetch.max.wait.ms (1..60,000). Allowed only on single-phase LOAD, ENDURANCE, and INTEGRITY runs.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000,
+          "default": 500
+        },
+        "enableIdempotence": {
+          "description": "Enable producer idempotence (requires acks: \"all\").",
+          "type": "boolean",
+          "default": false
+        },
+        "enableTransactions": {
+          "description": "Enable Kafka transactions (requires acks: \"all\", enableIdempotence: true, and backend: native).",
+          "type": "boolean",
+          "default": false
+        },
+        "enableCrc": {
+          "description": "Enable CRC32 payload validation (allowed only on single-phase INTEGRITY runs).",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "multiPhaseScenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "description": "Scenario name (1..128 characters).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "description": {
+          "description": "Human-readable description of the multi-phase scenario.",
+          "type": "string"
+        },
+        "type": {
+          "description": "Primary test type for the scenario.",
+          "$ref": "#/$defs/testType",
+          "default": "LOAD"
+        },
+        "backend": {
+          "description": "Benchmark execution engine: native or trogdor.",
+          "$ref": "#/$defs/backendType"
+        },
+        "baseSpec": {
+          "description": "Base TestSpec inherited by all phases unless overridden in phases[].spec.",
+          "$ref": "#/$defs/wireTestSpec"
+        },
+        "phases": {
+          "description": "Ordered sequence of execution phases (WARMUP, RAMP, STEADY, SPIKE, COOLDOWN).",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/scenarioPhase" }
+        },
+        "sla": {
+          "description": "SLA definition evaluated across the scenario run.",
+          "$ref": "#/$defs/slaDefinition"
+        },
+        "labels": {
+          "description": "Arbitrary key/value string labels attached to the scenario.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "scenarioPhase": {
+      "description": "A single execution phase within a multi-phase TestScenario.",
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [
+        { "required": ["type"] },
+        { "required": ["phaseType"] }
+      ],
+      "properties": {
+        "name": {
+          "description": "Phase display name (1..100 characters).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "type": {
+          "description": "Execution phase behavior: WARMUP, RAMP (supports rampSteps), STEADY, SPIKE, or COOLDOWN.",
+          "$ref": "#/$defs/phaseType"
+        },
+        "phaseType": {
+          "description": "Alias for type: execution phase behavior (WARMUP, RAMP, STEADY, SPIKE, or COOLDOWN).",
+          "$ref": "#/$defs/phaseType"
+        },
+        "durationMs": {
+          "description": "Phase duration in milliseconds (0 or 1,000..86,400,000).",
+          "type": "integer",
+          "anyOf": [
+            { "const": 0 },
+            { "minimum": 1000, "maximum": 86400000 }
+          ],
+          "default": 30000
+        },
+        "targetThroughput": {
+          "description": "Target producer throughput for this phase in records/sec, or -1 for unlimited.",
+          "type": "integer",
+          "minimum": -1,
+          "not": { "const": 0 },
+          "default": -1
+        },
+        "rampSteps": {
+          "description": "Number of incremental throughput steps (2..100). Only used when phase type is RAMP.",
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 100,
+          "default": 4
+        },
+        "spec": {
+          "description": "Phase-specific TestSpec overrides merged onto scenario.baseSpec.",
+          "$ref": "#/$defs/wireTestSpec"
+        },
+        "specOverrides": {
+          "description": "Phase-specific TestSpec overrides merged onto scenario.baseSpec.",
+          "$ref": "#/$defs/wireTestSpec"
+        }
+      }
+    },
+    "slaDefinition": {
+      "description": "Service Level Agreement thresholds used by Kates SlaGrader to grade a test or disruption run.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "p95LatencyMs": {
+          "description": "Maximum allowed p95 latency in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "p99LatencyMs": {
+          "description": "Maximum allowed p99 latency in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "avgLatencyMs": {
+          "description": "Maximum allowed average latency in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxP99LatencyMs": {
+          "description": "Maximum allowed p99 latency in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 100.0
+        },
+        "maxP999LatencyMs": {
+          "description": "Maximum allowed p99.9 latency in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 500.0
+        },
+        "maxAvgLatencyMs": {
+          "description": "Maximum allowed average latency in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 50.0
+        },
+        "minThroughputRecPerSec": {
+          "description": "Minimum required throughput in records/second (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 1000.0
+        },
+        "maxErrorRate": {
+          "description": "Maximum allowed error rate as a fraction between 0.0 and 1.0.",
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.01
+        },
+        "maxErrorRatePercent": {
+          "description": "Maximum allowed error rate percentage (0.0..100.0).",
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 100.0
+        },
+        "maxRecoveryTimeMs": {
+          "description": "Maximum allowed cluster recovery time in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxThroughputDegradationPercent": {
+          "description": "Maximum allowed throughput degradation percentage during disruption (0.0..100.0).",
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 100.0
+        },
+        "maxIsrRecoveryTimeMs": {
+          "description": "Maximum allowed ISR recovery time in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxConsumerLag": {
+          "description": "Maximum allowed consumer group lag in records (>= 0).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "minRecordsProcessed": {
+          "description": "Minimum total records processed (>= 1).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxDataLossPercent": {
+          "description": "Maximum allowed data loss percentage (0.0..100.0).",
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "default": 0.0
+        },
+        "maxRtoMs": {
+          "description": "Maximum allowed Recovery Time Objective (RTO) in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxRpoMs": {
+          "description": "Maximum allowed Recovery Point Objective (RPO) in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    }
+  }
+}
