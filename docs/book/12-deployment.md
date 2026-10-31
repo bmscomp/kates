@@ -917,7 +917,7 @@ The granting account creates a [KafkaUser](appendix-a-glossary.md#gl-kafkauser) 
 - Create, Describe, Write and Read on each test topic: `<type>-test`, such as `load-test`, unless the test sets `--topic`.
 - Read on the consumer groups `*`, because the group names Kates picks start with the run's random id, unless the test sets `--consumer-group`.
 - Write and Describe on the transactional ids that start with `kates-`, for tests with transactions on.
-- Create, Describe, Write and Read on the topic `kates-test-events`, and Read on the group `kates-webhooks`, which carry run events to webhooks; Describe and Read on the topic `kates-dlq`, which the Kates API polls.
+- Create, Describe, Write and Read on the topic `kates-test-events`, and Read on the group `kates-webhooks`, which carry run events to webhooks; Describe and Read on the topic `kates-dlq`, which the Kates API polls, and Read on its group `kates-dlq-consumer`.
 - Describe and DescribeConfigs on every topic for a compliance check's `topics` rules, which judge only the topics the user may describe, and DescribeConfigs on the cluster for `kafka.source: brokers`.
 
 It then renders the Role from the same release name, namespace and values as the team's install, so that it binds the right ServiceAccount, and applies it:

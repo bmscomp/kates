@@ -571,26 +571,88 @@ Read it from the top:
 
 ## Checking a Cluster You Don't Administer {#checking-without-cluster-admin}
 
-On a shared cluster, your account usually has the built-in `edit` role in a team namespace, and someone else runs Strimzi and the Kafka cluster. That is enough for a compliance check. Install the `kates` chart with `rbac.scope=namespace`, and it creates nothing cluster-scoped. The check then reads the Kafka namespace through one read-only Role, which the cluster's owner applies once. The steps use plain Helm and the published chart, so they work on any Kubernetes cluster: EKS, GKE, AKS, or one you run yourself. [Running Without Cluster Admin](12-deployment.md#running-without-cluster-admin) in the Deployment Guide covers the same install for performance and INTEGRITY tests too.
+On a shared cluster, your account usually has the built-in `edit` role in a team namespace, and someone else runs Strimzi and the Kafka cluster. That is enough for a compliance check. Install the `kates` chart with `rbac.scope=namespace`, and it creates nothing cluster-scoped. The check then reads the Kafka namespace through one read-only Role, which the cluster's owner applies once. The steps use plain Helm and the published chart, so they work on any Kubernetes cluster: EKS, GKE, AKS, or one you run yourself. [Running Without Cluster Admin](12-deployment.md#running-without-cluster-admin) in the Deployment Guide covers the same install for performance and INTEGRITY tests.
 
-The example installs Kates into the namespace `payments` and checks `krafter` in the namespace `streaming`. Wherever your cluster's names differ, use your own.
+The work splits in two, and only your part repeats:
+
+| Who | Does what | Rights it takes |
+|:----------------------|:---------------------------------------------------------|:----------------------------------|
+| The cluster's owner | Creates a KafkaUser for Kates and applies the read-only Role, once; optionally grants node reads | Strimzi's resources and PodMonitors in the Kafka namespace, and creating Roles; cluster-admin for node reads |
+| You | Install the chart, then run checks | `edit` in your namespace |
+
+The example installs Kates into the namespace `payments` and checks `krafter` in the namespace `kafka`. The figure shows what each grant lets the Kates API read:
+
+```mermaid
+%%| label: fig-compliance-adminless
+%%| fig-cap: "The Kates API in payments reads the Kafka namespace through the owner's Role, Kafka itself through its KafkaUser, and nodes only through the optional ClusterRole."
+%%| fig-alt: "The Kates API runs in the payments namespace. A Role in the kafka namespace lets it read the Kafka resource, node pools, pods, PersistentVolumeClaims, PodMonitors and EndpointSlices. The KafkaUser payments-kates lets it describe topics and configs through the Kafka Admin API. A dotted edge marks the optional ClusterRole that lets it read nodes."
+flowchart LR
+    subgraph team["namespace payments (edit)"]
+        api["Kates API"]
+    end
+    subgraph kafka["namespace kafka"]
+        role["Role<br/>kates-kafka-reader-payments"]
+        brokers["krafter brokers"]
+    end
+    nodes["nodes"]
+    api -- "reads through" --> role
+    api -- "KafkaUser payments-kates" --> brokers
+    api -. "optional ClusterRole" .-> nodes
+```
 
 ### Step 1 — The Cluster's Owner Grants the Reads
 
-Ask whoever administers the Kafka cluster for two things. The first is a [KafkaUser](appendix-a-glossary.md#gl-kafkauser) for Kates, here `payments-kates`, and its password. Where the cluster enforces ACLs, the `topics` rules need Describe and DescribeConfigs on every topic, and `kafka.source: brokers` needs DescribeConfigs on the cluster. A topic the user can't describe isn't judged. The ACLs that tests need are listed in [Step 1](12-deployment.md#step-1--grant-the-teams-kates-access-to-kafka) of the Deployment Guide.
+The owner first creates a [KafkaUser](appendix-a-glossary.md#gl-kafkauser) for Kates and gives you its password. On a cluster that enforces ACLs, the `topics` rules need Describe and DescribeConfigs on every topic, and `kafka.source: brokers` needs DescribeConfigs on the cluster; a topic the user can't describe isn't judged. The Kates API also reads and writes a few topics of its own from the moment it starts, for run events and its dead-letter queue. This KafkaUser holds what a check needs, and nothing for tests:
 
-The second is the Role. The owner renders it from your release name, namespace and values, so that it binds your ServiceAccount, and applies it:
+```yaml
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: payments-kates
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: krafter
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      # What a compliance check reads
+      - resource: {type: topic, name: "*", patternType: literal}
+        operations: [Describe, DescribeConfigs]
+      - resource: {type: cluster}
+        operations: [DescribeConfigs]
+      # The Kates API's own run events and dead-letter queue
+      - resource: {type: topic, name: kates-test-events, patternType: literal}
+        operations: [Create, Describe, Write, Read]
+      - resource: {type: group, name: kates-webhooks, patternType: literal}
+        operations: [Read]
+      - resource: {type: topic, name: kates-dlq, patternType: literal}
+        operations: [Describe, Read]
+      - resource: {type: group, name: kates-dlq-consumer, patternType: literal}
+        operations: [Read]
+```
+
+To run tests from the same install, the user needs the test topics' ACLs too, which [Step 1](12-deployment.md#step-1--grant-the-teams-kates-access-to-kafka) of the Deployment Guide lists.
+
+The owner then renders the Role from your release name, namespace and values, so that it binds your ServiceAccount, and applies it:
 
 ```bash
 helm template kates oci://ghcr.io/bmscomp/charts/kates -n payments \
   --set rbac.scope=namespace \
-  --set networkPolicy.kafka.namespace=streaming \
+  --set networkPolicy.kafka.namespace=kafka \
   --show-only templates/rbac.yaml | kubectl apply -f -
 ```
 
-The Role is `kates-kafka-reader-payments` in `streaming`. It gets the `Kafka` resource, and lists the node pools, pods, PersistentVolumeClaims, PodMonitors and EndpointSlices there; it never writes. Without it, the check stops before its first rule: the Kates API answers 503 and names the grant it is missing.
+Output:
 
-Nodes are cluster-scoped, so the Role can't cover them. The zone rules read zones another way, as [Step 4](#step-4--read-what-the-namespace-scope-changes) shows. If your reference uses a `zoneLabel` that only the nodes carry, the owner also applies the node grant, a ClusterRole with `get` and `list` on `nodes` and nothing else:
+```text
+role.rbac.authorization.k8s.io/kates-kafka-reader-payments created
+rolebinding.rbac.authorization.k8s.io/kates-kafka-reader-payments created
+```
+
+The Role gets the `Kafka` resource and lists the node pools, pods, PersistentVolumeClaims, PodMonitors and EndpointSlices in `kafka`; it never writes. Nodes are cluster-scoped, so it can't cover them, and the zone rules read zones another way, as [Step 4](#step-4--read-what-the-namespace-scope-changes) shows. Where your reference uses a `zoneLabel` that only the nodes carry, the owner also applies the node grant, a ClusterRole with `get` and `list` on `nodes` and nothing else:
 
 ```bash
 helm template kates oci://ghcr.io/bmscomp/charts/kates -n payments \
@@ -600,7 +662,7 @@ helm template kates oci://ghcr.io/bmscomp/charts/kates -n payments \
 
 ### Step 2 — Install Kates in Your Namespace
 
-Store the password in the Secret the chart reads, `kates-backend`, then install. `rbac.kafkaNamespaceRole=false` leaves out the Role you can't create; the owner applied it in Step 1. The three `kafka` values and `networkPolicy.kafka.namespace` point Kates at the cluster:
+Copy the password into the Secret the chart reads, `kates-backend`, then install. `rbac.kafkaNamespaceRole=false` leaves out the Role, which `edit` can't create and the owner applied in Step 1:
 
 ```bash
 kubectl create secret generic kates-backend -n payments \
@@ -608,13 +670,15 @@ kubectl create secret generic kates-backend -n payments \
 helm upgrade --install kates oci://ghcr.io/bmscomp/charts/kates -n payments \
   --set rbac.scope=namespace \
   --set rbac.kafkaNamespaceRole=false \
-  --set networkPolicy.kafka.namespace=streaming \
+  --set networkPolicy.kafka.namespace=kafka \
   --set kafka.clusterName=krafter \
-  --set kafka.bootstrapServers=krafter-kafka-bootstrap.streaming.svc:9092 \
+  --set kafka.bootstrapServers=krafter-kafka-bootstrap.kafka.svc:9092 \
   --set kafka.sasl.username=payments-kates
 ```
 
-One Kates API checks one Kafka cluster: the one `networkPolicy.kafka.namespace` and `kafka.clusterName` name. A reference whose `spec.target` names another is refused with a 409. The defaults are a plaintext SCRAM-SHA-512 listener on port 9092. For a TLS listener, set `kafka.security.protocol` and `kafka.ssl` as the [chart's README](https://github.com/bmscomp/kates/tree/main/charts/kates) describes, and set `networkPolicy.kafka.port` to the listener's port, because the chart's NetworkPolicy allows only that port to Kafka. If the cluster can't pull from GHCR, [Deploying Without GHCR](12-deployment.md#deploying-without-ghcr) shows how to mirror the images.
+The last four values are the chart's defaults here, and they are the ones to change on another cluster. `networkPolicy.kafka.namespace` and `kafka.clusterName` name the one Kafka cluster this Kates API checks, and a reference whose `spec.target` names another is refused with a 409. The chart's NetworkPolicy lets the pod reach Kafka only in that namespace, on `networkPolicy.kafka.port`, 9092 by default. The defaults expect a plaintext SCRAM-SHA-512 listener; for a TLS listener, set `kafka.security.protocol`, `kafka.ssl` and the port as the [chart's README](https://github.com/bmscomp/kates/tree/main/charts/kates) describes. If the cluster can't pull from GHCR, [Deploying Without GHCR](12-deployment.md#deploying-without-ghcr) shows how to mirror the images.
+
+The install also starts a PostgreSQL for the Kates API in `payments`, and waits for nothing outside it, so the pods come up whether or not the Role exists yet.
 
 Where you would rather run a Kafka cluster of your own than check a shared one, `kates deploy --adminless` installs the whole stack into namespaces you already have, once Strimzi is installed. [Deploying Without Cluster Admin](12-deployment.md#deploying-without-cluster-admin) describes it.
 
@@ -626,35 +690,69 @@ Where you would rather run a Kafka cluster of your own than check a shared one, 
 kates ports --app-ns payments
 ```
 
-Then lint the reference and check the cluster. Its `spec.target` names `streaming/krafter`, or leaves the target out:
+Then lint `minimal.yaml` from [Your First Reference](#your-first-reference) and check the cluster against it:
 
 ```bash
-kates compliance lint payments-krafter.yaml
-kates compliance check -f payments-krafter.yaml
+kates compliance lint minimal.yaml
+kates compliance check -f minimal.yaml
 ```
+
+Output, with the banner trimmed:
+
+```text
+1 file: no problems
+✓ PASS: 0 fail, 0 warn, 0 waived, 3 pass, 0 unknown
+  3 passing rules not shown; -o json lists them
+```
+
+If the owner hasn't applied the Role yet, the check stops before its first rule and exits 2. The Kates API answers 503 and names the first read it was refused, here the `Kafka` resource:
+
+```text
+  ✖ minimal.yaml: [503] Service Unavailable: The Kates API's service account may
+  not get kafkas.kafka.strimzi.io in kafka: bind it a Role there that grants it, …
+```
+
+The message ends by pointing at the `kates` chart's Role with `rbac.scope=namespace`, the one from Step 1.
 
 ### Step 4 — Read What the Namespace Scope Changes {#step-4--read-what-the-namespace-scope-changes}
 
-Most rules read the same objects as in a cluster-scoped install. Three groups differ, and each rule's `source` in `-o json` says what was read:
+Most rules read the same objects as in a cluster-scoped install. Three groups differ, and each rule's `source` in `-o json` says what it read:
 
-- `zones`, `skew` and `kafka.rackAwareness` with `kafka.source: cr` take each pod's zone from the EndpointSlices of Strimzi's headless Service, which carry only `topology.kubernetes.io/zone`. With a custom `zoneLabel` that is the Kafka CR's `spec.kafka.rack.topologyKey`, they take it from the racks the brokers report. With any other `zoneLabel`, they are UNKNOWN unless the owner applied the node grant, and the reason says which grant or `zoneLabel` would let the check read the zones.
-- `monitoring.podMonitor` looks for PodMonitors in the Kafka namespace only, and its source says so.
-- The `topics` rules see only the topics the KafkaUser may describe.
+- `zones`, `skew` and `kafka.rackAwareness` with `kafka.source: cr` take each pod's zone from the EndpointSlices of Strimzi's headless Service, which carry only `topology.kubernetes.io/zone`. With a custom `zoneLabel` that is the Kafka CR's `spec.kafka.rack.topologyKey`, they take it from the racks the brokers report. With any other `zoneLabel`, they are UNKNOWN until the owner applies the node grant, and the reason names the grant and the `zoneLabel` that would let the check read the zones.
+- `monitoring.podMonitor` looks for PodMonitors in the Kafka namespace only.
+- The `topics` rules judge only the topics the KafkaUser may describe.
 
-The EndpointSlice controller copies the zone from each node's `topology.kubernetes.io/zone` label. Managed clusters set that label on every node. A cluster you built yourself may not, and then every pod counts as in no zone. In that case, ask the owner to label the nodes, or to apply the node grant for the label the nodes do carry.
-
-To see where a zone came from, print the rule's detail:
+To see where the zones came from, print the rule's detail:
 
 ```bash
-kates compliance check -f payments-krafter.yaml -o json \
+kates compliance check -f minimal.yaml -o json \
   | jq -r '.results[] | select(.rule == "brokers.zones") | .detail'
 ```
 
-Output on a lab Kind cluster that `kates deploy --adminless` built, whose Kafka namespace is `kafka`:
+Output:
 
 ```text
 alpha: 1, gamma: 1, sigma: 1; zones from the EndpointSlices of kafka/krafter-kafka-brokers
 ```
+
+The EndpointSlice controller copies each pod's zone from its node's `topology.kubernetes.io/zone` label. Managed clusters set that label on every node. A cluster you built yourself may not, and then every pod counts as in no zone, so `zones` fails. Ask the owner to label the nodes, or to apply the node grant and name the label your nodes do carry in `zoneLabel`.
+
+With the node grant, the zones come from the nodes, and the detail drops its EndpointSlices note. The grant makes a rule readable, not true. A reference with `zoneLabel: example.com/zone`, a label no node on the lab carries, has `brokers.zones` UNKNOWN without the grant. With it, the rule is FAIL, with the detail `3 not scheduled on a node with example.com/zone`, which is the cluster's real state.
+
+::: {.callout-tip title="Try it: which read is missing?"}
+Before the owner applies the Role, run `kates compliance check -f minimal.yaml`. Which resource does the 503 name? Apply the Role and run the check again: which rule's `source` names the EndpointSlices?
+:::
+
+The outputs in this section come from a Kind cluster that `kates deploy --adminless` built, with a second Kates installed into `payments` by these four steps, from an account with `edit` there and nothing else.
+
+To remove it, uninstall the release and its Secret:
+
+```bash
+helm uninstall kates -n payments
+kubectl delete secret kates-backend -n payments
+```
+
+The owner then deletes what Step 1 created: the KafkaUser, and the Role and node grant, by piping the same `helm template` commands into `kubectl delete -f -`.
 
 ## Running It in a Pipeline
 
