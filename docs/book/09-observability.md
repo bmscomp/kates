@@ -1,12 +1,12 @@
 # Observability & Monitoring
 
-Running a Kafka performance test without monitoring is like driving at night with no headlights. You might arrive safely, but you won't know how close you came to the edge. A test that reports its throughput and P99 tells you the result — but it doesn't tell you *why*. Was broker 2 doing twice the work? Was the [ISR](appendix-a-glossary.md#gl-isr) shrinking under load? Was GC pausing every 30 seconds? Without observability, you're guessing.
+A test that reports its throughput and P99 tells you the result, but not *why* it came out that way. Was broker 2 doing twice the work? Was the [ISR](appendix-a-glossary.md#gl-isr) shrinking under load? Was GC pausing every 30 seconds? The run's own numbers can't say.
 
 The answer is in four places: the [Grafana](appendix-a-glossary.md#gl-grafana) boards that watched the cluster, the meters the Kates API published while the run was in flight, the [heatmap](appendix-a-glossary.md#gl-heatmap) the run left behind, and the trend of the runs before it. You learn here which one to open for which question, and what the shapes in them mean.
 
 After this chapter, you can:
 
-- Walk the four-step diagnostic sequence — cluster health, performance, broker internals, replication — after any test run
+- Walk the four-step diagnostic sequence (cluster health, performance, broker internals, replication) after any test run
 - Pick the right Grafana dashboard or CLI tool for the question you're asking
 - Export a latency heatmap and read the patterns that percentiles hide
 - Track trends across runs and diff two reports to catch a regression before it ships
@@ -35,46 +35,46 @@ graph TB
     KE -->|results| DB --> API --> CLI
 ```
 
-Each Kafka broker exposes its JMX MBeans as Prometheus metrics through the JMX Prometheus Exporter agent, configured by the kafka-cluster chart's metrics ConfigMap. Prometheus scrapes these endpoints, plus the Kates API's own `/q/metrics`, on its scrape interval — 30 seconds by default. Grafana queries Prometheus to render dashboards. Meanwhile, the Kates API writes test results to PostgreSQL and serves them through its REST API, which the CLI reads for terminal dashboards and trend charts. Heatmap exports come from the Kates API's memory instead, as [Exporting a Report](#exporting-a-report) explains. Traces take a third path, to Jaeger, which [Distributed Tracing](#distributed-tracing) covers.
+Each Kafka broker exposes its JMX MBeans as Prometheus metrics through the JMX Prometheus Exporter agent, configured by the kafka-cluster chart's metrics ConfigMap. Prometheus scrapes these endpoints, plus the Kates API's own `/q/metrics`, on its scrape interval, 30 seconds by default. Grafana queries Prometheus to render dashboards. Meanwhile, the Kates API writes test results to PostgreSQL and serves them through its REST API, which the CLI reads for terminal dashboards and trend charts. Heatmap exports come from the Kates API's memory instead, as [Exporting a Report](#exporting-a-report) explains. Traces take a third path, to Jaeger, which [Distributed Tracing](#distributed-tracing) covers.
 
 ## Reading the Dashboards: A Diagnostic Walkthrough
 
-Your `payments-scenarios.yaml` LOAD run has finished on [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test. `kates test get` shows the `produce` row's throughput and P99 against the 2,000 records per second and 100 ms gates — but not why they came out as they did. Here's how to read the dashboards, in what order, and what each pattern means.
+Your `payments-scenarios.yaml` LOAD run has finished on [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test. `kates test get` shows the `produce` row's throughput and P99 against the 2,000 records per second and 100 ms gates, but not why they came out as they did. The four steps below go through the dashboards in order and say what each pattern means.
 
 ### Step 1 — Check Cluster Health
 
 Open **Kafka — KRaft Operations** and read its six-stat header. This is your starting point after *every* test, whether it passed or failed. You're answering one question: "Was the cluster healthy throughout the test, or did something break?"
 
-**Active controllers** must be exactly 1 for the whole window. Zero means the quorum had no leader. A cluster with no [controller](appendix-a-glossary.md#gl-controller) looks healthy from a client while nothing new can happen — no topic created, no leader elected, no broker fenced or unfenced. **Fenced brokers** is the one that catches what Kubernetes cannot: a fenced broker is Running, passes both probes, publishes its metrics, and serves nothing. **Metadata lag (worst node)** is the KRaft-only failure with no ZooKeeper equivalent — a broker operating on a stale view of topics, ACLs and leadership while every other panel says it is fine.
+**Active controllers** must be exactly 1 for the whole window. Zero means the quorum had no leader. A cluster with no [controller](appendix-a-glossary.md#gl-controller) looks healthy from a client while nothing new can happen: no topic is created, no leader elected, no broker fenced or unfenced. **Fenced brokers** is the one that catches what Kubernetes cannot: a fenced broker is Running, passes both probes, publishes its metrics, and serves nothing. **Metadata lag (worst node)** catches the KRaft-only failure, which has no ZooKeeper equivalent: a broker working from a stale view of topics, ACLs and leadership while every other panel says it is fine.
 
-Then drop to the **Cluster health** section for **Offline Partitions** and **Partitions below min.insync.replicas**. Both should be zero for the entire duration. Note the trap on offline partitions: only the active controller publishes that series, so when the quorum has no leader the panel goes empty rather than to zero, and an empty panel is not a zero.
+Then drop to the **Cluster health** section for **Offline Partitions** and **Partitions below min.insync.replicas**. Both should be zero for the entire duration. Offline partitions has a trap: only the active controller publishes that series, so when the quorum has no leader the panel goes empty, and an empty panel is not a zero.
 
-For broker health as a *machine* — CPU, disk, volumes, per-listener connections — use the Strimzi operator's own `strimzi-kafka.json`, which the KRaft board links to from its header.
+For broker health as a *machine* (CPU, disk, volumes, per-listener connections), use the Strimzi operator's own `strimzi-kafka.json`, which the KRaft board links to from its header.
 
 ### Step 2 — Examine Performance Metrics
 
 Now switch to **Kafka — Performance & Load Testing**. Look at **Messages in /s**: it should match the run's `targetThroughput: 2000`. If it's significantly lower, the producer couldn't sustain the target rate, which means you were testing the *producer's* limits, not the *cluster's*.
 
-Check **Cluster throughput, in and out** to understand the data volume. If bytes out significantly exceeds bytes in, you have multiple consumer groups reading the same data — which is fine, but it means you're testing read amplification too.
+Check **Cluster throughput, in and out** to understand the data volume. If bytes out significantly exceeds bytes in, more than one consumer group is reading the same data. That's fine, but it means you're testing read amplification too.
 
 Every panel in that row carries `topic=""`. Kafka registers the throughput meters twice, once per topic and once with no topic tag for the broker aggregate, and an absent label matches the empty string. So a query without that matcher counts every byte twice. [`dashboards/METRICS.md`](https://github.com/bmscomp/kates/blob/main/dashboards/METRICS.md) is where that and three other naming traps are written down.
 
 ### Step 3 — Investigate Latency Sources
 
-If your P99 was higher than expected, open the **Broker Internals** section of the same board. **Request and response queue size** growing during the test means requests were arriving faster than the broker could process them; a healthy cluster keeps this near zero. **Request handler idle (windowed)** is the better saturation signal [@gregg2013thinking]. When this [request handler idle ratio](appendix-a-glossary.md#gl-request-handler-idle-ratio) falls below 0.3 the broker itself is the bottleneck, and that is exactly what `KafkaRequestHandlerSaturated` fires on.
+If your P99 was higher than expected, open the **Broker Internals** section of the same board. **Request and response queue size** growing during the test means requests were arriving faster than the broker could process them; a healthy cluster keeps this near zero. **Request handler idle (windowed)** is the better saturation signal [@gregg2013thinking]. When this [request handler idle ratio](appendix-a-glossary.md#gl-request-handler-idle-ratio) falls below 0.3 the broker itself is the bottleneck, and that is what `KafkaRequestHandlerSaturated` fires on.
 
 Read it beside **Request handler idle (lifetime mean)**, which is deliberately on the same board. The lifetime form is a mean since the broker started, so a node up for a week and saturated for an hour still reads a comfortable number. When the two disagree, the windowed one is the one describing your test.
 
-With `acks=all`, every produce request is parked in the broker's produce [purgatory](appendix-a-glossary.md#gl-purgatory) until all ISR members replicate it [@wang2015building]. There is no dedicated purgatory panel, but a clean request queue combined with high produce latency usually means replication — not request processing — is the bottleneck; verify that in the next step.
+With `acks=all`, every produce request is parked in the broker's produce [purgatory](appendix-a-glossary.md#gl-purgatory) until all ISR members replicate it [@wang2015building]. There is no dedicated purgatory panel, but a clean request queue with high produce latency usually means replication is the bottleneck, not request processing; verify that in the next step.
 
 ### Step 4 — Verify Replication
 
-Finally, open the **Replication** section. During a normal test, **ISR shrinks and expands /s** should stay flat at zero and **Under-replicated partitions** should be zero for the entire duration. If the ISR shrank during the test — an [ISR shrink](appendix-a-glossary.md#gl-isr-shrink) leaves [under-replicated partitions](appendix-a-glossary.md#gl-under-replicated-partition) behind — followers were struggling to keep up, likely because of disk I/O pressure or network saturation.
+Finally, open the **Replication** section. During a normal test, **ISR shrinks and expands /s** should stay flat at zero and **Under-replicated partitions** should be zero for the entire duration. If the ISR shrank during the test (an [ISR shrink](appendix-a-glossary.md#gl-isr-shrink) leaves [under-replicated partitions](appendix-a-glossary.md#gl-under-replicated-partition) behind), followers were struggling to keep up, likely because of disk I/O pressure or network saturation.
 
-**Replication traffic** is the panel most easily forgotten: follower fetch traffic is invisible in the client-facing throughput numbers and is frequently what actually saturates the network. And if you are running across availability zones, **Throughput by zone** and **Leaders by zone** tell you how much of the test's traffic crossed a zone boundary — a cost problem before it is a latency one.
+**Replication traffic** is the panel people forget: follower fetch traffic is invisible in the client-facing throughput numbers and is frequently what saturates the network. And if you are running across availability zones, **Throughput by zone** and **Leaders by zone** tell you how much of the test's traffic crossed a zone boundary, which is a cost problem before it is a latency one.
 
 ::: {.callout-tip title="Read the boards in this order after every run"}
-Follow this sequence — cluster health, performance, internals, replication — after every test. It takes 60 seconds and catches problems that aggregate metrics hide. If a test result surprises you, the dashboards almost always explain why.
+Follow this sequence (cluster health, performance, internals, replication) after every test. It takes 60 seconds and catches problems that aggregate metrics hide. When a test result surprises you, start here.
 :::
 
 ## The Dashboard Set
@@ -117,18 +117,18 @@ The division of labor is asymmetric, and worth knowing before you go looking ups
 
 ### What the Metrics Mean
 
-[`dashboards/METRICS.md`](https://github.com/bmscomp/kates/blob/main/dashboards/METRICS.md) is the reference for every series any board reads — its type, its labels, its operational meaning, how to query it where that is not obvious, and which boards read it. It also says whether this repository publishes each one or whether something else has to be installed first. So an empty panel can be read as *nothing is wrong* rather than *nothing publishes this*.
+[`dashboards/METRICS.md`](https://github.com/bmscomp/kates/blob/main/dashboards/METRICS.md) is the reference for every series any board reads: its type, its labels, its operational meaning, how to query it where that is not obvious, and which boards read it. It also says whether this repository publishes each one or whether something else has to be installed first. So when a panel is empty, you can tell *nothing is wrong* from *nothing publishes this*.
 
 Read its opening section before writing a PromQL query against a Kafka broker. Four naming traps account for most dead panels:
 
 - `_max_total` is not a counter. The exporter appends `_total` to anything a COUNTER rule names and the KRaft rules type `.+-max` as COUNTER, so `kafka_server_raftmetrics_commit_latency_max_total` is a max gauge in milliseconds. Never `rate()` it.
-- `_count_total` is a meter's `Count` attribute, and the unit is not always a count — `…requesthandleravgidlepercent_count_total` is cumulative nanoseconds of idle time.
+- `_count_total` is a meter's `Count` attribute, and the unit is not always a count: `…requesthandleravgidlepercent_count_total` is cumulative nanoseconds of idle time.
 - Percentiles are pre-computed gauges carrying a `quantile` label, with no `_sum` and no buckets. Select the quantile; `histogram_quantile()` has nothing to work with.
 - `BrokerTopicMetrics` is registered twice (see Step 2), so a total needs `topic=""` and a per-topic panel needs `topic!=""`.
 
 ## Kates-Specific Dashboards
 
-Six of the twelve boards are tailored to Kates itself — one live run, trends across runs, application health, chaos correlation, the chaos platform's own health, and a self-contained overview of the Kates API. They won't exist in a standard Kafka monitoring setup. The table gives each board's file, its UID and its template variables, apart from `$datasource`:
+Six of the twelve boards are tailored to Kates itself: one live run, trends across runs, application health, chaos correlation, the chaos platform's own health, and a self-contained overview of the Kates API. A standard Kafka monitoring setup has none of them. The table gives each board's file, its UID and its template variables, apart from `$datasource`:
 
 | Board | File | UID | Template variables |
 |------------------------------|-------------------------|------------------------------|------------------------------|
@@ -171,7 +171,7 @@ Both variables come from `kates_tests_completed_total`, a platform counter that 
 
 ### Kates — Application Health
 
-This dashboard monitors the Kates API itself — not Kafka, not the test results, but the Quarkus application running the tests. Use it when the Kates REST API feels slow, when tests are failing to start, or when you suspect the Kates API itself is the bottleneck. Its rows:
+This dashboard monitors the Quarkus application that runs the tests: the Kates API itself. Use it when the Kates REST API feels slow, when tests are failing to start, or when you suspect the Kates API itself is the bottleneck. Its rows:
 
 | Row | Panels |
 |---|---|
@@ -181,17 +181,17 @@ This dashboard monitors the Kates API itself — not Kafka, not the test results
 | Database | Agroal pool connections, acquisitions/sec, time waiting for a connection |
 | Container resources | CPU cores and container memory, from cAdvisor |
 
-The `$pod` list comes from the application's own `process_uptime_seconds` series. So it is the set of pods Prometheus is actually scraping, rather than the set whose names happen to match a regex.
+The `$pod` list comes from the application's own `process_uptime_seconds` series. So the list holds exactly the pods Prometheus scrapes, and no name regex decides it.
 
 If **time waiting for a connection** is climbing while the pool shows `active` pinned at its ceiling, the pool is too small and raising it helps. The same panel climbing with spare capacity means the database is slow, and a bigger pool does not help.
 
 Two of those rows depend on settings the application ships and Quarkus does not default to. The Agroal pool publishes nothing unless `quarkus.datasource.metrics.enabled` is on; the Micrometer extension alone does not switch it on. The HTTP timer carries only `_count`, `_sum` and `_max` until a `MeterFilter` gives it buckets, and the application's filter sets eleven fixed boundaries from 5 ms to 10 s. That filter is what makes `histogram_quantile()` possible on the *request latency* panel, and it also sets its resolution. A percentile is interpolated inside the bucket it falls in, so a P99 of 7 ms means "between 5 and 10". The GC pause panel is empty on the native image: GraalVM exposes no GC notification beans, so Micrometer registers no pause meters, and the panel's description says so.
 
-The `jvm_*` names on this board are **Micrometer's**, not the Prometheus JMX agent's. This is a Quarkus application, not a broker: Micrometer publishes `jvm_memory_used_bytes{area="heap"}` and `jvm_gc_pause_seconds`, while the JMX agent the Kafka boards read publishes `jvm_memory_bytes_used{area="heap"}` and `jvm_gc_collection_seconds` for the same quantities. Neither is a fallback for the other.
+The `jvm_*` names on this board are **Micrometer's**, not the Prometheus JMX agent's. The Kates API is a Quarkus application: Micrometer publishes `jvm_memory_used_bytes{area="heap"}` and `jvm_gc_pause_seconds`, while the JMX agent the Kafka boards read publishes `jvm_memory_bytes_used{area="heap"}` and `jvm_gc_collection_seconds` for the same quantities. Neither is a fallback for the other.
 
 ### Kates — Overview
 
-The only board that reads **nothing but metrics the application publishes about itself** — no kube-state-metrics, no cAdvisor, no exporter. A Prometheus that scrapes the Kates API is all it needs. Its title in Grafana is `KATES — Overview`, and it shows uptime, active runs, API traffic and latency, the JVM, and the Agroal pool.
+This is the only board that reads **nothing but metrics the application publishes about itself**: no kube-state-metrics, no cAdvisor, no exporter. A Prometheus that scrapes the Kates API is all it needs. Its title in Grafana is `KATES — Overview`, and it shows uptime, active runs, API traffic and latency, the JVM, and the Agroal pool.
 
 Use Application Health instead if you are running the full monitoring stack; it answers a bigger question with more sources. The run percentiles are per-run series, so they live on the benchmark boards and appear nowhere on this one. Every expression is scoped by the `$job` variable, so one copy serves every release a Grafana can see.
 
@@ -211,23 +211,23 @@ This dashboard correlates LitmusChaos experiment status with Kafka cluster healt
 The row's panels read the `kafka:chaos:*` recording rules, which record the `kates_integrity_result_*` gauges the Kates API registers when a run's integrity verifier reports. A plain LOAD run publishes none of them, so the row stays blank; blank during a resilience run means the verifier hasn't reported yet or the Kates API isn't scraped. The gauges go with the run's other meters when it ends, so read the row while the run is in flight, or widen the time range to cover it.
 :::
 
-One more caveat on the header. `Chaos engines running` reads `kube_customresource_chaosengine_status_engine_status`, which kube-state-metrics publishes only when **configured with custom-resource metrics for `ChaosEngine`** — not its default. `charts/monitoring` configures it (`kube-prometheus-stack.kube-state-metrics.customResourceState`, with the `list`/`watch` access on `chaosengines.litmuschaos.io` it needs); on another stack, copy that block. The series is one per engine and state — 1 for the state the engine is in, 0 for the other two — so a cluster that has never created an experiment has none.
+One more caveat on the header. `Chaos engines running` reads `kube_customresource_chaosengine_status_engine_status`, which kube-state-metrics publishes only when **configured with custom-resource metrics for `ChaosEngine`**, which is not its default. `charts/monitoring` configures it (`kube-prometheus-stack.kube-state-metrics.customResourceState`, with the `list`/`watch` access on `chaosengines.litmuschaos.io` it needs); on another stack, copy that block. The series is one per engine and state (1 for the state the engine is in, 0 for the other two), so a cluster that has never created an experiment has none.
 
-The panel anchors its zero fallback to the same series unfiltered by status, the only thing that proves the collector is configured. So it reads **No data** rather than a reassuring zero. The board's `$namespace` picker resolves from the same series, comes up empty, and says why in its tooltip: no experiment yet, or a collector without the configuration. Of the four alerts in `prometheus-chaos-rules.yaml` that read the series, only `KafkaChaosExperimentActive` works. The three guarded by `and on() count(…) == 0` cannot fire whether the series exists or not, because `count()` over nothing is empty rather than zero — and it is empty exactly when no experiment is running. Do not rely on those three until the guard is rewritten.
+The panel anchors its zero fallback to the same series unfiltered by status, the only thing that proves the collector is configured. So it reads **No data** rather than a reassuring zero. The board's `$namespace` picker resolves from the same series, comes up empty, and says why in its tooltip: no experiment yet, or a collector without the configuration. Of the four alerts in `prometheus-chaos-rules.yaml` that read the series, only `KafkaChaosExperimentActive` works. The three guarded by `and on() count(…) == 0` cannot fire whether the series exists or not, because `count()` over nothing is empty, not zero, and it is empty exactly when no experiment is running. Do not rely on those three until the guard is rewritten.
 
 ### Kates — Chaos Infrastructure
 
-**Kates — Chaos infrastructure** covers the layer underneath the one above: is the LitmusChaos execution plane installed, is its operator running, and has it actually run anything? Six panels, scoped to the namespace Litmus runs in — which is neither the Kafka namespace nor the namespace the experiments target.
+**Kates — Chaos infrastructure** covers the layer underneath the one above: is the LitmusChaos execution plane installed, is its operator running, and has it run anything? It has six panels, scoped to the namespace Litmus runs in, which is neither the Kafka namespace nor the namespace the experiments target.
 
-Open it when **Kates — Chaos** is empty and you need to know whether that means *no fault was injected* or *nothing is installed*. The two kube-state-metrics panels, the operator's availability and the infra pods' status, fill whether or not Litmus is scraped, which makes them the ones to read first. Operator green with every Litmus panel blank means the chaos-exporter is off, not that the platform is down. It is off by default — `litmus-core.exporter.enabled`.
+Open it when **Kates — Chaos** is empty and you need to know whether that means *no fault was injected* or *nothing is installed*. The two kube-state-metrics panels, the operator's availability and the infra pods' status, fill whether or not Litmus is scraped, which makes them the ones to read first. Operator green with every Litmus panel blank means the chaos-exporter is off, not that the platform is down. It is off by default (`litmus-core.exporter.enabled`).
 
 ## Kates CLI Observability
 
-Not everything requires a browser. The Kates CLI provides four terminal-based observability tools, each designed for a different workflow.
+Not everything requires a browser. The Kates CLI has four terminal views of its own.
 
 ### The Terminal Dashboard
 
-The `kates dashboard` command provides a full-screen terminal dashboard — the CLI equivalent of the Grafana Benchmark dashboard. Use it when you want a quick overview without leaving your terminal:
+The `kates dashboard` command opens a full-screen terminal dashboard, the CLI's counterpart to the Grafana Benchmark dashboard. Use it when you want a quick overview without leaving your terminal:
 
 ```bash
 kates dashboard
@@ -254,7 +254,7 @@ It shows running tests with real-time throughput and latency updates.
 
 ### The One-Line Status
 
-A one-line system health check — the fastest way to verify that Kates and Kafka are both reachable:
+`kates status` is a one-line health check, the fastest way to verify that Kates and Kafka are both reachable:
 
 ```bash
 kates status
@@ -274,13 +274,13 @@ kates cluster watch
 kates cluster watch --interval 10
 ```
 
-Under a banner with the cluster's status and ID, each refresh prints four blocks. Cluster Overview counts brokers, topics, partitions and consumer groups and names the controller. Partition Health counts under-replicated and offline partitions. Active Problems, shown only when there are any, lists each troubled partition with its topic and issue. Trend holds three sparklines — Under-Replicated, Offline and Partitions — over the last 30 polls.
+Under a banner with the cluster's status and ID, each refresh prints four blocks. Cluster Overview counts brokers, topics, partitions and consumer groups and names the controller. Partition Health counts under-replicated and offline partitions. Active Problems, shown only when there are any, lists each troubled partition with its topic and issue. Trend holds three sparklines over the last 30 polls: Under-Replicated, Offline and Partitions.
 
-Sparklines use Unicode block characters (▁▂▃▄▅▆▇█). A rising Under-Replicated line is the early warning: if it reads ▁▁▂▃▅▇, something is going wrong and you should investigate before it gets worse.
+Sparklines use Unicode block characters (▁▂▃▄▅▆▇█). A rising Under-Replicated line is the early warning: if it reads ▁▁▂▃▅▇, more partitions lose a replica with every poll, so investigate now.
 
 ## Latency Heatmaps
 
-Heatmaps preserve the **full latency distribution over time**, revealing patterns invisible in aggregate percentiles [@gregg2010visualizing]. Where a P99 tells you "99% of requests were under 15ms," a heatmap tells you "*when* the slow requests happened, *how many* there were, and *whether the pattern was sustained or momentary*."
+Heatmaps preserve the **full latency distribution over time**, so they show patterns that aggregate percentiles hide [@gregg2010visualizing]. Where a P99 tells you "99% of requests were under 15ms," a heatmap tells you "*when* the slow requests happened, *how many* there were, and *whether the pattern was sustained or momentary*."
 
 For the theory behind why heatmaps matter and why percentiles alone are insufficient, see [Heatmaps](04-performance-theory.md#heatmaps-seeing-the-full-picture).
 
@@ -333,9 +333,9 @@ Export your payments LOAD run with `kates report export <id> --format heatmap-cs
 
 ## Trend Analysis
 
-Individual test results are snapshots. Trend analysis turns those snapshots into a movie, letting you see how performance evolves over days and weeks. This is how you catch regressions early — before they reach production.
+A single run is a snapshot. A trend lines up the runs of one type over days and weeks, so a regression shows before it reaches production.
 
-A trend plots one point per `DONE` run of the type in the window. A `FAILED` run is left out, because its numbers stop wherever it failed, and so is a run still in flight. Without `--phase`, each point is the run's report summary, whose latency comes from its producers: a LOAD run's consumer measures none, so it is left out rather than averaged in. With `--phase`, each point is that phase's own summary. The table under [GET /api/tests/{id}/report](11-api-reference.md#get-apitestsidreport), in the REST API Reference, shows how each metric combines a run's tasks.
+A trend plots one point per `DONE` run of the type in the window. A `FAILED` run is left out, because its numbers stop wherever it failed, and so is a run still in flight. Without `--phase`, each point is the run's report summary, whose latency comes from its producers: a LOAD run's consumer measures none, so it is left out of the average. With `--phase`, each point is that phase's own summary. The table under [GET /api/tests/{id}/report](11-api-reference.md#get-apitestsidreport), in the REST API Reference, shows how each metric combines a run's tasks.
 
 For the payments workload, follow the `produce` phase, whose P99 is the one the target sets:
 
@@ -365,7 +365,7 @@ kates report compare <id1>,<id2>,<id3>
 
 ### Diff Output
 
-`kates report diff` prints one row per metric — average and peak throughput, average MB/s, average, P50, P95, P99 and maximum latency, and error rate. Each row gives the metric's value for the two runs, the change as a signed percentage, and a marker. The legend under the table reads:
+`kates report diff` prints one row per metric: average and peak throughput, average MB/s, average, P50, P95, P99 and maximum latency, and error rate. Each row gives the metric's value for the two runs, the change as a signed percentage, and a marker. The legend under the table reads:
 
 ```text
 ▲ = improved │ ▼ = regressed │ = ≈ no change
@@ -375,7 +375,7 @@ A change under 2% either way counts as no change. A P99 rising several times fas
 
 ## Exporting a Report
 
-`kates report export` writes a run's report in one of six formats, each designed for a different downstream consumer:
+`kates report export` writes a run's report in one of six formats:
 
 | Format | Command | Use Case |
 |--------|---------|----------|
@@ -459,11 +459,11 @@ Deploy [Jaeger](appendix-a-glossary.md#gl-jaeger) with `make jaeger`, which inst
 2. Click **Find Traces** to see recent requests
 3. Click a trace to see the full span tree (REST → DB)
 
-Each trace shows the complete request lifecycle as a waterfall diagram. Look for gaps between spans — these represent time spent in framework code, serialization, or network transit. A healthy trace shows spans tightly packed together; large gaps indicate inefficiency.
+Each trace shows the complete request lifecycle as a waterfall diagram. Look for gaps between spans: they are time spent in framework code, serialization, or network transit. A healthy trace shows spans tightly packed together; a large gap is where to look first.
 
 ## Alerting
 
-Kates ships [PrometheusRule](appendix-a-glossary.md#gl-prometheusrule) alerts alongside its charts. These alerts fire when cluster health degrades, giving you early warning before problems become outages. Three charts carry them:
+Kates ships [PrometheusRule](appendix-a-glossary.md#gl-prometheusrule) alerts alongside its charts. These alerts fire when cluster health degrades, so you hear of a problem before it becomes an outage. Three charts carry them:
 
 | File | Groups | What They Cover |
 |------|--------|-----------------|
@@ -534,7 +534,7 @@ These commands:
 
 The two Kafka boards read only series the vendored exporter rules produce, which the [metric contract](appendix-a-glossary.md#gl-metric-contract) check proves on every build.
 
-To render the same thing by hand — which is what you do when you need a values chain the targets do not offer:
+To render the same thing by hand, when you need a values chain the targets do not offer:
 
 ```bash
 helm pull oci://ghcr.io/bmscomp/charts/kates-monitoring --untar
@@ -601,7 +601,7 @@ The Kates API registers seven gauges for a run on the first poll after its integ
 
 ### Platform Meters
 
-The Kates API keeps these across runs (`KatesMetrics`). They tell you about the health and usage of the Kates platform over time — how many tests have been run, how long they take, and whether SLAs are passing:
+The Kates API keeps these across runs (`KatesMetrics`). They track how many tests have run, how long they take and whether SLAs pass:
 
 | Prometheus Metric | Type | Description |
 |---|---|---|

@@ -89,7 +89,7 @@ Pick the row that matches the cluster you have; the per-component table that fol
 
 ### Per-Component Breakdown
 
-The following table shows resource requirements per component. Use this to right-size your nodes:
+Add up the rows for the components you run to size your nodes:
 
 | Component | CPU (req / limit) | Memory (req / limit) | Disk | Notes |
 |-----------|:------------------:|:--------------------:|:----:|-------|
@@ -107,7 +107,7 @@ The following table shows resource requirements per component. Use this to right
 The broker and controller volumes are the `kafka-cluster` chart's defaults; on a cluster `kates deploy` sizes, the pools come from the nodes it finds.
 
 ::: {.callout-important title="The Minimal profile has no headroom"}
-The Minimal profile (16 GB) runs everything but leaves almost no headroom. If your laptop has 16 GB of RAM, close memory-heavy applications (browsers, IDEs with large projects) before running `make all`. Docker Desktop should be configured with at least 10 GB of memory allocation.
+The Minimal profile (16 GB) runs everything but leaves almost no headroom. If your laptop has 16 GB of RAM, close memory-heavy applications (browsers, IDEs with large projects) before running `make all`. Give Docker Desktop at least 10 GB of memory.
 :::
 
 ## Quick Deployment
@@ -268,7 +268,7 @@ Every `@Timeout` in the Kates API can be overridden this way. `application.prope
 
 #### JVM Tuning
 
-Kates is a latency-sensitive application — it's measuring Kafka's performance, so its own GC pauses can't be allowed to pollute the measurements. A long GC pause during a throughput test shows up as a producer timeout, indistinguishable from actual Kafka latency. This is why the JVM image runs ZGC (Z Garbage Collector) rather than the default G1GC. The native image cannot — see [Native Image Build](#native-image-build).
+Kates measures Kafka's latency, so its own GC pauses must stay out of the numbers. A long GC pause during a throughput test shows up as a producer timeout that looks the same as Kafka latency. So the JVM image runs ZGC (Z Garbage Collector) instead of G1GC, the default. The native image cannot — see [Native Image Build](#native-image-build).
 
 ZGC keeps pauses short by performing garbage collection concurrently with the application. It trades some peak throughput for pause time, and for a benchmarking tool consistent latency matters more than raw throughput.
 
@@ -290,7 +290,7 @@ jvm:
 
 These are the chart defaults, which a plain `helm install` runs with; `values-prod.yaml` sets the same memory and `jvm.options`, with a CPU limit of `1000m`. `kates deploy` runs the native image on every cluster, which `jvm.options` does not reach (see [Native Image Build](#native-image-build)). On Kind it applies `charts/kates/values-kind.yaml` and then `charts/kates/values-native-local.yaml`, a 384Mi request and a 512Mi limit. On any other cluster, admin-less installs included, it applies `charts/kates/values-generic.yaml` and then `charts/kates/values-native.yaml`, whose 768Mi request, 1Gi limit and CPU limit of 2 replace the generic overlay's JVM sizing.
 
-The three low-pause and default collectors compare like this:
+G1, the default, compares with the two low-pause collectors like this:
 
 | GC | Pauses | Best For |
 |----|----------------|----------|
@@ -356,7 +356,7 @@ Why PostgreSQL and not Kafka itself? Kafka is optimized for sequential append an
 
 #### Read-Only Filesystem Compliance
 
-The bundled PostgreSQL StatefulSet runs under the same strict admission standards enforced by the Kyverno `kates-pod-security-standards` policy. When `readOnlyRootFilesystem: true` is mutated onto the container, PostgreSQL fails to start because it cannot create socket lockfiles at `/var/run/postgresql` or write temporary files to `/tmp`.
+The Kyverno `kates-pod-security-standards` policy applies to the bundled PostgreSQL StatefulSet too. When `readOnlyRootFilesystem: true` is mutated onto the container, PostgreSQL fails to start because it cannot create socket lockfiles at `/var/run/postgresql` or write temporary files to `/tmp`.
 
 The Helm chart mitigates this by mounting two ephemeral `emptyDir` volumes onto the two paths PostgreSQL writes to:
 
@@ -444,7 +444,7 @@ Only the first row changes your configuration, so a context that serves another 
 
 ## Cloud Deployment
 
-The default deployment targets Kind. Moving to a cloud provider requires adjustments to storage classes, service exposure, and identity federation. This section provides the key overrides for each major provider.
+The default deployment targets Kind. This section gives the overrides for EKS, GKE and AKS.
 
 Every overlay below keeps its load balancers internal: reachable only from inside the cluster's VPC or VNet. The Kafka load balancers, and Grafana's on EKS and AKS, also admit only the ranges in `loadBalancerSourceRanges`; on GKE the Kates API and Grafana sit behind an internal Ingress, which takes no source ranges (see [Google GKE](#google-gke)). A LoadBalancer Service with no provider annotations usually gets a public address instead. The external Kafka listener still demands TLS and SCRAM-SHA-512, but a broker endpoint on the internet is attack surface all the same. Anyone who can reach the port can probe its TLS stack, try passwords against SCRAM, and load the brokers with connections that authentication has yet to refuse. `10.0.0.0/16` stands for your VPC or VNet range in every overlay; add the peered or on-premises ranges your clients run in.
 
@@ -462,11 +462,11 @@ Each chart is its own Helm release, so each takes its own overlay — there is n
 
 ### Public Load Balancers
 
-Open a load balancer to the internet only on purpose: switch the scheme (`internet-facing` on EKS; drop the internal annotation on GKE and AKS) and set `loadBalancerSourceRanges` to the public ranges of the clients that need it. On a public load balancer, empty ranges mean `0.0.0.0/0`. `kafka.externalAccess.allowedCidrs` does not replace them: it narrows only the chart's rule for the port. Strimzi's policy still admits every source until the listener carries [`networkPolicyPeers`](appendix-a-glossary.md#gl-networkpolicypeers), which the preset can't set ([How the Policies Combine](17-security.md#how-the-policies-combine)). Behind a load balancer the address a NetworkPolicy sees is also often a node or the load balancer rather than the client. So the overlays leave `allowedCidrs` empty and filter at the load balancer.
+Open a load balancer to the internet only on purpose: switch the scheme (`internet-facing` on EKS; drop the internal annotation on GKE and AKS) and set `loadBalancerSourceRanges` to the public ranges of the clients that need it. On a public load balancer, empty ranges mean `0.0.0.0/0`. `kafka.externalAccess.allowedCidrs` does not replace them: it narrows only the chart's rule for the port. Strimzi's policy still admits every source until the listener carries [`networkPolicyPeers`](appendix-a-glossary.md#gl-networkpolicypeers), which the preset can't set ([How the Policies Combine](17-security.md#how-the-policies-combine)). Behind a load balancer the source address a NetworkPolicy sees is also often a node's or the load balancer's, not the client's. So the overlays leave `allowedCidrs` empty and filter at the load balancer.
 
 ### Amazon EKS
 
-Use the `gp3` StorageClass instead of the default `gp2`. GP3 provides 3,000 baseline IOPS and 125 MB/s throughput regardless of volume size — GP2 scales IOPS with size, which means small test volumes get poor I/O performance.
+Use the `gp3` StorageClass instead of the default `gp2`. GP3 gives 3,000 baseline IOPS and 125 MB/s throughput whatever the volume size. GP2 scales IOPS with size, so small test volumes get poor I/O.
 
 Use an internal AWS Network Load Balancer (NLB) for Kafka external access. NLB operates at L4 (TCP), which is what Kafka's binary protocol requires. The annotations below are read by the AWS Load Balancer Controller, which has to be installed in the cluster. `aws-load-balancer-type: external` hands the Service to it, `aws-load-balancer-nlb-target-type: ip` sends traffic straight to the pod, and `aws-load-balancer-scheme: internal` keeps the NLB inside the VPC. Without the controller the Services stay pending, since the in-tree provider leaves `external` to it.
 
@@ -1033,7 +1033,7 @@ On a second team namespace whose Role you haven't applied, run `kates compliance
 
 ### Deploying Without Cluster Admin
 
-Where the team should run its own Kafka rather than share one, `kates deploy --adminless` installs the stack into namespaces the account already has. That is a Kafka cluster, Kafka Connect with its PostgreSQL, MirrorMaker 2 as a loopback mirror, Apicurio, Kafka UI, and the Kates API with `rbac.scope=namespace`. `kates deploy` offers it on its own when the account isn't cluster-admin.
+Where the team needs a Kafka of its own, `kates deploy --adminless` installs the stack into namespaces the account already has. That is a Kafka cluster, Kafka Connect with its PostgreSQL, MirrorMaker 2 as a loopback mirror, Apicurio, Kafka UI, and the Kates API with `rbac.scope=namespace`. `kates deploy` offers it on its own when the account isn't cluster-admin.
 
 The namespaces follow `--topology` and the `--*-ns` flags, as in a full deploy. By default each component gets its own:
 
@@ -1080,7 +1080,7 @@ The namespace scope trades these away:
 
 ## Makefile Reference
 
-The root `Makefile` gathers every operational target, so you can provision infrastructure, build and deploy Kates, compile the CLI, run tests, or launch chaos drills from a single entry point.
+The root `Makefile` holds every operational target: the cluster, the Kates build and deploy, the CLI, the tests and the chaos drills.
 
 ### Full Target List
 
@@ -1159,7 +1159,7 @@ If you're behind an HTTP/HTTPS proxy, set `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_P
 
 If you are not using `load-images-to-kind.sh`, run `./scripts/start-cluster.sh` (or `make cluster`) after setting proxy variables. This reconciles containerd proxy settings on Kind nodes so regular Kubernetes image pulls use the proxy. A cluster that `kates deploy` creates gets the same settings from the same variables, plus `PROXY_CA_FILE`, when it is built.
 
-Direct proxy flags are supported too:
+`start-cluster.sh` also takes the proxy as flags:
 
 ```bash
 ./scripts/start-cluster.sh \

@@ -1,6 +1,6 @@
 # Troubleshooting Index
 
-A consolidated index of troubleshooting procedures from across the book. Jump to the relevant section for step-by-step diagnosis and fixes.
+This index gathers the troubleshooting procedures from across the book. Find your symptom, then follow its chapter link for the diagnosis and the fix.
 
 ## Kafka Cluster
 
@@ -103,7 +103,7 @@ Something that worked before an operator or Kafka upgrade fails or slows down af
 
 ## Connectivity Debugging Flowchart
 
-When you can't connect to Kafka, work through this decision tree. The commands here and in [Quick Diagnostic Commands](#quick-diagnostic-commands) assume the chart defaults — cluster name `krafter` in namespace `kafka` (set in `charts/kafka-cluster/values.yaml`); adjust them if your deployment overrides these values.
+When you can't connect to Kafka, work through this decision tree. The commands here and in [Quick Diagnostic Commands](#quick-diagnostic-commands) assume the chart defaults: cluster name `krafter` in namespace `kafka` (set in `charts/kafka-cluster/values.yaml`); adjust them if your deployment overrides these values.
 
 ```mermaid
 %%| label: fig-troubleshooting-connectivity-tree
@@ -133,7 +133,7 @@ flowchart TD
 
 ## When to Escalate
 
-Not every problem is a Kates problem. Use this guide to determine where to focus your investigation:
+Not every problem is a Kates problem. This table maps each symptom pattern to the layer to check first:
 
 | Symptom Pattern | Likely Layer | What to Check |
 |-----------------|-------------|---------------|
@@ -145,7 +145,7 @@ Not every problem is a Kates problem. Use this guide to determine where to focus
 | Everything works locally but fails in CI | **CI environment** | Check resource limits, network access, Docker-in-Docker configuration |
 
 ::: {.callout-tip}
-When filing an issue, include the output of `kates doctor` — it runs a battery of diagnostic checks and gives you a single summary of system health.
+When filing an issue, include the output of `kates doctor`, which runs its diagnostic checks and prints one summary of the system's health.
 :::
 
 ## Common Issues (Additional)
@@ -195,7 +195,7 @@ kates kyverno violations --namespace kafka
 
 ### Kafka Tools Inside a Broker Pod
 
-The tools under `/opt/kafka/bin` need credentials. Both internal listeners authenticate — SCRAM-SHA-512 on 9092, mutual TLS on 9093 — and the brokers enforce ACLs. Without credentials `kafka-topics.sh` retries until it times out, prints an `Error while executing topic command` line to standard output and exits 1, so a filter after it shows nothing and a broken command reads like a healthy cluster. Build one client configuration from the `kates-backend` KafkaUser's Secret — the platform profile makes that user a super user, so it can describe every topic, its configuration and every consumer group — and pass it to each tool with `--command-config`:
+The tools under `/opt/kafka/bin` need credentials. Both internal listeners authenticate (SCRAM-SHA-512 on 9092, mutual TLS on 9093), and the brokers enforce ACLs. Without credentials `kafka-topics.sh` retries until it times out, prints an `Error while executing topic command` line to standard output and exits 1, so a filter after it shows nothing and a broken command reads like a healthy cluster. The platform profile makes the `kates-backend` KafkaUser a super user, so it can describe every topic, its configuration and every consumer group. Build one client configuration from that user's Secret and pass it to each tool with `--command-config`:
 
 ```bash
 BROKER=$(kubectl get pods -n kafka -l strimzi.io/cluster=krafter,strimzi.io/broker-role=true -o name | head -1)

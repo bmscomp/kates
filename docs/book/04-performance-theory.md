@@ -59,7 +59,7 @@ That last relation is the bend. At ρ = 0.5 a request spends twice its service t
 
 ### Where an `acks=all` Write Queues
 
-A Kafka write passes several stages, each with its own queue, and the first to saturate sets the knee. Each row names a stage, what waits there, and the setting that sizes the queue:
+A Kafka write passes five stages, each with its own queue, and the first to saturate sets the knee. Each row names a stage, what waits there, and the setting that sizes the queue:
 
 | Stage | What waits there | Setting that sizes it |
 |-------|------------------|-----------------------|
@@ -98,7 +98,7 @@ System A has a better mean, but 1% of its users wait 50 times longer than the re
 
 ### The Percentile Solution
 
-A percentile describes the latency distribution rather than its center. Each row below says what the percentile means and whether a finished Kates run keeps it:
+A percentile is the latency that a given share of requests stays under, so a few of them together describe the shape of the distribution. Each row below says what the percentile means and whether a finished Kates run keeps it:
 
 | Percentile | Meaning | Kates stores it |
 |-----------|---------|-----------------|
@@ -144,7 +144,7 @@ The chart's JVM image of the Kates API runs generational ZGC [@jep439], the defa
 
 ## Coordinated Omission
 
-A measurement error that load tests make easily is coordinated omission: the tool slows down along with the system, so it never measures the worst latencies [@tene2013how].
+Coordinated omission is a measurement error in which the load-test tool slows down along with the system, so it never measures the worst latencies [@tene2013how].
 
 ### How It Happens
 
@@ -180,7 +180,7 @@ During the stall, the tool should have sent 19 more requests, at t=30, 40, 50 an
 
 ### How Kates Handles It
 
-Kates's native [benchmark backend](appendix-a-glossary.md#gl-benchmark-backend) mitigates the classic closed-loop form of coordinated omission — load that sends each request only after the previous answer, the opposite of [open-loop load](appendix-a-glossary.md#gl-open-loop-load) — by sending asynchronously [@schroeder2006open]. Its producer loop never waits for an acknowledgment before dispatching the next record, and when a target rate is set it keeps pacing sends at that rate whatever the response times. A slow response therefore doesn't hold back the sends after it.
+Kates's native [benchmark backend](appendix-a-glossary.md#gl-benchmark-backend) mitigates the classic closed-loop form of coordinated omission by sending asynchronously [@schroeder2006open]. Closed-loop load sends each request only after the previous answer, the opposite of [open-loop load](appendix-a-glossary.md#gl-open-loop-load). The native producer loop never waits for an acknowledgment before dispatching the next record, and when a target rate is set it keeps pacing sends at that rate whatever the response times. A slow response therefore doesn't hold back the sends after it.
 
 The mitigation has limits:
 
@@ -210,11 +210,11 @@ Percentiles compress a run's latency into a few numbers and lose the time axis: 
 
 ## What "Good" Looks Like
 
-There is no universal good latency or throughput: good is the target your workload sets. For the payments platform, it's the two targets this chapter opened with, 2,000 records per second and a `produce` P99 of 100 ms or less, and they come from what the platform needs, not from a table of typical values. Kates lets you set [SLA](appendix-a-glossary.md#gl-sla) thresholds per scenario, targets you choose in the style of an SLO [@beyer2016site] rather than a contract. [Scenario Files & SLA Gates](13-scenario-files.md) turns the payments targets into gates.
+There is no universal good latency or throughput: good is the target your workload sets. For the payments platform, it's the two targets this chapter opened with, 2,000 records per second and a `produce` P99 of 100 ms or less, and they come from what the platform needs. Kates lets you set [SLA](appendix-a-glossary.md#gl-sla) thresholds per scenario: targets you choose, in the style of an SLO [@beyer2016site], with no contract behind them. [Scenario Files & SLA Gates](13-scenario-files.md) turns the payments targets into gates.
 
 ## Telling a Regression from Noise {#statistical-significance}
 
-One run supports no conclusion, because repeated identical runs disagree [@georges2007statistically]. JIT compilation and class loading, operating-system scheduling, the container layers under Kind, garbage collection and disk I/O all move a run's numbers. The method is to report the spread of three to five identical runs rather than one number, and to treat a difference that falls inside that spread as noise.
+One run supports no conclusion, because repeated identical runs disagree [@georges2007statistically]. JIT compilation and class loading, operating-system scheduling, the container layers under Kind, garbage collection and disk I/O all move a run's numbers. So run the test three to five times with nothing changed, report the spread of those runs, and treat a difference that falls inside that spread as noise.
 
 ### Warm-Up Phase
 

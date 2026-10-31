@@ -15,7 +15,7 @@ A disruption plan answers the cluster question. It runs one or more steps, each 
 
 A resilience run answers the client question. It starts a Kates test, such as a [LOAD](appendix-a-glossary.md#gl-test-type) or an INTEGRITY run, waits `steadyStateSec`, and injects one fault while the test runs. It snapshots the test's throughput, latency and error rate just before the fault, summarizes the whole run again after the recovery wait, and prints the change. When the question is whether `krafter` can lose an acknowledged payment, an INTEGRITY run through the fault is the one that answers it.
 
-Each run of a plan or a playbook is a disruption, with its own ID and report. Either kind of run carries out a chaos experiment: faults injected on purpose to test a [steady-state hypothesis](appendix-a-glossary.md#gl-steady-state-hypothesis) [@basiri2016chaos]. A [Game Day](appendix-a-glossary.md#gl-game-day) is the session your team runs around these commands, which [Chaos Engineering Theory](06-chaos-theory.md#the-game-day-methodology) explains; `make gameday` scripts one, and injects its fault with `kubectl` rather than through the [Kates API](appendix-a-glossary.md#gl-kates-api).
+Each run of a plan or a playbook is a disruption, with its own ID and report. Either kind of run carries out a chaos experiment: faults injected on purpose to test a [steady-state hypothesis](appendix-a-glossary.md#gl-steady-state-hypothesis) [@basiri2016chaos]. A [Game Day](appendix-a-glossary.md#gl-game-day) is the session your team runs around these commands, which [Chaos Engineering Theory](06-chaos-theory.md#the-game-day-methodology) explains; `make gameday` scripts one, and injects its fault with `kubectl`, outside the [Kates API](appendix-a-glossary.md#gl-kates-api).
 
 The table sets a plan and a resilience run side by side. Read the guard, rollback and report rows before you choose, because that's where the two differ most.
 
@@ -74,7 +74,7 @@ Kates supports 13 disruption types (the `DisruptionType` enum). Two chaos provid
 
 ### Choosing a Chaos Provider
 
-Every fault Kates injects, from a plan, a playbook or a resilience run, goes through one chaos provider: the Kates API's `kates.chaos.provider` setting. You choose it when you deploy Kates, not per fault, and it decides what actually happens to a pod or to the network.
+Every fault Kates injects, from a plan, a playbook or a resilience run, goes through one chaos provider: the Kates API's `kates.chaos.provider` setting. You choose it when you deploy Kates, not per fault, and it decides what happens to a pod or to the network.
 
 The table compares the four values. A stock install uses `litmus-crd`, the first row, and only `kubernetes` needs more from the `kates` chart than its default role, as the paragraphs after the table explain.
 
@@ -159,7 +159,7 @@ graph TD
     KCP --> K8S[Kubernetes API]
 ```
 
-The `hybrid` provider (selected with `kates.chaos.provider=hybrid`) picks its delegate once per process: it checks whether the Litmus CRDs (`chaosengines.litmuschaos.io`) exist in the cluster. If they do, it delegates all fault injection to `litmus-crd`; otherwise it falls back to the direct `kubernetes` provider. There is no per-type routing — a single delegate handles every disruption for the lifetime of the process. The Kates API's log names the pick: `Chaos provider: hybrid(litmus-crd)` or `Chaos provider: hybrid(kubernetes)`.
+The `hybrid` provider (selected with `kates.chaos.provider=hybrid`) picks its delegate once per process: it checks whether the Litmus CRDs (`chaosengines.litmuschaos.io`) exist in the cluster. If they do, it delegates all fault injection to `litmus-crd`; otherwise it falls back to the direct `kubernetes` provider. There is no per-type routing: a single delegate handles every disruption for the lifetime of the process. The Kates API's log names the pick: `Chaos provider: hybrid(litmus-crd)` or `Chaos provider: hybrid(kubernetes)`.
 
 ### Targeting Pods
 
@@ -182,7 +182,7 @@ A pod-level fault hits one pod unless told otherwise. The first of these that ap
 
 Both chaos providers resolve the pods the same way: `kubernetes` applies the fault to each of them, and `litmus-crd` passes them to the experiment as a comma-separated `TARGET_PODS` list. A selector that matches no pod fails the step with `No pods found matching label selector` instead of doing nothing.
 
-A `NODE_DRAIN` drains the node that runs the pod these rules pick. On `litmus-crd`, Kates passes that node to the `node-drain` experiment as `TARGET_NODE`, with no `TARGET_PODS`; the `kubernetes` provider doesn't run `NODE_DRAIN`. The experiment drains one node, so with `targetAll` every pod the selector matches has to run on the same node. On the [`panda`](appendix-a-glossary.md#gl-panda) [Kind](appendix-a-glossary.md#gl-kind) cluster, a zone's broker pods all run on the node named after the zone. The step fails without draining anything when the pods run on several nodes, when the pod is gone, or when it isn't on a node yet.
+A `NODE_DRAIN` drains the node that runs the pod these rules pick. On `litmus-crd`, Kates passes that node to the `node-drain` experiment as `TARGET_NODE`, with no `TARGET_PODS`; the `kubernetes` provider doesn't run `NODE_DRAIN`. The experiment drains one node, so with `targetAll` every pod the selector matches has to run on the same node. On the [`panda`](appendix-a-glossary.md#gl-panda) [Kind](appendix-a-glossary.md#gl-kind) cluster, a zone's broker pods all run on the node named after the zone. The step fails without draining anything when the pods run on more than one node, when the pod is gone, or when it isn't on a node yet.
 
 To drain a node you choose, name it in `envOverrides.TARGET_NODE`, or give `envOverrides.NODE_LABEL` for Litmus to pick a node with that label. Kates then picks no node itself. The drain evicts every pod on the node, not only the one picked, in every namespace, so the other Kafka pods there go down with it.
 
@@ -191,7 +191,7 @@ Litmus's own pods, the chaos runner and the experiment, are kept off the drained
 No drain takes the node the Kates API runs on, since it would evict the Kates API in the middle of the run. A random pick chooses among the pods on other nodes. When `envOverrides.NODE_LABEL` matches that node, Kates picks after all: it names another node the label matches as `TARGET_NODE`. A drain aimed at that node any other way fails without draining. The Kates API finds its node from its own pod, so outside a pod, as in dev mode, it spares no node.
 
 ::: {.callout-warning title="Litmus Deletes Several Targets One at a Time"}
-Kates runs `POD_KILL` and `LEADER_ELECTION` as Litmus `pod-delete` with `SEQUENCE=serial`, because the experiment's parallel mode fails its recovery check on pods owned by a StrimziPodSet. With several targets, Litmus therefore deletes them one at a time; the `kubernetes` provider deletes them all at once.
+Kates runs `POD_KILL` and `LEADER_ELECTION` as Litmus `pod-delete` with `SEQUENCE=serial`, because the experiment's parallel mode fails its recovery check on pods owned by a StrimziPodSet. With more than one target, Litmus therefore deletes them one at a time; the `kubernetes` provider deletes them all at once.
 :::
 
 ### Scaling Down a Node Pool
@@ -208,7 +208,7 @@ On a Kafka that Strimzi doesn't run, the step scales down the StatefulSet of eac
 
 ## Built-In Playbooks
 
-Kates ships six playbooks inside the Kates API image; `kates disruption playbook list` names them, and the YAML below is each one as shipped. Each playbook is a YAML file that defines a complete disruption scenario with safety parameters, fault steps, and observation windows.
+Kates ships six playbooks inside the Kates API image; `kates disruption playbook list` names them, and the YAML below is each one as shipped. Each playbook is one YAML file: the plan's safety fields, then its steps, each one fault with its own wait and observation window.
 
 ### leader-cascade
 
@@ -310,11 +310,11 @@ steps:
 
 ### az-failure
 
-Simulates a zone failure by killing every Kafka pod in zone `alpha` at once. It sets the highest `maxAffectedBrokers` of the six, `3`, because a zone may host several brokers. Use this to validate your zone-aware replication strategy.
+Simulates a zone failure by killing every Kafka pod in zone `alpha` at once. It sets the highest `maxAffectedBrokers` of the six, `3`, because a zone may host more than one broker. Use this to validate your zone-aware replication strategy.
 
-Pods do not carry their node's `topology.kubernetes.io/zone` label, so the playbook selects on the pod label `zone: alpha`. The `kafka-cluster` chart puts that label on every pod of a node pool pinned with `zone:`, and `kates detect --generate-values` pins one broker pool to each of the lab's `alpha`, `sigma` and `gamma` zones. `targetAll: true` makes the step kill every pod the selector matches, not just one of them, and the safety guard counts each broker among those pods against `maxAffectedBrokers`. A KRaft controller in the zone is killed too, but it is not a broker, so it is not counted.
+Pods do not carry their node's `topology.kubernetes.io/zone` label, so the playbook selects on the pod label `zone: alpha`. The `kafka-cluster` chart puts that label on every pod of a node pool pinned with `zone:`, and `kates detect --generate-values` pins one broker pool to each of the lab's `alpha`, `sigma` and `gamma` zones. `targetAll: true` makes the step kill every pod the selector matches, not one picked at random, and the safety guard counts each broker among those pods against `maxAffectedBrokers`. A KRaft controller in the zone is killed too, but it is not a broker, so it is not counted.
 
-A cluster whose pools spread across zones without a `zone:` pin has no pod with that label. On such a cluster the dry run warns that the selector matches no broker pod, and the step fails instead of silently killing nothing. To fail a different zone, submit the step as your own plan with the selector changed — built-in playbooks take no parameters.
+A cluster whose pools spread across zones without a `zone:` pin has no pod with that label. On such a cluster the dry run warns that the selector matches no broker pod, and the step fails instead of silently killing nothing. To fail a different zone, submit the step as your own plan with the selector changed, since built-in playbooks take no parameters.
 
 ```mermaid
 %%| label: fig-practice-az-failure
@@ -384,7 +384,7 @@ A pod run by a StatefulSet, as in a Kafka that Strimzi does not manage, is rolle
 
 ### consumer-isolation
 
-Isolates consumer pods from Kafka brokers via network partition to test consumer group rebalancing behavior. It targets pods labeled `app=kafka-consumer` in the `kates` namespace, which Kates does not deploy — label your own consumer that way. Kates runs it only where the Kates API itself runs in `kates`, as `kates deploy` installs it, since a step may target no other namespace but the Kafka cluster's. Note that `maxAffectedBrokers: -1` because this playbook targets consumers, not brokers: the safety guard enforces the cap only when it is greater than zero, so `-1` (like `0`) switches it off. The guard's other checks still apply. On the `kubernetes` chaos provider it needs `rbac.directChaos`.
+Isolates consumer pods from Kafka brokers via network partition to test consumer group rebalancing behavior. It targets pods labeled `app=kafka-consumer` in the `kates` namespace, which Kates does not deploy, so label your own consumer that way. Kates runs it only where the Kates API itself runs in `kates`, as `kates deploy` installs it, since a step may target no other namespace but the Kafka cluster's. The playbook sets `maxAffectedBrokers: -1` because it targets consumers, not brokers: the safety guard enforces the cap only when it is greater than zero, so `-1` (like `0`) switches it off. The guard's other checks still apply. On the `kubernetes` chaos provider it needs `rbac.directChaos`.
 
 ```yaml
 name: consumer-isolation
@@ -706,7 +706,7 @@ The table shows how each threshold in the `sla` block turns into a check, and wh
 
 The grader runs each threshold once per step, after the last step has finished, so a two-step plan with two thresholds makes four checks. Each miss is a violation, classified as the table shows. The grade is `A` when every check passes, `F` if any violation is critical, and otherwise `B`, `C`, or `D` depending on the fraction of checks that failed (more than 25% → `C`, more than 50% → `D`).
 
-A plan runs no workload of its own, its Prometheus capture has no P99.9 latency or error rate, and Kafka's exporter publishes latency percentiles but no mean. So `maxAvgLatencyMs`, `maxP999LatencyMs`, `maxErrorRate`, `minRecordsProcessed`, `maxDataLossPercent` and `maxRpoMs` cannot be evaluated here. A plan that declares any of them still runs, with a validation warning naming each one, and the report lists them under `unevaluated` instead of counting them as passed. A constraint that has nothing to compare against on this run — latency with Prometheus unreachable, `maxRtoMs` when no step waited for recovery — is listed there too. When no constraint could be evaluated, the grade is `-`, not `A`. Data loss and [RPO](appendix-a-glossary.md#gl-rpo) come from an INTEGRITY workload, not from a plan. A resilience run whose workload is an INTEGRITY test measures both, and `kates test get <id>` prints them in the INTEGRITY run's Data Integrity section. [Data Integrity Verification](08-data-integrity.md) shows how to size that run so it overlaps the fault.
+A plan runs no workload of its own, its Prometheus capture has no P99.9 latency or error rate, and Kafka's exporter publishes latency percentiles but no mean. So `maxAvgLatencyMs`, `maxP999LatencyMs`, `maxErrorRate`, `minRecordsProcessed`, `maxDataLossPercent` and `maxRpoMs` cannot be evaluated here. A plan that declares any of them still runs, with a validation warning naming each one, and the report lists them under `unevaluated` instead of counting them as passed. A constraint that has nothing to compare against on this run, such as latency with Prometheus unreachable or `maxRtoMs` when no step waited for recovery, is listed there too. When no constraint could be evaluated, the grade is `-`, not `A`. Data loss and [RPO](appendix-a-glossary.md#gl-rpo) come from an INTEGRITY workload, not from a plan. A resilience run whose workload is an INTEGRITY test measures both, and `kates test get <id>` prints them in the INTEGRITY run's Data Integrity section. [Data Integrity Verification](08-data-integrity.md) shows how to size that run so it overlaps the fault.
 
 The checks that do run have limits of their own:
 
@@ -835,4 +835,4 @@ Run `kates resilience run -f resilience-test.yaml` against `krafter`, and read t
 - Rollback undoes only a partition and a scale-down; every other fault ends by itself, and a plan can record the ISR and lag it caused.
 - A plan's SLA block earns a letter grade a pipeline can fail on; only an INTEGRITY run can tell you whether a payment was lost.
 
-Surviving the fault is only half the proof — the next question is whether every message survived with it, which is where [Data Integrity Verification](08-data-integrity.md) picks up.
+Surviving the fault is only half the proof. The other half is whether every message survived with it, which is where [Data Integrity Verification](08-data-integrity.md) picks up.

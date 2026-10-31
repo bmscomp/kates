@@ -194,7 +194,7 @@ Create a second schedule with `--cron` set a few minutes ahead in UTC, and wait 
 
 ## Recipe 3: Pre-Production Chaos Certification {#recipe-3-pre-production-chaos-certification}
 
-This recipe builds confidence that a Kafka cluster meets its resilience targets before it takes production traffic. It runs a LOAD baseline and an INTEGRITY run, three [playbooks](appendix-a-glossary.md#gl-playbook), and a [resilience run](appendix-a-glossary.md#gl-resilience-run) that kills a broker during a 360 s LOAD test. You need a cluster nothing else depends on, with a Kafka pool pinned to zone `alpha` for `az-failure`.
+This recipe checks that a Kafka cluster meets its resilience targets before it takes production traffic. It runs a LOAD baseline and an INTEGRITY run, three [playbooks](appendix-a-glossary.md#gl-playbook), and a [resilience run](appendix-a-glossary.md#gl-resilience-run) that kills a broker during a 360 s LOAD test. You need a cluster nothing else depends on, with a Kafka pool pinned to zone `alpha` for `az-failure`.
 
 ::: {.callout-caution title="This recipe breaks the cluster"}
 `leader-cascade` kills the brokers leading `__consumer_offsets` partitions 0 and 1, one after the other. `split-brain` cuts broker 0 off the network for 60 s, `az-failure` kills every Kafka pod in zone `alpha`, and Step 4 kills a broker during a LOAD test. Anything else using the cluster goes through the same failures, so run the recipe before the cluster takes production traffic.
@@ -232,7 +232,7 @@ kates test apply -f integrity-tx.yaml --wait
 
 ### Step 3 — Run the Playbooks {#step-3--run-the-playbooks}
 
-Each dry run previews the cluster as it is just before its playbook, starts nothing, and exits 1 when the [safety guard](appendix-a-glossary.md#gl-safety-guard) would refuse the playbook. The `&&` runs the playbook only when its dry run passes:
+Each dry run previews the cluster as it is before its playbook runs, starts nothing, and exits 1 when the [safety guard](appendix-a-glossary.md#gl-safety-guard) would refuse the playbook. The `&&` runs the playbook only when its dry run passes:
 
 ```bash
 kates disruption playbook run leader-cascade --dry-run \
@@ -651,7 +651,7 @@ The chart generates the key into the Secret `kates-api-key`, under the key `api-
 kubectl get secret kates-api-key -n team -o jsonpath='{.data.api-key}' | base64 -d
 ```
 
-To manage the key yourself, so that a reinstall keeps it, create the Secret and name it in `apiKey.existingSecret`. The CLI reads `KATES_URL` and `KATES_API_KEY` before any [CLI context](appendix-a-glossary.md#gl-cli-context), so the runner needs no configuration file. Keep the key in the environment rather than on the command line with `--api-key`, where the process list shows it.
+To manage the key yourself, so that a reinstall keeps it, create the Secret and name it in `apiKey.existingSecret`. The CLI reads `KATES_URL` and `KATES_API_KEY` before any [CLI context](appendix-a-glossary.md#gl-cli-context), so the runner needs no configuration file. Keep the key in the environment. Passed on the command line with `--api-key`, it shows in the process list.
 
 ### Step 3 — Write the Gates
 
@@ -824,4 +824,4 @@ The third check reads the status and the grade as well as the exit code, because
 
 Every recipe is the same loop: a baseline, a change or a fault, a re-measure, and a comparison the pipeline can read as an exit code. The sign-off recipe is that loop run once for one workload.
 
-Every command these recipes lean on has more flags and output formats than shown here — the [CLI Reference](10-cli-reference.md) documents the full command surface.
+Every command these recipes lean on has more flags and output formats than shown here. The [CLI Reference](10-cli-reference.md) documents them all.

@@ -182,7 +182,7 @@ Every rule is a constraint on one value, written either bare or as a map. The ba
 
 `equals` and `oneOf` stand alone, while `min` and `max` combine. A severity of `fail` is the default, so you write `severity` only to make a rule a warning.
 
-Pick the form that says what you actually require, because the form is the requirement. A broker count is a floor: three brokers are the fewest that can hold three replicas of a partition, and a fourth broker should never fail the check, so write `{min: 3}`. A controller count is a decision: a quorum of three tolerates one failed controller and a quorum of four tolerates no more, so write `3` exactly. A storage type is a set of acceptable answers, so write `oneOf`. A reference full of exact values describes one cluster on one day, and fails the first time anyone resizes it for good reason.
+Pick the form that says what you require, because the form is the requirement. A broker count is a floor: three brokers are the fewest that can hold three replicas of a partition, and a fourth broker should never fail the check, so write `{min: 3}`. A controller count is a decision: a quorum of three tolerates one failed controller and a quorum of four tolerates no more, so write `3` exactly. A storage type is a set of acceptable answers, so write `oneOf`. A reference full of exact values describes one cluster on one day, and fails the first time anyone resizes it for good reason.
 
 The language knows what kind of value each field holds, and compares it that way. Counts are whole numbers. CPU, memory and storage are Kubernetes quantities, so `8Gi` is more than `8000Mi` and `500m` is less than `1`. Versions compare part by part, so `4.10` is newer than `4.9`. That last rule is why a version must be quoted: unquoted, YAML reads `4.10` as the number 4.1. Lint catches the mistake, together with a misspelled field, in a file, `payments-typos.yaml`, whose `spec` reads (the output's line numbers are the full file's):
 
@@ -269,7 +269,7 @@ Read the failing row like this:
 2. The line under the row names the subjects that fall short: here every broker pod requests 11Gi for its `kafka` container, so all three are listed. A row's waiver, detail and note follow on lines of their own, each cut to the terminal's width, and `-o json` keeps them whole.
 3. The command exits 1.
 
-A failure is a question rather than a verdict: either the cluster is short of what you need, or the file asks for more than you need. If the payments load runs of Part II met their targets on these brokers, the file asks too much. Change the rule to `memory: {min: 8Gi}`, and the same check on `panda` passes all nine rules.
+A failure asks a question: either the cluster is short of what you need, or the file asks for more than you need. If the payments load runs of Part II met their targets on these brokers, the file asks too much. Change the rule to `memory: {min: 8Gi}`, and the same check on `panda` passes all nine rules.
 
 Storage size has a detail of its own. `brokers.storage.size` adds up the capacity of each broker's bound claims, which is what the broker has, not what its node pool asks for. On `panda` each broker pool's spec asks for 122Gi while each broker's claim holds 200Gi, so the rule observes 200Gi.
 
@@ -460,7 +460,7 @@ By default the `config` and `rackAwareness` rules read the `Kafka` resource, whi
 | `cr`, the default | What the `Kafka` resource's `spec.kafka.config` sets | The Kubernetes API only |
 | `brokers` | The value each broker uses, its default included, one subject per broker | The Kates API's connection to Kafka |
 
-With `brokers`, a broker that doesn't answer makes the rule UNKNOWN rather than hiding a gap. Lint refuses a sensitive setting, such as a password, under `kafka.source: brokers`, because Kafka never returns its value.
+With `brokers`, a broker that doesn't answer makes the rule UNKNOWN, so no gap hides behind it. Lint refuses a sensitive setting, such as a password, under `kafka.source: brokers`, because Kafka never returns its value.
 
 ### Every Topic, Not Only the Defaults
 
@@ -723,7 +723,7 @@ If the owner hasn't applied the Role yet, `kates compliance check -f minimal.yam
   not get kafkas.kafka.strimzi.io in kafka: bind it a Role there that grants it, …
 ```
 
-The message ends by pointing at the `kates` chart's Role with `rbac.scope=namespace`. Where you would rather run a Kafka cluster of your own than check a shared one, [Deploying Without Cluster Admin](12-deployment.md#deploying-without-cluster-admin) installs the whole stack into namespaces you already have, once Strimzi is installed.
+The message ends by pointing at the `kates` chart's Role with `rbac.scope=namespace`. If you want a Kafka cluster of your own, [Deploying Without Cluster Admin](12-deployment.md#deploying-without-cluster-admin) installs the whole stack into namespaces you already have, once Strimzi is installed.
 
 To remove the install, uninstall the release and its Secret:
 
@@ -841,7 +841,7 @@ The file names the stored check, its audit row and that row's hash, and repeats 
 
 Keep it where the database's administrators can't change it. Your pipeline's artifacts, a ticket, or a file you sign with your own key all qualify. An anchor inside the same database proves nothing.
 
-For a whole period rather than one check, `kates evidence export --from <time> --out <dir>` writes the stored checks, the audit rows and the chain's verification to a new directory, with a SHA256SUMS file. Keep that file's hashes as you keep the anchor.
+To cover a whole period, `kates evidence export --from <time> --out <dir>` writes the stored checks, the audit rows and the chain's verification to a new directory, with a SHA256SUMS file. Keep that file's hashes as you keep the anchor.
 
 ### Verify a Stored Check
 
@@ -875,7 +875,7 @@ A deleted audit row breaks the chain as surely as an edited one, so `"intact": f
 
 ### What the Proof Covers
 
-The proof covers what the check stored, not what it read. It shows that a report is the one the Kates API wrote, not that the cluster was read truthfully.
+The proof covers what the check stored. It shows that a report is the one the Kates API wrote, and says nothing about whether the cluster was read truthfully.
 
 An anchor protects the rows up to its own. Rows written after it are covered by the next anchor you keep.
 

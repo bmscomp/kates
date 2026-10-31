@@ -2,7 +2,7 @@
 
 Before the payments platform moves onto [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test, you have to say what happens to an acknowledged payment when a broker dies, and "the cluster is resilient" isn't something you can test. Chaos engineering turns that sentence into a hypothesis with numbers in it, breaks something on purpose, and measures the gap [@principlesofchaos2019; @basiri2016chaos]. [Chaos Engineering in Practice](07-chaos-practice.md) shows how Kates runs those experiments.
 
-You don't need prior chaos tooling experience — just a working knowledge of Kafka's replication model. After this chapter, you can:
+You don't need prior chaos tooling experience; a working knowledge of Kafka's replication model is enough. After this chapter, you can:
 
 - State a [steady-state hypothesis](appendix-a-glossary.md#gl-steady-state-hypothesis) with measurable pass and fail criteria
 - Predict how Kafka behaves during leader election, [ISR shrink](appendix-a-glossary.md#gl-isr-shrink), and [consumer group](appendix-a-glossary.md#gl-consumer-group) rebalance
@@ -18,7 +18,7 @@ Distributed systems fail in ways that are impossible to predict from reading cod
 - The surviving brokers might hit memory pressure from absorbing extra [partitions](appendix-a-glossary.md#gl-partition)
 - Network timeouts might cascade into producer retries that amplify the problem
 
-Chaos engineering replaces hope with evidence: you find out which of these happens on your cluster before a production outage tells you.
+Chaos engineering tells you which of these happens on your cluster before a production outage does.
 
 ## Core Principles
 
@@ -53,7 +53,7 @@ Any under-replicated or offline partition that `kates cluster check` reports is 
 
 ### Vary Real-World Events
 
-Inject faults that actually happen in production. The table maps the failures distributed systems meet to the [disruption types](appendix-a-glossary.md#gl-disruption-type) that reproduce them; read the right-hand column for the gaps:
+Inject the faults that happen in production. The table maps the failures distributed systems meet to the [disruption types](appendix-a-glossary.md#gl-disruption-type) that reproduce them; read the right-hand column for the gaps:
 
 | Domain | Real-world fault | Kates disruption type |
 |--------|------------------|-----------------------|
@@ -128,7 +128,7 @@ graph TB
     L3 --> L4["Level 4<br/>Kill 2 brokers<br/>acks=all refused<br/>on krafter"]
 ```
 
-In a Kates [disruption plan](appendix-a-glossary.md#gl-disruption-plan), each rung is a `maxAffectedBrokers` value. `krafter` runs one broker per zone, so the first three rungs hit one broker each. The zone rung, a `NODE_DRAIN` of `alpha` or the `az-failure` playbook, differs in taking other pods in the zone with it, such as a KRaft controller running there. The `az-failure` playbook caps its count at `3`, for clusters with several brokers per zone. The last rung hits two brokers, and the [safety guard](appendix-a-glossary.md#gl-safety-guard) runs it with a warning, because only one broker is left. On a cluster with more than two brokers per zone, the zone becomes the top rung. The guard refuses a plan that would hit more brokers than its limit, or every broker: see [Safety Guardrails](07-chaos-practice.md#safety-guardrails) in Chaos Engineering in Practice.
+In a Kates [disruption plan](appendix-a-glossary.md#gl-disruption-plan), each rung is a `maxAffectedBrokers` value. `krafter` runs one broker per zone, so the first three rungs hit one broker each. The zone rung, a `NODE_DRAIN` of `alpha` or the `az-failure` playbook, differs in taking other pods in the zone with it, such as a KRaft controller running there. The `az-failure` playbook caps its count at `3`, for clusters with more than one broker per zone. The last rung hits two brokers, and the [safety guard](appendix-a-glossary.md#gl-safety-guard) runs it with a warning, because only one broker is left. On a cluster with more than two brokers per zone, the zone becomes the top rung. The guard refuses a plan that would hit more brokers than its limit, or every broker: see [Safety Guardrails](07-chaos-practice.md#safety-guardrails) in Chaos Engineering in Practice.
 
 ## The Game Day Methodology
 
@@ -250,7 +250,7 @@ sequenceDiagram
     Note over C1,C3: Processing resumes
 ```
 
-The diagram shows the classic eager protocol, where all consumers in the group stop processing during a rebalance — a "stop-the-world" pause that can last seconds to minutes depending on group size and partition count. Cooperative incremental rebalancing (KIP-429 [@kip429]) shrinks the pause to only the partitions that actually move, and the next-generation consumer group protocol (KIP-848 [@kip848], `group.protocol=consumer`) removes the global synchronization barrier entirely. Kates's test consumers run the classic protocol, the default of the Kafka client they run on, so a Kates test shows you the eager or cooperative pause, not the KIP-848 one.
+The diagram shows the classic eager protocol, where every consumer in the group stops processing during a rebalance. That "stop-the-world" pause can last seconds to minutes, depending on group size and partition count. Cooperative incremental rebalancing (KIP-429 [@kip429]) shrinks the pause to only the partitions that move, and the next-generation consumer group protocol (KIP-848 [@kip848], `group.protocol=consumer`) removes the global synchronization barrier entirely. Kates's test consumers run the classic protocol, the default of the Kafka client they run on, so a Kates test shows you the eager or cooperative pause, not the KIP-848 one.
 
 ## Key Metrics During Chaos
 
@@ -266,13 +266,13 @@ Watch these signals while a fault is active. For each one, the table says what a
 | Leader election rate | Should equal the number of partitions the failed broker led |
 | Recovery time | Time from failure to all ISRs fully expanded |
 
-A Kates [disruption](appendix-a-glossary.md#gl-disruption) reports several of them. `kates disruption kafka-metrics` shows each step's time to full ISR, minimum ISR depth and peak under-replicated partitions when the plan names a topic in `isrTrackingTopic`, and consumer lag when it names a group in `lagTrackingGroupId`. A plan's `sla` block can set targets for P99 latency, throughput and how long the Kafka pods take to be Ready again, and the plan's [SLA grade](appendix-a-glossary.md#gl-sla-grade) says how the run met them.
+A Kates [disruption](appendix-a-glossary.md#gl-disruption) reports three of them. `kates disruption kafka-metrics` shows each step's time to full ISR, minimum ISR depth and peak under-replicated partitions when the plan names a topic in `isrTrackingTopic`, and consumer lag when it names a group in `lagTrackingGroupId`. A plan's `sla` block can set targets for P99 latency, throughput and how long the Kafka pods take to be Ready again, and the plan's [SLA grade](appendix-a-glossary.md#gl-sla-grade) says how the run met them.
 
 ## Fault Injection Approaches
 
 In Kates, where a fault comes from is a deployment setting, not a choice you make per experiment. Every fault goes through one [chaos provider](appendix-a-glossary.md#gl-chaos-provider), a setting of the [Kates API](appendix-a-glossary.md#gl-kates-api). `litmus-crd`, the default, injects through [LitmusChaos](appendix-a-glossary.md#gl-litmuschaos), and `kubernetes` through the Kubernetes API, which needs nothing installed but runs fewer disruption types. `hybrid` picks one of those two at startup, and `noop` injects nothing. What you do choose per experiment is how to run the fault. A disruption plan injects faults and watches the cluster from outside, while `kates resilience run` injects one fault under a Kates test and measures what a client sees. [Chaos Engineering in Practice](07-chaos-practice.md) compares the providers and the two ways to run a fault.
 
-Two other tools sit near chaos but inject nothing through Kates. [Trogdor](appendix-a-glossary.md#gl-trogdor) is a [benchmark backend](appendix-a-glossary.md#gl-benchmark-backend) in Kates: it generates load, as [Test Types Deep Dive](05-test-types.md) explains, and never injects a fault. A pod you delete by hand with `kubectl` disrupts the cluster just the same, but Kates doesn't know it happened: no plan report lists it, and an INTEGRITY run it hits reports [RPO](appendix-a-glossary.md#gl-rpo) as not measured.
+Two other tools sit near chaos but inject nothing through Kates. [Trogdor](appendix-a-glossary.md#gl-trogdor) is a [benchmark backend](appendix-a-glossary.md#gl-benchmark-backend) in Kates: it generates load, as [Test Types Deep Dive](05-test-types.md) explains, and never injects a fault. A pod you delete by hand with `kubectl` disrupts the cluster the same way, but Kates doesn't know it happened: no plan report lists it, and an INTEGRITY run it hits reports [RPO](appendix-a-glossary.md#gl-rpo) as not measured.
 
 ## Summary
 

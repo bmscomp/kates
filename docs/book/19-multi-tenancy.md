@@ -1,6 +1,6 @@
 # Multi-Tenancy
 
-As the platform profile ships it, `krafter`, the [Kafka cluster under test](appendix-a-glossary.md#gl-krafter), already carries several tenants — the Kates API, Kafka UI, the schema registry and Kafka Connect among them — each with its own user and topic prefix. Before the payments platform joins them, you have to say what keeps its producer out of their topics, its traffic inside its share of the brokers, and its credentials inside its own namespace. You also have to say how you take it off again without touching a neighbor. Kafka gives you three tools for that — prefixed ACLs, per-user quotas and NetworkPolicy — and the `kafka-cluster` chart lets you declare all three in one block of values.
+As the platform profile ships it, `krafter`, the [Kafka cluster under test](appendix-a-glossary.md#gl-krafter), already carries several tenants — the Kates API, Kafka UI, the schema registry and Kafka Connect among them — each with its own user and topic prefix. Before the payments platform joins them, you have to say what keeps its producer out of their topics, its traffic inside its share of the brokers, and its credentials inside its own namespace. You also have to say how you take it off again without touching a neighbor. Kafka gives you three tools for that: prefixed ACLs, per-user quotas and NetworkPolicy. The `kafka-cluster` chart lets you declare all three in one block of values.
 
 After this chapter, you can:
 
@@ -134,13 +134,13 @@ users:
             host: "*"
 ```
 
-`Create` lets the service make topics under its prefix itself, with the brokers' defaults rather than `topics.defaults`. Leave it out for a tenant whose topics you declare in Step 1, and grant it to one that creates its own, like a schema registry or Connect.
+`Create` lets the service make topics under its prefix itself, with the brokers' defaults; `topics.defaults` doesn't reach them. Leave it out for a tenant whose topics you declare in Step 1, and grant it to one that creates its own, like a schema registry or Connect.
 
 ### Step 3 — Allow Network Access
 
 `networkPolicy.clients` names the tenant's pods and the listeners they may reach, and the chart turns the listener names into ports from `kafka.listeners`. Leave `listeners` out and the entry covers every internal listener; name one that `kafka.listeners` doesn't have and the render fails with the list of names it does have.
 
-A later values file replaces `clients` rather than merging it. Copy every entry `helm get values` shows into `tenants.yaml` before adding yours; an entry you leave out is gone at the next upgrade. A `kates deploy` install has at least the `connect` entry:
+A later values file replaces the whole `clients` list, because Helm doesn't merge lists. Copy every entry `helm get values` shows into `tenants.yaml` before adding yours; an entry you leave out is gone at the next upgrade. A `kates deploy` install has at least the `connect` entry:
 
 ```bash
 # krafter from kates deploy; kafka-cluster for a release make kafka installed.
@@ -164,7 +164,7 @@ The grant lands in the chart's `krafter-kafka` policy, which `values-kind.yaml`,
 
 ### Step 4 — Apply and Verify
 
-Start from the values the release runs with — every file and `--set` flag it was installed with — then render to see exactly what the tenant block adds, and upgrade. The release is `krafter` when `kates deploy` installed it and `kafka-cluster` when `make kafka` did — `helm list -n kafka` shows which — while the Kafka cluster is `krafter` either way:
+Start from the values the release runs with — every file and `--set` flag it was installed with — then render to see exactly what the tenant block adds, and upgrade. The release is `krafter` when `kates deploy` installed it and `kafka-cluster` when `make kafka` did (`helm list -n kafka` shows which), while the Kafka cluster is `krafter` either way:
 
 ```bash
 # The Helm release: krafter from kates deploy, kafka-cluster from make kafka
@@ -284,7 +284,7 @@ The `kafka-cluster` chart's platform profile already sizes its own tenants, and 
 | `kates-connect`, `kates-mm2` | 50 MB/s | 50 MB/s | 25% | A pipeline or a mirror |
 | `kates-backend`, `litmus-chaos` | None | None | None | Load and faults |
 
-The last row carries no `quotas` block at all. A quota on `kates-backend`, which generates the load you measure, would cap the test rather than the tenant.
+The last row carries no `quotas` block at all. A quota on `kates-backend`, which generates the load you measure, would cap the test itself.
 
 A tenant's [partition](appendix-a-glossary.md#gl-partition) count follows the same profile. Its consumers can't outnumber its partitions usefully, since one partition feeds one consumer in a group. Its produce quota adds up across brokers only when its partition leaders spread over all of them, so give a tenant at least as many partitions as `krafter` has brokers. [The Cluster Under Test](03-cluster.md) explains what each partition costs the brokers.
 
@@ -396,7 +396,7 @@ kubectl get networkpolicy krafter-kafka -n kafka -o yaml | grep -c payments
 
 - A tenant is one service with one user, one topic prefix and one network grant, and no prefix may begin another's.
 - One block of chart values carries the whole tenant, and one upgrade from the release's own values applies it.
-- Quotas are per broker and throttle rather than refuse, so a tenant over its limit shows up as latency.
+- Quotas are per broker and slow a client down without refusing it, so a tenant over its limit shows up as latency.
 - No per-user metric is exported, so you watch a tenant by its topic prefix and its consumer groups.
 - Turning a tenant off stops the chart managing it; the user, topics and credential copy you delete by hand.
 

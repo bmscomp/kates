@@ -77,7 +77,7 @@ graph TB
     I -->|regression| G
 ```
 
-Kates serves both as a check before a merge (a short LOAD run) and as the gate before production (the disruption plans with their SLA blocks).
+Kates is both a check before a merge (a short LOAD run) and the gate before production (the disruption plans with their SLA blocks).
 
 ## Quick Start
 
@@ -135,7 +135,7 @@ The diff shows what relaxing producer acknowledgments buys you in latency.
 
 ## What Kates Is Not
 
-Kates leaves several nearby jobs to other tools:
+Kates leaves four nearby jobs to other tools:
 
 - It isn't a Confluent Platform replacement or a managed Kafka distribution. It tests clusters that Confluent, Strimzi or any other Kafka deployment runs.
 - It isn't a general-purpose load tester. Its tests are built around Kafka behavior, such as ISR tracking, consumer [rebalancing](appendix-a-glossary.md#gl-rebalance) and partition leadership. For HTTP or gRPC load, use k6, Gatling or Locust.
@@ -144,10 +144,10 @@ Kates leaves several nearby jobs to other tools:
 
 ## Summary
 
-- Kates pairs performance testing with chaos engineering and speaks Kafka: producer acknowledgments, ISR state and partition leadership, not a black-box endpoint.
+- Kates pairs performance testing with chaos engineering and speaks Kafka: it sets producer acknowledgments and tracks ISR state and partition leadership.
 - Production readiness spans performance, resilience and data integrity, and Kates checks all three with repeatable tests against targets you set.
 - You can connect the CLI to a running Kates API, start a LOAD run and find its report.
-- Every run is stored and exportable as JSON, CSV, JUnit XML or heatmap data, so results feed CI gates and trends rather than scrollback.
+- Every run is stored and exportable as JSON, CSV, JUnit XML or heatmap data, so results feed CI gates and trends.
 - Kates is a testing and validation platform, not a Kafka distribution, a management UI or a production monitoring system.
 
-Next, [Architecture & Design](02-architecture.md) follows a LOAD run through those two halves: which part generates the load, where the faults come from, and where the report you just read is kept.
+Next, [Architecture & Design](02-architecture.md) follows a LOAD run through those two halves: which part generates the load, where the faults come from, and where the Quick Start's report is kept.

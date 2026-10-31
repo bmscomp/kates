@@ -12,13 +12,13 @@ Kafka 4.0 removed the client protocol API versions that predate Kafka 2.1 (KIP-8
 
 KIP-1124 [@kip1124] states the consequence without hedging: 2.1 is the oldest version compatible with 4.0, and 4.0 clients require a broker of 2.1 or newer.
 
-This is a removal, not a setting. There is no compatibility flag, no `inter.broker.protocol.version` you can lower on the client side, nothing to negotiate. Below the floor the broker answers `UNSUPPORTED_VERSION` and the [connector](appendix-a-glossary.md#gl-connector) fails — while the `KafkaMirrorMaker2` resource keeps reporting `Ready`, because the operator's readiness is about the workers, not about whether replication is happening.
+Nothing restores them. There is no compatibility flag, no `inter.broker.protocol.version` you can lower on the client side, nothing to negotiate. Below the floor the broker answers `UNSUPPORTED_VERSION` and the [connector](appendix-a-glossary.md#gl-connector) fails. The `KafkaMirrorMaker2` resource keeps reporting `Ready`, because the operator's readiness covers the workers and says nothing about whether replication is happening.
 
 ::: {.callout-important title="The floor is on the source broker's protocol, not its data"}
 The floor is on the source broker, and it is a floor on the *protocol*, not on the data. A 2.1 broker holding records written years earlier in an ancient message format is fine — see [Message Formats: The Half That Surprises People](#message-formats-the-half-that-surprises-people). A 2.0 broker holding yesterday's records is not.
 :::
 
-The chart refuses this case at render time rather than letting you find it an hour later:
+The chart refuses this case at render time, before anything deploys:
 
 ```yaml
 compatibility:
@@ -32,7 +32,7 @@ mirrors:
       kafkaVersion: "2.8.2"
 ```
 
-`requireDeclaredVersion` is the line to add when you write your own values: the chart's default is `false`, and the `values-migrate-*` presets and `kates migrate` turn it on. A source that does not say what it is cannot be checked, and "we think it's a 2.x" is exactly the sentence that precedes a failed cutover.
+`requireDeclaredVersion` is the line to add when you write your own values: the chart's default is `false`, and the `values-migrate-*` presets and `kates migrate` turn it on. A source that does not say what it is cannot be checked, and "we think it's a 2.x" is the sentence that precedes a failed cutover.
 
 ::: {.callout-tip title="Try it: Does the chart refuse a 2.0 source before anything deploys?"}
 Pull the `mirror-maker2` chart, copy its `values-migrate-2x.yaml`, set `kafkaVersion` to `2.0.1`, and render it with `helm template`; no cluster is needed. Read the error, then delete the `kafkaVersion` line and render again. The second error is `requireDeclaredVersion` refusing a source that says nothing.
@@ -74,7 +74,7 @@ flowchart TB
     B -->|"MM2, 4.x line"| C["Target<br/>Kafka 4.x"]
 ```
 
-KIP-1124 names 3.9.x as the recommended bridge and calls a direct upgrade from 0.11–2.0 "not officially supported and untested" [@kip1124]. 0.11 is the lowest version with a supported path at all. Below that, the migration is an application-level replay, not a mirror.
+KIP-1124 names 3.9.x as the recommended bridge and calls a direct upgrade from 0.11–2.0 "not officially supported and untested" [@kip1124]. 0.11 is the lowest version with a supported path at all. Below that, the migration is an application-level replay.
 
 ::: {.callout-warning title="A 3.9-line mirror against a pre-2.1 source is an inference, not a documented path"}
 Running a 3.9-line MirrorMaker 2 against a pre-2.1 source is an inference from the bridge-release guidance, not something Apache documents directly. Rehearse it against a copy of the real cluster before committing to it, and measure — do not assume — that the checkpoint connector translates offsets correctly.
@@ -102,13 +102,13 @@ Each row is a place where a runbook written for the target does the wrong thing 
 
 Kafka 4.0 is the first release with no ZooKeeper at all, and it has no `zookeeper.*` broker settings. KRaft was declared production-ready in 3.3 and ZooKeeper mode was deprecated in 3.5 (KIP-833 [@kip833]), which is why the 3.x releases are called bridge releases.
 
-None of this reaches MirrorMaker 2. The mirror talks to the source over the client protocol and never asks how the source stores its metadata. What the removal does change is this. The target must already be KRaft with a [metadata version](appendix-a-glossary.md#gl-metadata-version) of at least 3.3.x before it can be 4.x at all. So a ZooKeeper cluster has to be migrated to KRaft *before* it can be upgraded, not as part of the same step. The source's administration stays in its own era: you keep a 2.x-era toolbox for the old cluster, because a 4.x one cannot do the job, as [The Tools You Reach for Are Not the Tools You Have](#the-tools-you-reach-for-are-not-the-tools-you-have) shows.
+None of this reaches MirrorMaker 2. The mirror talks to the source over the client protocol and never asks how the source stores its metadata. What the removal does change is the target, which must already be KRaft with a [metadata version](appendix-a-glossary.md#gl-metadata-version) of at least 3.3.x before it can be 4.x at all. So a ZooKeeper cluster has to be migrated to KRaft *before* it can be upgraded, not as part of the same step. The source's administration stays in its own era: you keep a 2.x-era toolbox for the old cluster, because a 4.x one cannot do the job, as [The Tools You Reach for Are Not the Tools You Have](#the-tools-you-reach-for-are-not-the-tools-you-have) shows.
 
 ### The Tools You Reach for Are Not the Tools You Have
 
-A 4.x distribution is missing things a 2.x runbook assumes, and the failures are "command not found" rather than anything explanatory.
+A 4.x distribution is missing things a 2.x runbook assumes, and the failure is a bare "command not found" that explains nothing.
 
-`kafka-get-offsets.sh` arrived in 3.0 (KIP-635 [@kip635]). Which form you use depends on the distribution you are typing into, not on the broker you are pointing at — a modern client reads any broker above the 2.1 floor. In the commands below, `SRC` is the source's bootstrap address, `legacy-legacy-kafka-bootstrap.kafka-legacy-2x.svc:9092` for the chart above:
+`kafka-get-offsets.sh` arrived in 3.0 (KIP-635 [@kip635]). Which form you use depends on the distribution you are typing into, not on the broker you are pointing at. A modern client reads any broker above the 2.1 floor. In the commands below, `SRC` is the source's bootstrap address, `legacy-legacy-kafka-bootstrap.kafka-legacy-2x.svc:9092` for the chart above:
 
 ```bash
 SRC=legacy-legacy-kafka-bootstrap.kafka-legacy-2x.svc:9092
@@ -121,7 +121,7 @@ kafka-get-offsets.sh --bootstrap-server "$SRC" --topic orders
 kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list "$SRC" --topic orders
 ```
 
-The second form has its own cliff. `GetOffsetShell` moved to `org.apache.kafka.tools` in 3.7.0 ([KAFKA-14581](https://issues.apache.org/jira/browse/KAFKA-14581)) and, unlike the tools discussed below, was given no forwarder under the old name and no release note. So the old invocation works on 3.6.2 and every 2.x, and raises `ClassNotFoundException` from 3.7 onward — which, with stderr discarded, reads as "no offsets".
+The second form has its own cliff. `GetOffsetShell` moved to `org.apache.kafka.tools` in 3.7.0 ([KAFKA-14581](https://issues.apache.org/jira/browse/KAFKA-14581)) and, unlike the tools discussed below, was given no forwarder under the old name and no release note. So the old invocation works on 3.6.2 and every 2.x, and raises `ClassNotFoundException` from 3.7 onward. With stderr discarded, that error reads as "no offsets".
 
 `kafka-acls.sh` lost `--authorizer`, `--authorizer-properties` and `--zk-tls-config-file` in 4.0. The classic 2.x incantation cannot be typed into a 4.x distribution at all:
 
@@ -156,22 +156,22 @@ If the source has not been touched in years, its brokers were configured when th
 | `JndiLoginModule` disabled | 3.4 | A JAAS configuration copied from the old cluster |
 | Empty OAUTHBEARER allow-list (`org.apache.kafka.sasl.oauthbearer.allowed.urls`) | 4.0 | Any OAUTHBEARER token endpoint not listed |
 
-Hostname verification is a real security improvement, not a bug to work around, but it is better to discover it in a pre-flight probe than in a stalled connector. A JAAS configuration copied from the old cluster, likewise, can fail for reasons that have nothing to do with credentials being wrong.
+Hostname verification is a real security improvement, so don't work around it. Find the gap in a pre-flight probe, before it stalls a connector. A JAAS configuration copied from the old cluster, likewise, can fail for reasons that have nothing to do with credentials being wrong.
 
-The chart's pre-flight probe exists for exactly this: it performs a real handshake against the real source with the real client, before anything is deployed, and reports what it found. It is off by default and on in the migration presets.
+The chart's pre-flight probe exists for this: it performs a real handshake against the real source with the real client, before anything is deployed, and reports what it found. It is off by default and on in the migration presets.
 
 ### Message Formats: The Half That Surprises People
 
 Message formats v0 and v1 were deprecated in 3.0 and removed in 4.0 (KIP-724 [@kip724]), and 4.0 has no `log.message.format.version` setting. What that means in practice is more precise than "old formats are unsupported".
 
-Reading old records still works. KIP-724 keeps v0 and v1 records readable when they are already on disk — a broker returns them rather than scanning every batch to convert. A 4.x MirrorMaker 2 can drain a source whose oldest segments predate the current format.
+Reading old records still works. KIP-724 keeps v0 and v1 records readable when they are already on disk — a broker returns them as they are, without scanning every batch to convert it. A 4.x MirrorMaker 2 can drain a source whose oldest segments predate the current format.
 
 Writing is always v2. The target has no setting that would produce anything else, so everything the mirror writes lands in the modern format.
 
 Your own old consumers are the problem. A client that speaks Fetch v3 or lower cannot read the 4.x target, and there is no configuration that restores it. The mirror moves the data faithfully to a cluster your application cannot read.
 
 ::: {.callout-caution title="Inventory your clients before the cutover"}
-Kafka 3.7 added the `DeprecatedRequestsPerSec` metric and a `requestApiVersionDeprecated` field in the request log precisely so this question has an answer: if the metric is zero on a 3.7+ cluster, nothing is speaking a removed protocol version. On a 2.x source that metric does not exist, and the inventory is manual.
+Kafka 3.7 added the `DeprecatedRequestsPerSec` metric and a `requestApiVersionDeprecated` field in the request log so that this question has an answer: if the metric is zero on a 3.7+ cluster, nothing is speaking a removed protocol version. On a 2.x source that metric does not exist, and the inventory is manual.
 :::
 
 ## The Legacy Cluster Has to Live Somewhere
@@ -191,7 +191,7 @@ helm install legacy ./legacy-kafka -n kafka-legacy-2x --create-namespace \
 kates migrate source deploy --version 2.8.2
 ```
 
-A 4.x source is different: it can run under Strimzi, though possibly not under the *same* Strimzi. If the source is on a Kafka line the current operator has dropped, it needs its own namespace-scoped operator beside the primary's — see [Kafka Deployment Engineering](15-kafka-deployment.md) for the operator scope rules and what they cost.
+A 4.x source is different: it can run under Strimzi, though possibly not under the *same* Strimzi. If the source is on a Kafka line the current operator has dropped, it needs its own namespace-scoped operator beside the primary's. [Kafka Deployment Engineering](15-kafka-deployment.md) covers the operator scope rules and what they cost.
 
 ## The Sequence
 
@@ -202,7 +202,7 @@ The full cutover mechanics are in the [MirrorMaker 2 Runbook — Cutover, Rollba
 3. Inventory the clients, using `DeprecatedRequestsPerSec` if the source is 3.7 or newer, and by hand if it is not. This is the step that determines whether the cutover is a repointing or a client upgrade program.
 4. Stand up the source (`legacy-kafka` for 2.x and 3.x) and the target.
 5. Run the pre-flight probe — a real handshake with the real client, which is where the TLS and SASL default changes surface.
-6. Start the mirror with `identity` replication (see [Three Uses, Three Different Configurations](22-mirror-maker2-migration.md#three-uses-three-different-configurations)), so topic names are preserved and consumers can repoint without being rewritten, and with `sync.group.offsets.enabled` so they resume rather than restart. The chart's own default policy is `default` (prefixed names); the `values-migrate-*` presets and `kates migrate` set `identity`, so set `replicationPolicy.mode: identity` yourself when you write values from scratch.
+6. Start the mirror with `identity` replication (see [Three Uses, Three Different Configurations](22-mirror-maker2-migration.md#three-uses-three-different-configurations)), so topic names are preserved and consumers can repoint without being rewritten, and with `sync.group.offsets.enabled` so they resume from their committed positions. The chart's own default policy is `default` (prefixed names); the `values-migrate-*` presets and `kates migrate` set `identity`, so set `replicationPolicy.mode: identity` yourself when you write values from scratch.
 7. Verify replication and [offset translation](appendix-a-glossary.md#gl-offset-translation) before anything moves.
 8. Cut over, then retire the mirror.
 

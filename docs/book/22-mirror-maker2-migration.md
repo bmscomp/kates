@@ -4,7 +4,7 @@
 
 One thing does not carry over, and it drives the whole design: Connect talks to one cluster, and MirrorMaker 2 talks to two. Every difficulty in this chapter descends from that.
 
-By the end you can tell which of the three uses a mirror serves and write the chart values for a migration. You can also prove a mirror moves data rather than merely reporting Ready, and run the cutover in the one order that keeps consumer positions.
+By the end you can tell which of the three uses a mirror serves and write the chart values for a migration. You can also prove that a mirror moves data, which its Ready condition never shows, and run the cutover in the one order that keeps consumer positions.
 
 ## The Model
 
@@ -89,7 +89,7 @@ Three questions, in increasing order of how much they tell you:
 | Are the connectors running? | `.status.connectors[].connector.state` | The connectors started |
 | Is data arriving? | End offsets on the target, read twice | The mirror works |
 
-A test suite that stops at the first question reports success on a dead mirror. The chart's Helm tests span all three. CR readiness and connector state run on every `helm test`; the produce-and-consume round trip and the [offset-translation](appendix-a-glossary.md#gl-offset-translation) check are off by default because they need credentials. `kates migrate run` asks the third question against a real legacy broker and diffs the distinct records read back rather than counting lines.
+A test suite that stops at the first question reports success on a dead mirror. The chart's Helm tests span all three. CR readiness and connector state run on every `helm test`; the produce-and-consume round trip and the [offset-translation](appendix-a-glossary.md#gl-offset-translation) check are off by default because they need credentials. `kates migrate run` asks the third question against a real legacy broker and compares the distinct records it reads back with the ones it produced.
 
 Two helpers answer the third question by hand. `kates migrate target offsets <topic>` sums a topic's end offsets with whichever offset tool the target's Kafka line ships; run it twice, and a mirror that moves data shows a larger sum the second time. `kates migrate target topics` lists what the mirror created on the target, which `kubectl get kafkatopics` never shows, because the Topic Operator is unidirectional.
 
@@ -105,7 +105,7 @@ The workers' PodMonitor exports every Connect series, and five of them answer th
 | `worker_metrics_connector_failed_task_count` | Is something broken outright? |
 | `worker_rebalance_metrics_completed_rebalances_total` | Is it stable? |
 
-Replication latency is the one a cutover decision rests on, and you want its history rather than a spot reading — which means turning metrics on before the first record moves, not after something looks wrong.
+Replication latency is the one a cutover decision rests on, and the decision needs its history, so turn metrics on before the first record moves.
 
 ::: {.callout-tip title="Sawtooth lag means rebalances, not a slow source"}
 Tasks do not replicate during a rebalance, so a rebalance storm presents as intermittent lag with no failed tasks. If lag is sawtoothing, look at the rebalance rate before you look at the source.
@@ -123,7 +123,7 @@ Kafka 4.0 removed the client protocol versions older than Kafka 2.1, KIP-896 [@k
 The failure is silent from the outside. The `KafkaMirrorMaker2` reports `Ready`, because `Ready` means the Connect workers started. Only the connector status and the target's record counts show that nothing is crossing.
 :::
 
-The `mirror-maker2` chart turns this into a render-time failure. Declare `mirrors[].source.kafkaVersion` and a source below the floor fails `helm install` in seconds, naming the alias and the way out; a source that declares no version passes unchecked unless `compatibility.requireDeclaredVersion` is true. With `preflight.enabled: true`, which the migration presets set, a pre-install Job goes further: it performs the `ApiVersions` handshake against the real source with the workers' own client, so a pass is evidence rather than an assumption.
+The `mirror-maker2` chart turns this into a render-time failure. Declare `mirrors[].source.kafkaVersion` and a source below the floor fails `helm install` in seconds, naming the alias and the way out. A source that declares no version passes unchecked unless `compatibility.requireDeclaredVersion` is true. With `preflight.enabled: true`, which the migration presets set, a pre-install Job goes further: it performs the `ApiVersions` handshake against the real source with the workers' own client, so a pass means the real source answered.
 
 ### Identity Mode Makes the Mirror Self-Matching
 
@@ -170,7 +170,7 @@ Both are expressed in the chart's `cutover` block, applied as a values overlay o
 
 ## Testing a Migration Locally
 
-The pinned Strimzi operator supports only the Kafka lines its release lists, all of them 4.x (see the [Version & Compatibility Matrix](appendix-d-versions.md)), and refuses a `Kafka` resource whose `spec.version` is outside that set. So a 2.x or 3.x cluster cannot be expressed as a `Kafka` custom resource at all. The `legacy-kafka` chart fills that gap: plain StatefulSets running the last 2.x line on ZooKeeper, or the last 3.x line on KRaft, in their own namespace, purely to be replicated from. Which 2.x and 3.x lines those are is pinned in that chart's overlays, and `kates migrate pairs` prints the pairs this cluster can actually stand up.
+The pinned Strimzi operator supports only the Kafka lines its release lists, all of them 4.x (see the [Version & Compatibility Matrix](appendix-d-versions.md)), and refuses a `Kafka` resource whose `spec.version` is outside that set. So a 2.x or 3.x cluster cannot be expressed as a `Kafka` custom resource at all. The `legacy-kafka` chart fills that gap: plain StatefulSets running the last 2.x line on ZooKeeper, or the last 3.x line on KRaft, in their own namespace, purely to be replicated from. Which 2.x and 3.x lines those are is pinned in that chart's overlays, and `kates migrate pairs` prints the pairs this cluster can stand up.
 
 ```bash
 kates migrate pairs              # the source-to-target pairs available here
@@ -182,7 +182,7 @@ kates migrate run --from 2.8.2   # the 2.x leg
 On `panda`, the book's three-node Kind cluster, run `kates migrate pairs`, then `kates migrate run --from 3.9.1 --yes`. In the report, find the `record content` and `offset translation` rows. They say whether the records and a consumer group's position crossed, which the CR's `Ready` never does.
 :::
 
-Each run stands up the legacy broker, produces a known corpus, commits a consumer offset, mirrors it, reads the records back off the 4.x cluster, verifies offset translation, and rehearses the cutover — reporting every assertion in a table.
+Each run stands up the legacy broker, produces a known corpus, commits a consumer offset, mirrors it, reads the records back off the 4.x cluster, verifies offset translation, and rehearses the cutover. It reports every assertion in a table.
 
 ::: {.callout-caution title="legacy-kafka is a lab fixture"}
 The `legacy-kafka` chart is a lab fixture: single broker, replication factor 1, `emptyDir`, no TLS. It proves protocol and topology compatibility, not durability or throughput. Never point production traffic at it.

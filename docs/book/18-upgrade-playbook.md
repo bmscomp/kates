@@ -53,7 +53,7 @@ At first install, `kates deploy` pins `kafka.metadataVersion` to the newest mino
 
 ### Where the Versions Are Pinned
 
-The versions this release pins, and the operator and Kafka pair it ships, are in the [Version & Compatibility Matrix](appendix-d-versions.md). `kates versions` prints the window of the operator actually running, and `kates versions kafka --strimzi-version <v>` prints another release's.
+The versions this release pins, and the operator and Kafka pair it ships, are in the [Version & Compatibility Matrix](appendix-d-versions.md). `kates versions` prints the running operator's window, and `kates versions kafka --strimzi-version <v>` prints another release's.
 
 ### Limits
 
@@ -112,7 +112,7 @@ kates report regression <post-id>
 kates resilience run -f payments-integrity-broker.yaml
 ```
 
-Read the `produce` row of `kates report diff` for the throughput and P99 against the 2,000 records per second and the 100 ms targets. `kates report regression` compares the new run with the LOAD baseline you set. [Consumer lag](appendix-a-glossary.md#gl-consumer-lag) alerts should not be firing. `kates report compare` puts more than two runs side by side when you want the trend across several upgrades.
+Read the `produce` row of `kates report diff` for the throughput and P99 against the 2,000 records per second and the 100 ms targets. `kates report regression` compares the new run with the LOAD baseline you set. [Consumer lag](appendix-a-glossary.md#gl-consumer-lag) alerts should not be firing. `kates report compare` puts more than two runs side by side when you want the trend across upgrades.
 
 ## Strimzi Operator Upgrade
 

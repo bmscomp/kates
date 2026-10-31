@@ -2,9 +2,9 @@
 
 Before the payments platform moves onto [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test, you need four different answers: what its latency is at 2,000 records per second, where it saturates, how it behaves when a burst hits, and whether an acknowledged record ever disappears. Each answer is a different run, and Kates names them: eight core test types, plus the `TUNE_*` types that [CLI Reference](10-cli-reference.md) covers and an `INTEGRATION_CDC` type that [REST API Reference](11-api-reference.md) lists.
 
-Whether you're baselining a new cluster or gating a CI pipeline, after this chapter you can:
+After this chapter, you can:
 
-- Pick the test type that answers the question you're actually asking — steady-state latency, breaking point, burst behavior, or data safety
+- Pick the test type that answers your question: steady-state latency, breaking point, burst behavior, or data safety
 - Set each type's key parameters and know the load each one puts on the cluster, whichever [benchmark backend](appendix-a-glossary.md#gl-benchmark-backend) runs it
 - Read the results — recognize [saturation](appendix-a-glossary.md#gl-saturation-point), slow leaks, and data loss in the rows each type reports
 - Run any type from a built-in scenario template instead of hand-rolled flags
@@ -204,7 +204,7 @@ The Kates API refuses, with `400`, a run planned to last longer than two hours. 
 
 ## VOLUME Test
 
-A VOLUME test answers how the cluster handles large records: the storage and replication cost of data size rather than request rate.
+A VOLUME test answers how the cluster handles large records: the storage and replication cost that grows with record size.
 
 ### How a VOLUME Run Works
 
@@ -232,7 +232,7 @@ Add gates once you have a baseline; [Scenario Files & SLA Gates](13-scenario-fil
 
 ## CAPACITY Test
 
-A CAPACITY test answers what the most throughput is that the cluster can sustain, and which resource is the bottleneck at that ceiling.
+A CAPACITY test answers two questions: how much throughput the cluster can sustain at most, and which resource is the bottleneck at that ceiling.
 
 ### How a CAPACITY Run Works
 
@@ -399,7 +399,7 @@ Read `Lost`, `Duplicates` and `Verdict` on the run; the gates don't check duplic
 
 ### INTEGRITY Through a Fault
 
-An INTEGRITY run injects no [fault](appendix-a-glossary.md#gl-fault) by itself, so on a healthy cluster it answers the durability question only half. `kates resilience run` pairs it with one fault injected while it produces, a [resilience run](appendix-a-glossary.md#gl-resilience-run), one of the two ways Kates runs a [chaos experiment](appendix-a-glossary.md#gl-chaos-experiment); the other is a [disruption plan](appendix-a-glossary.md#gl-disruption-plan). The rate limit keeps the run alive through the fault: an unthrottled run can finish before the fault lands, and its [verdict](appendix-a-glossary.md#gl-verdict) then says nothing about the failure. [Data Integrity Verification](08-data-integrity.md#integrity-under-chaos) gives the payments file, its sizing and how to read the verdict.
+An INTEGRITY run injects no [fault](appendix-a-glossary.md#gl-fault) by itself, so on a healthy cluster it answers only half of the durability question. `kates resilience run` pairs it with one fault injected while it produces. That pairing is a [resilience run](appendix-a-glossary.md#gl-resilience-run), one of the two ways Kates runs a [chaos experiment](appendix-a-glossary.md#gl-chaos-experiment); the other is a [disruption plan](appendix-a-glossary.md#gl-disruption-plan). The rate limit keeps the run alive through the fault: an unthrottled run can finish before the fault lands, and its [verdict](appendix-a-glossary.md#gl-verdict) then says nothing about the failure. [Data Integrity Verification](08-data-integrity.md#integrity-under-chaos) gives the payments file, its sizing and how to read the verdict.
 
 ## Flags and Spec Keys
 
@@ -425,7 +425,7 @@ A run's settings have two spellings: the flags of `kates test create` and the `s
 
 ## Summary
 
-- Every test type answers one question — choose by the question you need answered, not by the settings you want to change.
+- Every test type answers one question, so choose by the question you need answered, not by the settings you want to change.
 - LOAD sets the baseline; STRESS shows how the cluster degrades toward the ceiling, and CAPACITY measures the ceiling itself.
 - A producer row times send to acknowledgment, a consumer row measures no latency, and ROUND_TRIP times send to receipt.
 - Both backends start the same tasks, but only the native backend measures the tail and runs INTEGRITY.
