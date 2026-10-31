@@ -342,6 +342,8 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "chore(krew): kates ${TAG} [skip ci]"
+            # update-charts in the image workflows may have pushed to main since the checkout.
+            git pull --rebase
             git push
           fi
 
