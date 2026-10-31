@@ -209,13 +209,15 @@ public class TrendService {
             List<TrendResponse.DataPoint> points, double baseline, String metric) {
         if (baseline == 0) return List.of();
 
-        boolean isLatencyMetric = metric.toLowerCase().contains("latency");
+        // Latency and the error rate get worse as they rise, throughput as it falls.
+        String m = metric.toLowerCase();
+        boolean higherIsWorse = m.contains("latency") || m.equals("errorrate");
         double threshold = 0.20;
 
         List<TrendResponse.Regression> regressions = new ArrayList<>();
         for (TrendResponse.DataPoint point : points) {
             double deviation = (point.value() - baseline) / baseline;
-            boolean isRegression = isLatencyMetric ? deviation > threshold : deviation < -threshold;
+            boolean isRegression = higherIsWorse ? deviation > threshold : deviation < -threshold;
 
             if (isRegression) {
                 regressions.add(new TrendResponse.Regression(

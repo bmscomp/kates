@@ -94,6 +94,25 @@ class TrendServiceTest {
     }
 
     @Test
+    void aRisingErrorRateIsTheRegression() {
+        save(TestType.LOAD, TestResult.TaskStatus.DONE, daysAgo(4), withErrors(1, 4));
+        save(TestType.LOAD, TestResult.TaskStatus.DONE, daysAgo(3), withErrors(1, 4));
+        TestRun worse = save(TestType.LOAD, TestResult.TaskStatus.DONE, daysAgo(2), withErrors(3, 4));
+        save(TestType.LOAD, TestResult.TaskStatus.DONE, daysAgo(1), withErrors(0, 4));
+
+        TrendResponse errors = trendService.computeTrend(TestType.LOAD, "errorRate", 30, 5);
+
+        assertEquals(List.of(0.25, 0.25, 0.75, 0.0), values(errors.dataPoints()));
+        // 0.75 against a 0.3125 baseline is the regression. The error-free run
+        // used to be flagged instead, read as throughput falling.
+        assertEquals(
+                List.of(worse.getId()),
+                errors.regressions().stream()
+                        .map(TrendResponse.Regression::runId)
+                        .toList());
+    }
+
+    @Test
     void phaseTrendsReadEachPhasesOwnResults() {
         TestRun run = save(
                 TestType.LOAD,
@@ -206,6 +225,17 @@ class TrendServiceTest {
                 .withP99LatencyMs(p99Ms)
                 .withMaxLatencyMs(p99Ms * 1.5)
                 .withPhaseName(phase);
+    }
+
+    /** {@code tasks} tasks, the first {@code failed} of them with an error. */
+    private static TestResult[] withErrors(int failed, int tasks) {
+        TestResult[] results = new TestResult[tasks];
+        for (int i = 0; i < tasks; i++) {
+            TestResult task = task("p" + i, null, 10_000, 1_000, 40);
+            results[i] =
+                    i < failed ? task.withStatus(TestResult.TaskStatus.FAILED).withError("broker unreachable") : task;
+        }
+        return results;
     }
 
     private static Instant daysAgo(int days) {

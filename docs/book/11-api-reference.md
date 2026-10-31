@@ -1032,7 +1032,7 @@ An unknown `id` gets `404 Not Found`. The `node-maintenance` scenario is listed,
 
 ### Trend Analysis
 
-A trend follows one metric across a test type's `DONE` runs over a number of days, compares each run with a baseline averaged over the most recent of them, and flags regressions; `kates trend` charts the same data. A `FAILED` run is left out, because its numbers stop wherever it failed, and so is a run still in flight.
+A trend follows one metric across a test type's `DONE` runs over a number of days, compares each run with a baseline averaged over the most recent of them, and flags regressions; `kates trend` charts the same data. A run is a regression when it is more than 20% off the baseline in the bad direction: above it for a latency or the error rate, below it for throughput. A `FAILED` run is left out, because its numbers stop wherever it failed, and so is a run still in flight.
 
 #### GET /api/trends
 
