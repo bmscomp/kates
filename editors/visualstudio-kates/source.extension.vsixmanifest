@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
+  <Metadata>
+    <Identity Id="Kates.VisualStudio.7b3e9d20-5e1a-4c3f-9a21-8d0e4b1c5f9a" Version="1.0.0" Language="en-US" Publisher="Kates" />
+    <DisplayName>Kates YAML Studio for Visual Studio</DisplayName>
+    <Description xml:space="preserve">Auto-completion, syntax &amp; semantic highlighting, unknown-attribute &amp; cross-field error detection, and quick-fixes for Kates performance tests, flows, resilience chaos specs, disruption playbooks, and KafkaReference compliance files.</Description>
+    <Tags>kafka;strimzi;kates;yaml;chaos;compliance;lsp</Tags>
+  </Metadata>
+  <Installation>
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0, 18.0)" />
+    <InstallationTarget Id="Microsoft.VisualStudio.Pro" Version="[17.0, 18.0)" />
+    <InstallationTarget Id="Microsoft.VisualStudio.Enterprise" Version="[17.0, 18.0)" />
+  </Installation>
+  <Dependencies>
+    <Dependency Id="Microsoft.Framework.NDP" DisplayName="Microsoft .NET Framework" d:Source="Manual" Version="[4.8,)" />
+  </Dependencies>
+  <Prerequisites>
+    <Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor" Version="[17.0,18.0)" DisplayName="Visual Studio core editor" />
+  </Prerequisites>
+  <Assets>
+    <Asset Type="Microsoft.VisualStudio.VsPackage" d:Source="Project" d:ProjectName="%CurrentProject%" Path="|%CurrentProject%;PkgdefProjectOutputGroup|" />
+    <Asset Type="Microsoft.VisualStudio.MefComponent" d:Source="Project" d:ProjectName="%CurrentProject%" Path="|%CurrentProject%|" />
+    <Asset Type="Microsoft.VisualStudio.VsPackage" Path="pkgdef\kates.pkgdef" />
+  </Assets>
+</PackageManifest>

@@ -1,0 +1,302 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/bmscomp/kates/main/schemas/scenario.v1.schema.json",
+  "title": "Kates Test Scenario File v1",
+  "description": "Declarative scenario file for kates test apply and kates test lint. Holds either a scenarios list or a single scenario at the top level.",
+  "type": "object",
+  "additionalProperties": false,
+  "anyOf": [
+    { "required": ["scenarios"] },
+    { "required": ["type"] }
+  ],
+  "dependentSchemas": {
+    "scenarios": {
+      "properties": {
+        "scenarios": true
+      },
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "scenarios": {
+      "description": "List of test scenarios executed sequentially by kates test apply.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/scenarioItem" }
+    },
+    "name": {
+      "description": "Human-readable name for a single top-level scenario.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "type": {
+      "description": "The benchmark or validation test type to run.",
+      "$ref": "#/$defs/testType"
+    },
+    "backend": {
+      "description": "Execution engine backend: native (Kates producer/consumer engine) or trogdor.",
+      "$ref": "#/$defs/backendType"
+    },
+    "spec": {
+      "description": "Scenario workload and Kafka client/topic parameters. Uses scenario field names (records, parallelProducers, recordSizeBytes, durationSeconds, targetThroughput).",
+      "$ref": "#/$defs/scenarioSpec"
+    },
+    "validate": {
+      "description": "SLA gates checked by kates test apply --wait after the scenario finishes.",
+      "$ref": "#/$defs/validationSpec"
+    }
+  },
+  "$defs": {
+    "testType": {
+      "type": "string",
+      "enum": [
+        "LOAD",
+        "STRESS",
+        "SPIKE",
+        "ENDURANCE",
+        "VOLUME",
+        "CAPACITY",
+        "ROUND_TRIP",
+        "INTEGRITY",
+        "TUNE_REPLICATION",
+        "TUNE_ACKS",
+        "TUNE_BATCHING",
+        "TUNE_COMPRESSION",
+        "TUNE_PARTITIONS",
+        "INTEGRATION_CDC"
+      ]
+    },
+    "backendType": {
+      "type": "string",
+      "enum": ["native", "trogdor"],
+      "default": "native"
+    },
+    "scenarioItem": {
+      "description": "A single test scenario with workload parameters and optional SLA validation gates.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "name": {
+          "description": "Display name of the scenario shown in progress output and JUnit reports.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "type": {
+          "description": "The benchmark or validation test type to run.",
+          "$ref": "#/$defs/testType"
+        },
+        "backend": {
+          "description": "Execution engine backend: native (default) or trogdor.",
+          "$ref": "#/$defs/backendType"
+        },
+        "spec": {
+          "description": "Scenario workload and Kafka client/topic parameters.",
+          "$ref": "#/$defs/scenarioSpec"
+        },
+        "validate": {
+          "description": "SLA gates checked by kates test apply --wait.",
+          "$ref": "#/$defs/validationSpec"
+        }
+      }
+    },
+    "scenarioSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "records": {
+          "description": "Number of records each producer task sends (1..100,000,000). Note: use 'records' in scenario files, not 'numRecords'.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000000,
+          "default": 50000
+        },
+        "parallelProducers": {
+          "description": "Number of concurrent producer tasks (1..64). Note: use 'parallelProducers' in scenario files, not 'numProducers'.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 2
+        },
+        "recordSizeBytes": {
+          "description": "Payload size of each record in bytes (1..10,485,760). Note: use 'recordSizeBytes' in scenario files, not 'recordSize'.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10485760,
+          "default": 512
+        },
+        "durationSeconds": {
+          "description": "Maximum test duration in seconds (0 for record-count bounded, or 1..86,400). Converted to durationMs (x1000) when sent to the API.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400,
+          "default": 0
+        },
+        "targetThroughput": {
+          "description": "Target producer rate in records/sec per producer, or -1 for unthrottled maximum throughput. SPIKE and CAPACITY require -1.",
+          "type": "integer",
+          "minimum": -1,
+          "not": { "const": 0 },
+          "default": -1
+        },
+        "topic": {
+          "description": "Kafka topic name (1..249 ASCII alphanumeric, '.', '_', or '-' chars). Auto-generated if omitted.",
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9._-]{1,249}$"
+        },
+        "acks": {
+          "description": "Producer acknowledgment mode: \"all\" (or \"-1\"), \"1\", or \"0\". Must be \"all\" or \"-1\" when enableIdempotence or enableTransactions is true.",
+          "oneOf": [
+            { "type": "string", "enum": ["all", "-1", "0", "1"] },
+            { "type": "integer", "enum": [-1, 0, 1] }
+          ],
+          "default": "all"
+        },
+        "batchSize": {
+          "description": "Producer batch.size in bytes (1..16,777,216).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216,
+          "default": 16384
+        },
+        "lingerMs": {
+          "description": "Producer linger.ms in milliseconds (0..60,000).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "default": 5
+        },
+        "compressionType": {
+          "description": "Producer compression codec: none, gzip, snappy, lz4, or zstd.",
+          "type": "string",
+          "enum": ["none", "gzip", "snappy", "lz4", "zstd"],
+          "default": "none"
+        },
+        "numConsumers": {
+          "description": "Number of concurrent consumer threads (1..64).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 1
+        },
+        "replicationFactor": {
+          "description": "Topic replication factor (1..10). Must be >= minInsyncReplicas.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1
+        },
+        "partitions": {
+          "description": "Number of topic partitions (1..1,000).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 6
+        },
+        "minInsyncReplicas": {
+          "description": "Topic min.insync.replicas (1..10). Must be <= replicationFactor.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1
+        },
+        "consumerGroup": {
+          "description": "Consumer group ID (1..255 printable ASCII chars). Applicable only to LOAD, ENDURANCE, and INTEGRITY tests.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[ -~]{1,255}$"
+        },
+        "fetchMinBytes": {
+          "description": "Consumer fetch.min.bytes (1..16,777,216). Applicable only to LOAD, ENDURANCE, and INTEGRITY tests.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216,
+          "default": 1
+        },
+        "fetchMaxWaitMs": {
+          "description": "Consumer fetch.max.wait.ms (1..60,000). Applicable only to LOAD, ENDURANCE, and INTEGRITY tests.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000,
+          "default": 500
+        },
+        "enableIdempotence": {
+          "description": "Enable Kafka producer idempotence (enable.idempotence=true). Requires acks: \"all\".",
+          "type": "boolean",
+          "default": false
+        },
+        "enableTransactions": {
+          "description": "Enable transactional producer/consumer (EOS). Requires acks: \"all\", enableIdempotence: true, and backend: native.",
+          "type": "boolean",
+          "default": false
+        },
+        "enableCrc": {
+          "description": "Enable payload CRC32 verification. Applicable only to INTEGRITY tests.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "validationSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxP99LatencyMs": {
+          "description": "Maximum allowed p99 producer latency in milliseconds (> 0; setting 0 turns the gate off).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxAvgLatencyMs": {
+          "description": "Maximum allowed average producer latency in milliseconds (> 0; setting 0 turns the gate off).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "minThroughputRecPerSec": {
+          "description": "Minimum required aggregate producer throughput in records/second (> 0; setting 0 turns the gate off).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxErrorRate": {
+          "description": "Maximum error rate (0.0..1.0). Note: kates test apply --wait does not check maxErrorRate; use maxDataLossPercent on INTEGRITY runs.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "maxDataLossPercent": {
+          "description": "Maximum allowed data loss percentage (0.0..100.0; 0 enforces zero data loss on INTEGRITY runs).",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "maxRtoMs": {
+          "description": "Maximum allowed Recovery Time Objective (RTO) in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxRpoMs": {
+          "description": "Maximum allowed Recovery Point Objective (RPO) in milliseconds (> 0).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxOutOfOrder": {
+          "description": "Maximum allowed out-of-order message count (>= 0; 0 enforces strict ordering on INTEGRITY runs).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxCrcFailures": {
+          "description": "Maximum allowed CRC payload mismatch count (>= 0; 0 enforces zero corruption on INTEGRITY runs).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "perTask": {
+          "description": "When true, evaluates SLA gates against each individual task row rather than the run aggregate.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    }
+  }
+}

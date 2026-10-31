@@ -364,6 +364,10 @@ A Kubernetes policy engine that runs as an admission webhook and mutates, valida
 
 Kates's terminal UI for tuning by iteration: each iteration is a full test run with its own ID, and sweeps, warm-up runs and median mode each cost as many runs. See [Lab — Interactive Performance Tuning](10b-lab.md#iteration-workflow).
 
+### Language Server (`kates lsp`) {#gl-lsp}
+
+Kates's built-in Language Server Protocol (LSP 3.17) server over stdio, which validates all six Kates YAML dialects (`scenario`, `test-request`, `flow`, `resilience`, `disruption`, and `kafkareference`) in real time and powers completion, hover documentation, inlay hints, and quick-fixes in VS Code and Visual Studio 2022. See [IDE Extensions & Language Server](appendix-ide-extensions.md).
+
 ### Leader Election {#gl-leader-election}
 
 The controller choosing a new leader for a partition, from its ISR, when the old leader's broker fails or is fenced. Until a producer learns the new leader, its writes to the partition fail and are retried; in a disruption plan, a `LEADER_ELECTION` step with `targetTopic` kills the pod of that partition's leader to force one. See [The Cluster Under Test](03-cluster.md#what-happens-during-a-broker-failure).

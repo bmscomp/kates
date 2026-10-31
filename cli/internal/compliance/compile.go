@@ -312,6 +312,36 @@ func isRuleID(r rule) bool {
 	return !strings.Contains(r.id, "].")
 }
 
+// DeclaredRule is a waiver-targetable rule declared in spec, with its 1-based
+// source location for editor completion, go-to-definition and semantic tokens.
+type DeclaredRule struct {
+	ID   string
+	Kind string
+	Line int
+	Col  int
+}
+
+// DeclaredRules returns all waiver-targetable rules declared in a
+// KafkaReference document root.
+func DeclaredRules(root *yaml.Node) []DeclaredRule {
+	spec := get(root, "spec")
+	if spec == nil || spec.Kind != yaml.MappingNode {
+		return nil
+	}
+	var out []DeclaredRule
+	for _, r := range declaredRules(spec) {
+		if isRuleID(r) && r.node != nil {
+			out = append(out, DeclaredRule{
+				ID:   r.id,
+				Kind: r.kind,
+				Line: r.node.Line,
+				Col:  r.node.Column,
+			})
+		}
+	}
+	return out
+}
+
 func listenerNames(spec *yaml.Node) []Diagnostic {
 	req := lookup(spec, "kafka.listeners.require")
 	if req == nil || req.Kind != yaml.SequenceNode {

@@ -366,6 +366,8 @@ A warning is a gate that checks nothing: `maxErrorRate`, which no run reports (`
 
 Both readers of a scenario file, the YAML one and the JSON one, drop a key they don't know. Without these checks, a gate named `maxP99Latency` would never be checked, and a `spec` key named `record` would leave the run at its type's default records, without a word. A `spec` key takes the scenario file's name, such as `records` or `durationSeconds`, not the Kates API's `numRecords` or `durationMs`, and lint names the right key for those.
 
+In Visual Studio Code and Visual Studio 2022, the [Language Server (`kates lsp`)](appendix-a-glossary.md#gl-lsp) runs the same checks as you type, offers one-click quick-fixes for misspelled keys, and displays inline hints for per-type defaults and estimated disk footprint; see [IDE Extensions & Language Server](appendix-ide-extensions.md).
+
 ::: {.callout-tip title="Try it: what does lint say about a misspelled gate?"}
 Write a one-scenario file whose gate is misspelled, then lint it:
 

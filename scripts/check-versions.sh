@@ -483,10 +483,10 @@ mapfile -t cluster_node_versions < <(
   grep -Eo 'kindest/node:v[0-9]+\.[0-9]+\.[0-9]+' "$CLUSTER_YAML" | sed 's|kindest/node:||' | sort -u
 )
 
-# "| **Kind** *(optional)* | 0.22+ |" — a floor for readers, not a pin.
+# "| **Kind** *(optional)* | 0.22+ |" — an optional floor for readers, not a pin.
 docs_kind_floor=$(
   grep -E '^\|[[:space:]]*\*\*Kind\*\*' "$INSTALL_GUIDE" \
-    | sed -E 's/.*\|[[:space:]]*([0-9]+\.[0-9]+)\+[[:space:]]*\|.*/\1/' | head -1
+    | sed -E 's/.*\|[[:space:]]*([0-9]+\.[0-9]+)\+[[:space:]]*\|.*/\1/' | head -1 || true
 )
 
 echo
@@ -495,14 +495,15 @@ printf '  %-46s %s\n' "versions.env KIND_VERSION:"           "${env_kind_version
 printf '  %-46s %s\n' "versions.env KINDEST_NODE_VERSION:"   "${env_node_version:-<unset>}"
 printf '  %-46s %s\n' "versions.env KUBECTL_VERSION:"        "${env_kubectl_version:-<unset>}"
 printf '  %-46s %s\n' "${CLUSTER_YAML} kindest/node tags:"   "${cluster_node_versions[*]:-<none found>}"
-printf '  %-46s %s\n' "${INSTALL_GUIDE} Kind floor:"         "${docs_kind_floor:-<unset>}+"
+if [[ -n "$docs_kind_floor" ]]; then
+  printf '  %-46s %s\n' "${INSTALL_GUIDE} Kind floor:"       "${docs_kind_floor}+"
+fi
 echo
 
 for pair in \
   "env_kind_version:versions.env KIND_VERSION" \
   "env_node_version:versions.env KINDEST_NODE_VERSION" \
-  "env_kubectl_version:versions.env KUBECTL_VERSION" \
-  "docs_kind_floor:${INSTALL_GUIDE} Kind floor"; do
+  "env_kubectl_version:versions.env KUBECTL_VERSION"; do
   var="${pair%%:*}"
   label="${pair#*:}"
   if [[ -z "${!var}" ]]; then

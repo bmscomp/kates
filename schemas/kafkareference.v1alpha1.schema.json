@@ -1,0 +1,576 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/bmscomp/kates/main/cli/examples/conformity/kafkareference.v1alpha1.schema.json",
+  "title": "Kates KafkaReference v1alpha1",
+  "description": "A reference architecture for a Kafka platform on Kubernetes. kates compliance check reports every declared constraint the live cluster does not meet.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "description": "The compliance schema version. Must be conformity.kates.io/v1alpha1.",
+      "const": "conformity.kates.io/v1alpha1"
+    },
+    "kind": {
+      "description": "The document kind. Must be KafkaReference.",
+      "const": "KafkaReference"
+    },
+    "metadata": {
+      "description": "Reference metadata identifying this compliance profile.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "description": "Unique DNS-label name for this reference architecture (e.g., prod-3az, minimal).",
+          "type": "string",
+          "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+        },
+        "description": {
+          "description": "Human-readable summary of the reference architecture and its target environment.",
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "spec": {
+      "description": "Declared architectural, sizing, placement, durability, security, and monitoring rules.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "target": {
+          "description": "Optional cluster identity pins. When set, kates compliance check verifies it is inspecting the intended cluster.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "platform": {
+              "description": "Kubernetes operator platform managing the Kafka cluster.",
+              "enum": ["strimzi"],
+              "default": "strimzi"
+            },
+            "namespace": {
+              "description": "Expected Kubernetes namespace of the Kafka custom resource.",
+              "$ref": "#/$defs/dnsLabel"
+            },
+            "name": {
+              "description": "Expected metadata.name of the Strimzi Kafka custom resource.",
+              "$ref": "#/$defs/dnsLabel"
+            },
+            "clusterId": {
+              "description": "Expected 22-character base64url Kafka cluster ID reported by status.clusterId.",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{22}$"
+            }
+          }
+        },
+        "zoneLabel": {
+          "description": "Kubernetes node label used to determine availability zone spread and skew.",
+          "type": "string",
+          "default": "topology.kubernetes.io/zone",
+          "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
+        },
+        "versions": {
+          "description": "Version constraints for Kubernetes, the Strimzi operator, and Kafka. Always quote version strings (e.g., \"4.2.0\") so YAML does not parse 4.10 as 4.1.",
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "kubernetes": {
+              "description": "Kubernetes API server version constraint (e.g., {min: \"1.29\"}).",
+              "$ref": "#/$defs/versionConstraint"
+            },
+            "strimzi": {
+              "description": "Strimzi Cluster Operator version constraint (e.g., {min: \"0.45.0\"}).",
+              "$ref": "#/$defs/versionConstraint"
+            },
+            "kafka": {
+              "description": "Apache Kafka broker version constraint (e.g., {min: \"4.0.0\"}).",
+              "$ref": "#/$defs/versionConstraint"
+            }
+          }
+        },
+        "controllers": {
+          "description": "Sizing, storage, and topology placement constraints for KRaft controller pods.",
+          "allOf": [{ "$ref": "#/$defs/role" }],
+          "properties": {
+            "dedicated": {
+              "description": "Whether controllers run in dedicated controller-only node pools without the broker role.",
+              "$ref": "#/$defs/boolConstraint"
+            }
+          },
+          "unevaluatedProperties": false
+        },
+        "brokers": {
+          "description": "Sizing, storage, and topology placement constraints for Kafka broker pods.",
+          "allOf": [{ "$ref": "#/$defs/role" }],
+          "unevaluatedProperties": false
+        },
+        "kafka": {
+          "description": "Kafka-level rack awareness, authorization, listener security, and broker configuration rules.",
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "source": {
+              "description": "Where config and rackAwareness read from: cr, the Kafka CR (no Kafka access), or brokers, the Kafka Admin API (each broker's effective values). A setting, not a rule.",
+              "enum": ["cr", "brokers"],
+              "default": "cr"
+            },
+            "rackAwareness": {
+              "description": "Whether broker rack awareness (spec.kafka.rack or broker.rack) is enabled.",
+              "$ref": "#/$defs/boolConstraint"
+            },
+            "authorization": {
+              "description": "Required Kafka authorization mechanism (none, simple, opa, keycloak, or custom).",
+              "$ref": "#/$defs/authorizationConstraint"
+            },
+            "listeners": {
+              "description": "Constraints on Kafka listeners declared in spec.kafka.listeners.",
+              "type": "object",
+              "additionalProperties": false,
+              "minProperties": 1,
+              "properties": {
+                "require": {
+                  "description": "Named listeners that must exist on the cluster with the specified type, port, TLS, and authentication.",
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 50,
+                  "items": { "$ref": "#/$defs/requiredListener" }
+                },
+                "every": {
+                  "description": "Universal constraints that every declared Kafka listener must satisfy.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "minProperties": 1,
+                  "properties": {
+                    "type": {
+                      "description": "Allowed listener exposure types across all listeners.",
+                      "$ref": "#/$defs/listenerTypeConstraint"
+                    },
+                    "tls": {
+                      "description": "Whether TLS encryption must be enabled on every listener.",
+                      "$ref": "#/$defs/boolConstraint"
+                    },
+                    "auth": {
+                      "description": "Allowed authentication mechanisms across all listeners.",
+                      "$ref": "#/$defs/authConstraint"
+                    }
+                  }
+                }
+              }
+            },
+            "config": {
+              "description": "Broker config name to constraint. With source cr, compared with what the Kafka CR sets, and a key it leaves out fails; with brokers, with the effective value on every broker.",
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 200,
+              "propertyNames": { "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$", "maxLength": 128 },
+              "additionalProperties": { "$ref": "#/$defs/configConstraint" }
+            }
+          }
+        },
+        "topics": {
+          "description": "Each topic's own durability, internal topics included. Read through the Kafka Admin API whatever kafka.source says, so declaring it opens a Kafka connection.",
+          "type": "object",
+          "additionalProperties": false,
+          "anyOf": [{ "required": ["replicationFactor"] }, { "required": ["minInsyncReplicas"] }],
+          "properties": {
+            "replicationFactor": {
+              "description": "The smallest replica set across the topic's partitions.",
+              "$ref": "#/$defs/intConstraint"
+            },
+            "minInsyncReplicas": {
+              "description": "The topic's effective min.insync.replicas: its own, or the broker default.",
+              "$ref": "#/$defs/intConstraint"
+            },
+            "exclude": {
+              "description": "Topic-name prefixes left out, such as __ for Kafka's internal topics. Prefixes, not patterns.",
+              "type": "array",
+              "maxItems": 50,
+              "items": { "type": "string", "pattern": "^[a-zA-Z0-9._-]{1,249}$" }
+            }
+          }
+        },
+        "monitoring": {
+          "description": "Observability and Prometheus metrics export rules.",
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "metrics": {
+              "description": "Required metrics reporter configuration (none, jmxPrometheusExporter, or strimziMetricsReporter).",
+              "$ref": "#/$defs/metricsConstraint"
+            },
+            "kafkaExporter": {
+              "description": "Whether the Strimzi Kafka Exporter deployment is enabled.",
+              "$ref": "#/$defs/boolConstraint"
+            },
+            "podMonitor": {
+              "description": "Whether Prometheus Operator PodMonitor resources exist for the cluster.",
+              "$ref": "#/$defs/boolConstraint"
+            }
+          }
+        },
+        "waivers": {
+          "description": "Time-bounded exceptions for declared rules that are temporarily allowed to fail without failing the compliance check.",
+          "type": "array",
+          "maxItems": 200,
+          "items": { "$ref": "#/$defs/waiver" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "dnsLabel": {
+      "description": "A lowercase RFC 1123 DNS label (1..63 lowercase alphanumeric characters or hyphens).",
+      "type": "string",
+      "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+    },
+    "severity": {
+      "description": "Rule violation severity: fail (exits 1) or warn (reported without failing the check).",
+      "enum": ["fail", "warn"],
+      "default": "fail"
+    },
+    "operatorShape": {
+      "description": "equals and oneOf stand alone; min and max combine. A map without an operator is refused.",
+      "anyOf": [
+        { "required": ["equals"] },
+        { "required": ["min"] },
+        { "required": ["max"] },
+        { "required": ["oneOf"] }
+      ],
+      "dependentSchemas": {
+        "equals": { "not": { "anyOf": [{ "required": ["min"] }, { "required": ["max"] }, { "required": ["oneOf"] }] } },
+        "oneOf": { "not": { "anyOf": [{ "required": ["min"] }, { "required": ["max"] }] } }
+      }
+    },
+    "count": {
+      "description": "A non-negative integer count between 0 and 10000.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "intConstraint": {
+      "description": "An integer constraint: either a bare integer for exact equality, or a map with equals, min, max, or oneOf and optional severity.",
+      "oneOf": [
+        { "$ref": "#/$defs/count" },
+        {
+          "type": "object",
+          "allOf": [{ "$ref": "#/$defs/operatorShape" }],
+          "additionalProperties": false,
+          "properties": {
+            "equals": { "description": "Exact integer value required.", "$ref": "#/$defs/count" },
+            "min": { "description": "Minimum inclusive integer value.", "$ref": "#/$defs/count" },
+            "max": { "description": "Maximum inclusive integer value.", "$ref": "#/$defs/count" },
+            "oneOf": { "description": "List of allowed integer values.", "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/count" } },
+            "severity": { "$ref": "#/$defs/severity" }
+          }
+        }
+      ]
+    },
+    "port": {
+      "description": "A TCP port number between 1 and 65535.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "portConstraint": {
+      "description": "A TCP port constraint: bare port number or map with equals, min, max, or oneOf.",
+      "oneOf": [
+        { "$ref": "#/$defs/port" },
+        {
+          "type": "object",
+          "allOf": [{ "$ref": "#/$defs/operatorShape" }],
+          "additionalProperties": false,
+          "properties": {
+            "equals": { "description": "Exact TCP port number.", "$ref": "#/$defs/port" },
+            "min": { "description": "Minimum inclusive TCP port number.", "$ref": "#/$defs/port" },
+            "max": { "description": "Maximum inclusive TCP port number.", "$ref": "#/$defs/port" },
+            "oneOf": { "description": "Allowed TCP port numbers.", "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/port" } },
+            "severity": { "$ref": "#/$defs/severity" }
+          }
+        }
+      ]
+    },
+    "quantity": {
+      "description": "A Kubernetes quantity: 500m, 2, 8Gi, 1.5T.",
+      "oneOf": [
+        { "type": "number", "minimum": 0 },
+        { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$" }
+      ]
+    },
+    "quantityConstraint": {
+      "description": "A Kubernetes resource quantity constraint (e.g., \"8Gi\", {min: \"4Gi\", max: \"32Gi\"}).",
+      "oneOf": [
+        { "$ref": "#/$defs/quantity" },
+        {
+          "type": "object",
+          "allOf": [{ "$ref": "#/$defs/operatorShape" }],
+          "additionalProperties": false,
+          "properties": {
+            "equals": { "description": "Exact resource quantity.", "$ref": "#/$defs/quantity" },
+            "min": { "description": "Minimum inclusive resource quantity.", "$ref": "#/$defs/quantity" },
+            "max": { "description": "Maximum inclusive resource quantity.", "$ref": "#/$defs/quantity" },
+            "oneOf": { "description": "Allowed resource quantities.", "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/quantity" } },
+            "severity": { "$ref": "#/$defs/severity" }
+          }
+        }
+      ]
+    },
+    "version": {
+      "description": "A dotted version, as a string. Missing parts count as 0: 4.2 is 4.2.0.",
+      "type": "string",
+      "pattern": "^v?[0-9]+(\\.[0-9]+){0,3}$"
+    },
+    "versionConstraint": {
+      "description": "A dotted version constraint with quoted version strings (e.g., {min: \"4.0.0\"}).",
+      "oneOf": [
+        { "$ref": "#/$defs/version" },
+        {
+          "type": "object",
+          "allOf": [{ "$ref": "#/$defs/operatorShape" }],
+          "additionalProperties": false,
+          "properties": {
+            "equals": { "description": "Exact version string required.", "$ref": "#/$defs/version" },
+            "min": { "description": "Minimum inclusive version string.", "$ref": "#/$defs/version" },
+            "max": { "description": "Maximum inclusive version string.", "$ref": "#/$defs/version" },
+            "oneOf": { "description": "Allowed version strings.", "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/version" } },
+            "severity": { "$ref": "#/$defs/severity" }
+          }
+        }
+      ]
+    },
+    "stringConstraint": {
+      "description": "An exact string or set of allowed strings.",
+      "oneOf": [
+        { "type": "string", "minLength": 1, "maxLength": 253 },
+        {
+          "type": "object",
+          "allOf": [{ "$ref": "#/$defs/operatorShape" }],
+          "additionalProperties": false,
+          "properties": {
+            "equals": { "description": "Exact string value.", "type": "string", "minLength": 1, "maxLength": 253 },
+            "oneOf": { "description": "Allowed string values.", "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": "string", "minLength": 1, "maxLength": 253 } },
+            "severity": { "$ref": "#/$defs/severity" }
+          }
+        }
+      ]
+    },
+    "boolConstraint": {
+      "description": "A boolean constraint: bare true/false or {equals: true/false, severity: warn}.",
+      "oneOf": [
+        { "type": "boolean" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["equals"],
+          "properties": {
+            "equals": { "description": "Expected boolean value.", "type": "boolean" },
+            "severity": { "$ref": "#/$defs/severity" }
+          }
+        }
+      ]
+    },
+    "storageType": {
+      "description": "Strimzi storage topology type: ephemeral, persistent-claim, or jbod.",
+      "enum": ["ephemeral", "persistent-claim", "jbod"]
+    },
+    "antiAffinityLevel": {
+      "description": "Pod anti-affinity enforcement level: required (hard), preferred (soft), or none.",
+      "enum": ["required", "preferred", "none"]
+    },
+    "authType": {
+      "description": "Kafka listener client authentication mechanism.",
+      "enum": ["none", "tls", "scram-sha-512", "oauth", "custom"]
+    },
+    "authorizationType": {
+      "description": "Kafka broker authorization type.",
+      "enum": ["none", "simple", "opa", "keycloak", "custom"]
+    },
+    "listenerType": {
+      "description": "Strimzi listener exposure type.",
+      "enum": ["internal", "cluster-ip", "route", "loadbalancer", "nodeport", "ingress"]
+    },
+    "metricsType": {
+      "description": "Strimzi metrics exporter implementation.",
+      "enum": ["none", "jmxPrometheusExporter", "strimziMetricsReporter"]
+    },
+    "storageTypeConstraint": {
+      "description": "Constraint on storage type (ephemeral, persistent-claim, or jbod).",
+      "oneOf": [{ "$ref": "#/$defs/storageType" }, { "type": "object", "allOf": [{ "$ref": "#/$defs/operatorShape" }], "additionalProperties": false, "properties": { "equals": { "$ref": "#/$defs/storageType" }, "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/storageType" } }, "severity": { "$ref": "#/$defs/severity" } } }]
+    },
+    "antiAffinityConstraint": {
+      "description": "Constraint on pod anti-affinity (required, preferred, or none).",
+      "oneOf": [{ "$ref": "#/$defs/antiAffinityLevel" }, { "type": "object", "allOf": [{ "$ref": "#/$defs/operatorShape" }], "additionalProperties": false, "properties": { "equals": { "$ref": "#/$defs/antiAffinityLevel" }, "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/antiAffinityLevel" } }, "severity": { "$ref": "#/$defs/severity" } } }]
+    },
+    "authConstraint": {
+      "description": "Constraint on listener authentication (none, tls, scram-sha-512, oauth, or custom).",
+      "oneOf": [{ "$ref": "#/$defs/authType" }, { "type": "object", "allOf": [{ "$ref": "#/$defs/operatorShape" }], "additionalProperties": false, "properties": { "equals": { "$ref": "#/$defs/authType" }, "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/authType" } }, "severity": { "$ref": "#/$defs/severity" } } }]
+    },
+    "authorizationConstraint": {
+      "description": "Constraint on broker authorization (none, simple, opa, keycloak, or custom).",
+      "oneOf": [{ "$ref": "#/$defs/authorizationType" }, { "type": "object", "allOf": [{ "$ref": "#/$defs/operatorShape" }], "additionalProperties": false, "properties": { "equals": { "$ref": "#/$defs/authorizationType" }, "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/authorizationType" } }, "severity": { "$ref": "#/$defs/severity" } } }]
+    },
+    "listenerTypeConstraint": {
+      "description": "Constraint on listener exposure type (internal, cluster-ip, route, loadbalancer, nodeport, or ingress).",
+      "oneOf": [{ "$ref": "#/$defs/listenerType" }, { "type": "object", "allOf": [{ "$ref": "#/$defs/operatorShape" }], "additionalProperties": false, "properties": { "equals": { "$ref": "#/$defs/listenerType" }, "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/listenerType" } }, "severity": { "$ref": "#/$defs/severity" } } }]
+    },
+    "metricsConstraint": {
+      "description": "Constraint on metrics exporter (none, jmxPrometheusExporter, or strimziMetricsReporter).",
+      "oneOf": [{ "$ref": "#/$defs/metricsType" }, { "type": "object", "allOf": [{ "$ref": "#/$defs/operatorShape" }], "additionalProperties": false, "properties": { "equals": { "$ref": "#/$defs/metricsType" }, "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/metricsType" } }, "severity": { "$ref": "#/$defs/severity" } } }]
+    },
+    "configConstraint": {
+      "description": "min and max compare numbers; equals and oneOf compare the value's text, so false matches \"false\".",
+      "oneOf": [
+        { "type": ["string", "number", "boolean"] },
+        {
+          "type": "object",
+          "allOf": [{ "$ref": "#/$defs/operatorShape" }],
+          "additionalProperties": false,
+          "properties": {
+            "equals": { "description": "Exact config value (compared as text).", "type": ["string", "number", "boolean"] },
+            "min": { "description": "Minimum numeric config value.", "type": "number" },
+            "max": { "description": "Maximum numeric config value.", "type": "number" },
+            "oneOf": { "description": "Allowed config values.", "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": ["string", "number", "boolean"] } },
+            "severity": { "$ref": "#/$defs/severity" }
+          }
+        }
+      ]
+    },
+    "resources": {
+      "description": "Container CPU and memory resource constraints.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "cpu": {
+          "description": "CPU resource constraint (e.g., \"2\", \"500m\", {min: \"4\"}).",
+          "$ref": "#/$defs/quantityConstraint"
+        },
+        "memory": {
+          "description": "Memory resource constraint (e.g., \"8Gi\", {min: \"16Gi\", max: \"64Gi\"}).",
+          "$ref": "#/$defs/quantityConstraint"
+        }
+      }
+    },
+    "role": {
+      "description": "Common sizing, storage, and topology placement constraints for a node role (controllers or brokers).",
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "count": {
+          "description": "Number of pod replicas required for this role.",
+          "$ref": "#/$defs/intConstraint"
+        },
+        "requests": {
+          "description": "Kubernetes container resource requests per pod.",
+          "$ref": "#/$defs/resources"
+        },
+        "limits": {
+          "description": "Kubernetes container resource limits per pod.",
+          "$ref": "#/$defs/resources"
+        },
+        "storage": {
+          "description": "Persistent or ephemeral volume storage constraints per pod.",
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "type": {
+              "description": "Storage topology type (ephemeral, persistent-claim, or jbod).",
+              "$ref": "#/$defs/storageTypeConstraint"
+            },
+            "size": {
+              "description": "Total persistent storage capacity per pod (e.g., {min: \"500Gi\"}). Cannot be combined with type: ephemeral.",
+              "$ref": "#/$defs/quantityConstraint"
+            },
+            "class": {
+              "description": "Kubernetes StorageClass name required for PVCs. Cannot be combined with type: ephemeral.",
+              "$ref": "#/$defs/stringConstraint"
+            }
+          }
+        },
+        "zones": {
+          "description": "Number of distinct availability zones (by spec.zoneLabel) across which pods of this role must be spread.",
+          "$ref": "#/$defs/intConstraint"
+        },
+        "skew": {
+          "description": "Maximum allowed difference in pod count between the most-populated and least-populated availability zone (typically {max: 1}).",
+          "$ref": "#/$defs/intConstraint"
+        },
+        "perNode": {
+          "description": "Maximum number of pods of this role scheduled onto any single Kubernetes worker node (typically {max: 1} or 1).",
+          "$ref": "#/$defs/intConstraint"
+        },
+        "antiAffinity": {
+          "description": "Pod anti-affinity enforcement configured on the role's scheduling template (required, preferred, or none).",
+          "$ref": "#/$defs/antiAffinityConstraint"
+        }
+      }
+    },
+    "requiredListener": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One rule: the listener exists with every property listed. Its severity is the rule's, so its properties take no warn of their own.",
+      "required": ["name"],
+      "anyOf": [{ "required": ["type"] }, { "required": ["port"] }, { "required": ["tls"] }, { "required": ["auth"] }],
+      "properties": {
+        "name": {
+          "description": "Listener name in spec.kafka.listeners (1..11 lowercase alphanumeric chars, e.g., plain, tls, external).",
+          "type": "string",
+          "pattern": "^[a-z0-9]{1,11}$"
+        },
+        "type": {
+          "description": "Required listener exposure type.",
+          "allOf": [{ "$ref": "#/$defs/listenerTypeConstraint" }, { "$ref": "#/$defs/noWarn" }]
+        },
+        "port": {
+          "description": "Required listener TCP port number.",
+          "allOf": [{ "$ref": "#/$defs/portConstraint" }, { "$ref": "#/$defs/noWarn" }]
+        },
+        "tls": {
+          "description": "Whether TLS encryption must be enabled on this listener.",
+          "allOf": [{ "$ref": "#/$defs/boolConstraint" }, { "$ref": "#/$defs/noWarn" }]
+        },
+        "auth": {
+          "description": "Required client authentication mechanism on this listener.",
+          "allOf": [{ "$ref": "#/$defs/authConstraint" }, { "$ref": "#/$defs/noWarn" }]
+        },
+        "severity": { "$ref": "#/$defs/severity" }
+      }
+    },
+    "noWarn": { "not": { "type": "object", "required": ["severity"], "properties": { "severity": { "const": "warn" } } } },
+    "waiver": {
+      "description": "A time-bounded exception for a single declared rule ID.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule", "reason", "by", "until"],
+      "properties": {
+        "rule": {
+          "description": "Exact rule ID declared in this file (e.g., brokers.count, kafka.listeners[external], kafka.config[min.insync.replicas]).",
+          "type": "string",
+          "maxLength": 200,
+          "pattern": "^[a-z][A-Za-z]*(\\.[a-z][A-Za-z]*|\\[[^\\]]+\\])*$"
+        },
+        "reason": {
+          "description": "Explanation of why this rule is temporarily waived and the remediation plan.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "by": {
+          "description": "Owner, team, or ticket approving the waiver.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "until": {
+          "description": "Expiration date in YYYY-MM-DD format (max 365 days ahead).",
+          "type": "string",
+          "format": "date"
+        }
+      }
+    }
+  }
+}

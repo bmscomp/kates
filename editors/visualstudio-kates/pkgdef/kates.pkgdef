@@ -1,0 +1,5 @@
+[$RootKey$\TextMate\Repositories]
+"KatesYAML"="$PackageFolder$\Grammars"
+
+[$RootKey$\JSONSchema\Catalogs]
+"KatesSchemaCatalog"="$PackageFolder$\catalog.json"

@@ -56,6 +56,7 @@ var commandProfiles = map[string][]string{
 	"charts":        {"deploy"},
 	"kyverno":       {"security", "deploy"},
 	"lab":           {"performance"},
+	"lsp":           nil,
 	"mcp":           nil,
 	"migrate":       {"deploy", "integrity"},
 	"operators":     {"deploy"},

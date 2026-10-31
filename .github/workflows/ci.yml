@@ -37,6 +37,9 @@ jobs:
             code:
               - 'kates/**'
               - 'cli/**'
+              - 'schemas/**'
+              - 'editors/**'
+              - 'scripts/package-editors.sh'
               - 'images.env'
               - 'versions.env'
               - '.github/workflows/ci.yml'
@@ -679,10 +682,30 @@ jobs:
           GOMEMLIMIT: 2GiB
           GOGC: 50
 
+  editor-extensions:
+    name: Editor Extensions
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/load-versions
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Verify schema parity, compile TypeScript, and package extensions
+        run: |
+          ./scripts/package-editors.sh --check
+          ./scripts/package-editors.sh --package 1.0.0-ci
+
   gate:
     name: Gate · Backend
     if: always()
-    needs: [changes, build-and-test, dependency-scan, helm-lint, kyverno-policy-test, yaml-validation, go-tests]
+    needs: [changes, build-and-test, dependency-scan, helm-lint, kyverno-policy-test, yaml-validation, go-tests, editor-extensions]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

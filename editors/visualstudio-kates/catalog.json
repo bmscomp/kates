@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json.schemastore.org/schema-catalog.json",
+  "version": 1,
+  "schemas": [
+    {
+      "name": "Kates Scenario v1",
+      "description": "Kates CLI performance & integrity scenario specification (kates test apply)",
+      "fileMatch": [
+        "**/scenarios/*.yaml",
+        "**/perf-*.yaml",
+        "**/load-test.yaml",
+        "**/*.scenario.yaml"
+      ],
+      "url": "./Schemas/scenario.v1.schema.json"
+    },
+    {
+      "name": "Kates Test Request v1",
+      "description": "Kates CreateTestRequest & multi-phase TestScenario specification",
+      "fileMatch": [
+        "**/test-request*.yaml",
+        "**/*.test-request.yaml"
+      ],
+      "url": "./Schemas/test-request.v1.schema.json"
+    },
+    {
+      "name": "Kates Flow Pipeline v1",
+      "description": "Kates multi-step flow pipeline specification (kates flow run)",
+      "fileMatch": [
+        "**/flow-*.yaml",
+        "**/flows/*.yaml",
+        "**/*.flow.yaml"
+      ],
+      "url": "./Schemas/flow.v1.schema.json"
+    },
+    {
+      "name": "Kates Resilience Test v1",
+      "description": "Kates resilience chaos test specification (kates resilience run)",
+      "fileMatch": [
+        "**/resilience-*.yaml",
+        "**/*.resilience.yaml"
+      ],
+      "url": "./Schemas/resilience.v1.schema.json"
+    },
+    {
+      "name": "Kates Disruption Plan v1",
+      "description": "Kates multi-step disruption plan and playbook specification (kates disruption run)",
+      "fileMatch": [
+        "**/playbooks/*.yaml",
+        "**/disruption-*.yaml",
+        "**/*.disruption.yaml"
+      ],
+      "url": "./Schemas/disruption.v1.schema.json"
+    },
+    {
+      "name": "Kates KafkaReference v1alpha1",
+      "description": "Kates cluster compliance reference architecture (kates compliance check)",
+      "fileMatch": [
+        "**/conformity/*.yaml",
+        "**/compliance/*.yaml",
+        "**/*.kafkareference.yaml"
+      ],
+      "url": "./Schemas/kafkareference.v1alpha1.schema.json"
+    }
+  ]
+}

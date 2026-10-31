@@ -9,6 +9,7 @@ import (
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -41,7 +42,9 @@ var disruptionRunCmd = &cobra.Command{
 
 		var plan interface{}
 		if err := json.Unmarshal(data, &plan); err != nil {
-			return cmdErr("Invalid JSON: " + err.Error())
+			if yamlErr := yaml.Unmarshal(data, &plan); yamlErr != nil {
+				return cmdErr("Invalid JSON: " + err.Error())
+			}
 		}
 
 		if dryRunMode {

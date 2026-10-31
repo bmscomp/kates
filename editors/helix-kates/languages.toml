@@ -1,0 +1,24 @@
+# Helix editor configuration for Kates YAML dialects (`kates lsp --stdio` + yaml-language-server)
+# Copy into your workspace `.helix/languages.toml` or `~/.config/helix/languages.toml`.
+
+[language-server.kates-lsp]
+command = "kates"
+args = ["lsp", "--stdio"]
+
+[language-server.yaml-language-server.config.yaml]
+validation = true
+hover = true
+completion = true
+
+[language-server.yaml-language-server.config.yaml.schemas]
+"./schemas/scenario.v1.schema.json" = ["**/scenarios/*.yaml", "**/perf-*.yaml", "**/*.scenario.yaml"]
+"./schemas/test-request.v1.schema.json" = ["**/test-request*.yaml", "**/*.test-request.yaml"]
+"./schemas/flow.v1.schema.json" = ["**/flows/*.yaml", "**/flow-*.yaml", "**/*.flow.yaml"]
+"./schemas/resilience.v1.schema.json" = ["**/resilience-*.yaml", "**/*.resilience.yaml"]
+"./schemas/disruption.v1.schema.json" = ["**/playbooks/*.yaml", "**/disruption-*.yaml", "**/*.disruption.yaml"]
+"./schemas/kafkareference.v1alpha1.schema.json" = ["**/conformity/*.yaml", "**/compliance/*.yaml", "**/*.kafkareference.yaml"]
+
+[[language]]
+name = "yaml"
+language-servers = ["kates-lsp", "yaml-language-server"]
+auto-format = false
