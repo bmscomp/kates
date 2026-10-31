@@ -6,6 +6,7 @@ In this chapter you'll:
 
 - write a reference file and check `krafter` against it;
 - read a report and decide whether to fix the cluster, fix the file or record the gap;
+- install Kates to check a cluster where you aren't cluster admin;
 - run the check in a pipeline, where its exit code fails the build.
 
 ## Your First Reference
@@ -568,6 +569,93 @@ Read it from the top:
 2. The waived row still shows Expected `true` and Observed `false`, and the line under it gives the waiver: the rule's own status, FAIL, then the end date, the owner and the reason.
 3. The summary counts 24 rules, and the check exits 0.
 
+## Checking a Cluster You Don't Administer {#checking-without-cluster-admin}
+
+On a shared cluster, your account usually has the built-in `edit` role in a team namespace, and someone else runs Strimzi and the Kafka cluster. That is enough for a compliance check. Install the `kates` chart with `rbac.scope=namespace`, and it creates nothing cluster-scoped. The check then reads the Kafka namespace through one read-only Role, which the cluster's owner applies once. The steps use plain Helm and the published chart, so they work on any Kubernetes cluster: EKS, GKE, AKS, or one you run yourself. [Running Without Cluster Admin](12-deployment.md#running-without-cluster-admin) in the Deployment Guide covers the same install for performance and INTEGRITY tests too.
+
+The example installs Kates into the namespace `payments` and checks `krafter` in the namespace `streaming`. Wherever your cluster's names differ, use your own.
+
+### Step 1 — The Cluster's Owner Grants the Reads
+
+Ask whoever administers the Kafka cluster for two things. The first is a [KafkaUser](appendix-a-glossary.md#gl-kafkauser) for Kates, here `payments-kates`, and its password. Where the cluster enforces ACLs, the `topics` rules need Describe and DescribeConfigs on every topic, and `kafka.source: brokers` needs DescribeConfigs on the cluster. A topic the user can't describe isn't judged. The ACLs that tests need are listed in [Step 1](12-deployment.md#step-1--grant-the-teams-kates-access-to-kafka) of the Deployment Guide.
+
+The second is the Role. The owner renders it from your release name, namespace and values, so that it binds your ServiceAccount, and applies it:
+
+```bash
+helm template kates oci://ghcr.io/bmscomp/charts/kates -n payments \
+  --set rbac.scope=namespace \
+  --set networkPolicy.kafka.namespace=streaming \
+  --show-only templates/rbac.yaml | kubectl apply -f -
+```
+
+The Role is `kates-kafka-reader-payments` in `streaming`. It gets the `Kafka` resource, and lists the node pools, pods, PersistentVolumeClaims, PodMonitors and EndpointSlices there; it never writes. Without it, the check stops before its first rule: the Kates API answers 503 and names the grant it is missing.
+
+Nodes are cluster-scoped, so the Role can't cover them. The zone rules read zones another way, as [Step 4](#step-4--read-what-the-namespace-scope-changes) shows. If your reference uses a `zoneLabel` that only the nodes carry, the owner also applies the node grant, a ClusterRole with `get` and `list` on `nodes` and nothing else:
+
+```bash
+helm template kates oci://ghcr.io/bmscomp/charts/kates -n payments \
+  --set rbac.scope=namespace --set rbac.kafkaNamespaceRole=false \
+  --set rbac.nodeReads=true --show-only templates/rbac.yaml | kubectl apply -f -
+```
+
+### Step 2 — Install Kates in Your Namespace
+
+Store the password in the Secret the chart reads, `kates-backend`, then install. `rbac.kafkaNamespaceRole=false` leaves out the Role you can't create; the owner applied it in Step 1. The three `kafka` values and `networkPolicy.kafka.namespace` point Kates at the cluster:
+
+```bash
+kubectl create secret generic kates-backend -n payments \
+  --from-literal=password="$PASSWORD"
+helm upgrade --install kates oci://ghcr.io/bmscomp/charts/kates -n payments \
+  --set rbac.scope=namespace \
+  --set rbac.kafkaNamespaceRole=false \
+  --set networkPolicy.kafka.namespace=streaming \
+  --set kafka.clusterName=krafter \
+  --set kafka.bootstrapServers=krafter-kafka-bootstrap.streaming.svc:9092 \
+  --set kafka.sasl.username=payments-kates
+```
+
+One Kates API checks one Kafka cluster: the one `networkPolicy.kafka.namespace` and `kafka.clusterName` name. A reference whose `spec.target` names another is refused with a 409. The defaults are a plaintext SCRAM-SHA-512 listener on port 9092. For a TLS listener, set `kafka.security.protocol` and `kafka.ssl` as the [chart's README](https://github.com/bmscomp/kates/tree/main/charts/kates) describes, and set `networkPolicy.kafka.port` to the listener's port, because the chart's NetworkPolicy allows only that port to Kafka. If the cluster can't pull from GHCR, [Deploying Without GHCR](12-deployment.md#deploying-without-ghcr) shows how to mirror the images.
+
+Where you would rather run a Kafka cluster of your own than check a shared one, `kates deploy --adminless` installs the whole stack into namespaces you already have, once Strimzi is installed. [Deploying Without Cluster Admin](12-deployment.md#deploying-without-cluster-admin) describes it.
+
+### Step 3 — Reach the API and Run a Check
+
+`kates ports` forwards the Kates API to `localhost:8080`, and writes the address and the key into the `ports` [CLI context](appendix-a-glossary.md#gl-cli-context). Your account can't list Services in every namespace, so name yours:
+
+```bash
+kates ports --app-ns payments
+```
+
+Then lint the reference and check the cluster. Its `spec.target` names `streaming/krafter`, or leaves the target out:
+
+```bash
+kates compliance lint payments-krafter.yaml
+kates compliance check -f payments-krafter.yaml
+```
+
+### Step 4 — Read What the Namespace Scope Changes {#step-4--read-what-the-namespace-scope-changes}
+
+Most rules read the same objects as in a cluster-scoped install. Three groups differ, and each rule's `source` in `-o json` says what was read:
+
+- `zones`, `skew` and `kafka.rackAwareness` with `kafka.source: cr` take each pod's zone from the EndpointSlices of Strimzi's headless Service, which carry only `topology.kubernetes.io/zone`. With a custom `zoneLabel` that is the Kafka CR's `spec.kafka.rack.topologyKey`, they take it from the racks the brokers report. With any other `zoneLabel`, they are UNKNOWN unless the owner applied the node grant, and the reason says which grant or `zoneLabel` would let the check read the zones.
+- `monitoring.podMonitor` looks for PodMonitors in the Kafka namespace only, and its source says so.
+- The `topics` rules see only the topics the KafkaUser may describe.
+
+The EndpointSlice controller copies the zone from each node's `topology.kubernetes.io/zone` label. Managed clusters set that label on every node. A cluster you built yourself may not, and then every pod counts as in no zone. In that case, ask the owner to label the nodes, or to apply the node grant for the label the nodes do carry.
+
+To see where a zone came from, print the rule's detail:
+
+```bash
+kates compliance check -f payments-krafter.yaml -o json \
+  | jq -r '.results[] | select(.rule == "brokers.zones") | .detail'
+```
+
+Output on a lab Kind cluster that `kates deploy --adminless` built, whose Kafka namespace is `kafka`:
+
+```text
+alpha: 1, gamma: 1, sigma: 1; zones from the EndpointSlices of kafka/krafter-kafka-brokers
+```
+
 ## Running It in a Pipeline
 
 A reference earns its keep when every change to the cluster, or to the file, is checked against it. Three moments call for a check. A pull request that changes a reference gets the offline commands, so a broken file never merges. A deploy or an upgrade gets a full check right after it, because that is when the cluster changes on purpose. A schedule, nightly for example, catches the changes that happen between deploys, which is where drift lives.
@@ -729,7 +817,7 @@ The check reports what it can read, and some things are deliberately outside it:
 - `storage.size` reads the capacity of the bound claims, so a pool's requested size and the observed size can differ.
 - With `kafka.source: cr`, a broker setting the `Kafka` resource doesn't set fails, even when Kafka's default meets the rule.
 - The topic rules and `kafka.source: brokers` need the Kates API's connection to Kafka, and are UNKNOWN without it.
-- `zones`, `skew` and `kafka.rackAwareness` with `kafka.source: cr` read node labels, and `monitoring.podMonitor` lists PodMonitors in every namespace. Installed with `rbac.scope=namespace`, the Kates API may do neither: the first three take each pod's zone from the EndpointSlices of Strimzi's headless Service, or, with a custom `zoneLabel` that is the Kafka CR's rack key, from the racks the brokers report, and are UNKNOWN with any other `zoneLabel` unless the chart's `rbac.nodeReads=true` lets the Kates API list nodes, and `monitoring.podMonitor` looks in the Kafka namespace only. [Running Without Cluster Admin](12-deployment.md#running-without-cluster-admin) has the details.
+- `zones`, `skew` and `kafka.rackAwareness` with `kafka.source: cr` read node labels, and `monitoring.podMonitor` lists PodMonitors in every namespace. Installed with `rbac.scope=namespace`, the Kates API may do neither: the first three take each pod's zone from the EndpointSlices of Strimzi's headless Service, or, with a custom `zoneLabel` that is the Kafka CR's rack key, from the racks the brokers report, and are UNKNOWN with any other `zoneLabel` unless the chart's `rbac.nodeReads=true` lets the Kates API list nodes, and `monitoring.podMonitor` looks in the Kafka namespace only. [Checking a Cluster You Don't Administer](#checking-without-cluster-admin) has the details.
 - One Kates API checks one Kafka cluster, and Strimzi is the only platform the language knows.
 - The check doesn't cover [PodDisruptionBudgets](appendix-a-glossary.md#gl-poddisruptionbudget), Kafka users and ACLs, Kafka Connect, MirrorMaker 2 or Cruise Control; `kates security audit` covers users and ACLs.
 - The check never changes the cluster and keeps no history; the pipeline's logs and JUnit files are the record.
@@ -740,6 +828,7 @@ The check reports what it can read, and some things are deliberately outside it:
 - A check reads the cluster, changes nothing, and reports every rule as passing, failing, warning, waived or unknown.
 - Lint catches typos and impossible combinations on your machine, before any cluster is involved.
 - A failed rule means fixing the cluster, fixing the file, or recording the gap with an owner and an end date.
+- Installed with `rbac.scope=namespace` and one read-only Role from the cluster's owner, Kates checks a cluster you don't administer.
 - The exit code makes the check a pipeline step that fails when the cluster drifts from its design.
 - A hash kept outside the database on the day of a check shows whether its stored report was changed since.
 
