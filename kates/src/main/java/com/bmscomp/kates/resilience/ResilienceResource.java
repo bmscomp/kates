@@ -1,5 +1,6 @@
 package com.bmscomp.kates.resilience;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -21,6 +22,7 @@ import com.bmscomp.kates.api.ApiError;
 import com.bmscomp.kates.audit.Audited;
 import com.bmscomp.kates.chaos.FaultLimits;
 import com.bmscomp.kates.chaos.FaultSpec;
+import com.bmscomp.kates.chaos.ProbeSpec;
 import com.bmscomp.kates.disruption.DisruptionConcurrencyGuard;
 import com.bmscomp.kates.disruption.DisruptionPlan;
 import com.bmscomp.kates.disruption.DisruptionSafetyGuard;
@@ -215,8 +217,8 @@ public class ResilienceResource {
             responseCode = "400",
             description = "Invalid request, including a testRequest with no type, a testRequest spec value outside"
                     + " its limits, a testRequest spec field the test type or backend cannot apply, or a chaosSpec"
-                    + " parameter outside the chaos limits, where fieldErrors names each field; or a chaosSpec the"
-                    + " safety guard refuses, such as one that would hit every broker")
+                    + " parameter outside the chaos limits or a probe intervalSec under 1, where fieldErrors names"
+                    + " each field; or a chaosSpec the safety guard refuses, such as one that would hit every broker")
     @APIResponse(
             responseCode = "409",
             description = "Another disruption is running against this cluster; no test is started")
@@ -240,6 +242,10 @@ public class ResilienceResource {
         if (outsideLimits.isPresent()) {
             return outsideLimits.get();
         }
+        Optional<Response> probesTooFast = probesTooFast(request.getProbes());
+        if (probesTooFast.isPresent()) {
+            return probesTooFast.get();
+        }
         Optional<Response> unsafeOrBusy = unsafeOrBusy(request.getChaosSpec());
         if (unsafeOrBusy.isPresent()) {
             return unsafeOrBusy.get();
@@ -247,6 +253,32 @@ public class ResilienceResource {
 
         StreamingOutput stream = executeWithKeepAlive(request, null);
         return Response.ok(stream).build();
+    }
+
+    /**
+     * A 400 naming each probe with an intervalSec under 1, or empty when there
+     * is none. The probe monitor sleeps that long between rounds, so at 0 it
+     * ran exec calls into the broker pods back to back for the whole fault.
+     */
+    private static Optional<Response> probesTooFast(List<ProbeSpec> probes) {
+        if (probes == null) {
+            return Optional.empty();
+        }
+        Map<String, String> found = new LinkedHashMap<>();
+        for (int i = 0; i < probes.size(); i++) {
+            if (probes.get(i) != null && probes.get(i).intervalSec() < 1) {
+                found.put("probes[" + i + "].intervalSec", "must be at least 1");
+            }
+        }
+        if (found.isEmpty()) {
+            return Optional.empty();
+        }
+        String message = found.entrySet().stream()
+                .map(e -> e.getKey() + ": " + e.getValue())
+                .collect(Collectors.joining("; "));
+        return Optional.of(Response.status(400)
+                .entity(ApiError.validationFailed(message, found))
+                .build());
     }
 
     @GET

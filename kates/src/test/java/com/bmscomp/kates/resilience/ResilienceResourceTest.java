@@ -182,6 +182,27 @@ class ResilienceResourceTest {
     }
 
     /**
+     * The probe monitor sleeps a probe's intervalSec between rounds, so at 0
+     * it ran exec calls into the broker pods back to back for the whole fault.
+     */
+    @Test
+    void aProbeIntervalUnderOneSecondIsRefusedByItsIndex() {
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"LOAD\"},\"chaosSpec\":{\"experimentName\":\"test\"},"
+                        + "\"probes\":[{\"name\":\"ok\",\"mode\":\"Continuous\"},"
+                        + "{\"name\":\"spin\",\"mode\":\"Continuous\",\"intervalSec\":0}]}")
+                .when()
+                .post("/api/resilience")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", hasKey("probes[1].intervalSec"))
+                .body("fieldErrors", not(hasKey("probes[0].intervalSec")))
+                .body("message", is("probes[1].intervalSec: must be at least 1"));
+        verify(orchestrator, never()).execute(any());
+    }
+
+    /**
      * The limits are those of POST /api/tests, and so is the fieldErrors that
      * names a value outside them. As there, they are checked before the
      * fields the run could not apply, here the rate SPIKE ignores.
