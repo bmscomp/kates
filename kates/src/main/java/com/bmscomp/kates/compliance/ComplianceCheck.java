@@ -89,6 +89,10 @@ public class ComplianceCheck {
             .build();
 
     private static final String DEFAULT_ZONE_LABEL = "topology.kubernetes.io/zone";
+
+    /** The grant that ends a refused node list: charts/kates' opt-in ClusterRole, get and list on nodes. */
+    private static final String NODE_READS = ". The chart's rbac.nodeReads=true lets it list nodes";
+
     private static final String HOSTNAME = "kubernetes.io/hostname";
 
     private static final int MAX_SUBJECTS = 50;
@@ -574,7 +578,8 @@ public class ComplianceCheck {
             } catch (KubernetesClientException e) {
                 if (e.getCode() == 403) {
                     throw new IllegalStateException("Forbidden: the Kates API's service account may list neither"
-                            + " nodes, which are cluster-scoped, nor EndpointSlices in " + namespace);
+                            + " nodes, which are cluster-scoped, nor EndpointSlices in " + namespace
+                            + NODE_READS);
                 }
                 throw e;
             }
@@ -593,7 +598,7 @@ public class ComplianceCheck {
             if (byNode.isEmpty()) {
                 throw new IllegalStateException("Forbidden: the Kates API's service account may not list nodes,"
                         + " which are cluster-scoped, and no EndpointSlice of " + namespace + "/" + service
-                        + " names a node");
+                        + " names a node" + NODE_READS);
             }
             return new NodeLabels(byNode, "the EndpointSlices of " + namespace + "/" + service, false);
         }
@@ -608,7 +613,9 @@ public class ComplianceCheck {
             if (!zoneLabel().equals(at(kafka, "spec", "kafka", "rack", "topologyKey"))) {
                 throw new IllegalStateException("Forbidden: the Kates API's service account may not list nodes,"
                         + " which are cluster-scoped, and only nodes carry " + zoneLabel()
-                        + ", which is not the Kafka CR's spec.kafka.rack.topologyKey");
+                        + ", which is not the Kafka CR's spec.kafka.rack.topologyKey. A zoneLabel that is the rack"
+                        + " key reads the brokers' racks instead, or the chart's rbac.nodeReads=true lets it list"
+                        + " nodes");
             }
             Map<String, String> rackById = new HashMap<>();
             for (Node broker : brokers.get()) {
@@ -629,7 +636,7 @@ public class ComplianceCheck {
             }
             if (byNode.isEmpty()) {
                 throw new IllegalStateException("Forbidden: the Kates API's service account may not list nodes,"
-                        + " which are cluster-scoped, and no broker Kafka reports runs in a Kafka pod");
+                        + " which are cluster-scoped, and no broker Kafka reports runs in a Kafka pod" + NODE_READS);
             }
             return new NodeLabels(byNode, brokers.name + " racks", true);
         }
@@ -666,7 +673,13 @@ public class ComplianceCheck {
                     meets(rules.kafkaExporter()),
                     crKafka + ".kafkaExporter",
                     () -> scalar(at(kafka, "spec", "kafkaExporter") != null));
-            rule("monitoring.podMonitor", rules.podMonitor(), meets(rules.podMonitor()), podMonitors.name, () -> {
+            Supplier<String> monitorsFrom = () -> {
+                Monitors read = podMonitors.peek();
+                return read != null && read.ownNamespaceOnly()
+                        ? "Kubernetes: PodMonitors in " + namespace
+                        : podMonitors.name;
+            };
+            rule("monitoring.podMonitor", rules.podMonitor(), meets(rules.podMonitor()), monitorsFrom, () -> {
                 Monitors monitors = podMonitors.get();
                 if (monitors.items() == null) {
                     return new Observation<>(Map.of("", false), "the PodMonitor CRD is not installed");

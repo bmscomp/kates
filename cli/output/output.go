@@ -12,6 +12,7 @@ import (
 	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/lipgloss"
 	lgtable "github.com/charmbracelet/lipgloss/table"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 	"github.com/muesli/termenv"
 	"golang.org/x/term"
@@ -406,9 +407,17 @@ func printNote(note string, indent int) {
 	if ASCII() {
 		tail = "..."
 	}
+	width := max(TermWidth()-indent, 20)
 	for _, line := range strings.Split(note, "\n") {
-		line = runewidth.Truncate(stripAnsi(line), max(TermWidth()-indent, 20), tail)
-		fmt.Fprintln(Out, strings.Repeat(" ", indent)+DimStyle.Render(line))
+		// Wrapped, so a reason reads whole; three lines at most, so a long list of subjects stays a note.
+		wrapped := strings.Split(ansi.Wrap(stripAnsi(line), width, ""), "\n")
+		if len(wrapped) > 3 {
+			wrapped = wrapped[:3]
+			wrapped[2] = runewidth.Truncate(wrapped[2], width-runewidth.StringWidth(tail), "") + tail
+		}
+		for _, w := range wrapped {
+			fmt.Fprintln(Out, strings.Repeat(" ", indent)+DimStyle.Render(strings.TrimRight(w, " ")))
+		}
 	}
 }
 

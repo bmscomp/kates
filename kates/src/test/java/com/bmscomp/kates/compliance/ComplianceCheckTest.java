@@ -994,6 +994,7 @@ class ComplianceCheckTest {
                 "Forbidden: the Kates API's service account may not list PodMonitors outside kafka,"
                         + " and none in kafka selects every broker pod",
                 unseen.detail());
+        assertEquals("Kubernetes: PodMonitors in kafka", unseen.source());
 
         podMonitor("kafka", "brokers", Map.of("strimzi.io/cluster", "krafter"), null);
 
@@ -1001,6 +1002,8 @@ class ComplianceCheckTest {
 
         assertEquals(Status.PASS, found.status());
         assertEquals("kafka/brokers", found.detail());
+        // It read the Kafka namespace only, so it doesn't claim every namespace.
+        assertEquals("Kubernetes: PodMonitors in kafka", found.source());
     }
 
     /** A namespace-scoped role may not list nodes; Strimzi's headless Service lists each Kafka pod's zone. */
@@ -1041,7 +1044,8 @@ class ComplianceCheckTest {
         assertEquals(Status.UNKNOWN, zones.status());
         assertEquals(
                 "Kubernetes: nodes: Forbidden: the Kates API's service account may not list nodes,"
-                        + " which are cluster-scoped, and no EndpointSlice of kafka/krafter-kafka-brokers names a node",
+                        + " which are cluster-scoped, and no EndpointSlice of kafka/krafter-kafka-brokers names a node."
+                        + " The chart's rbac.nodeReads=true lets it list nodes",
                 zones.detail());
     }
 
@@ -1058,7 +1062,8 @@ class ComplianceCheckTest {
         assertEquals(
                 "Kubernetes: nodes: Forbidden: the Kates API's service account may not list nodes,"
                         + " which are cluster-scoped, and only nodes carry example.com/zone,"
-                        + " which is not the Kafka CR's spec.kafka.rack.topologyKey",
+                        + " which is not the Kafka CR's spec.kafka.rack.topologyKey. A zoneLabel that is the rack key"
+                        + " reads the brokers' racks instead, or the chart's rbac.nodeReads=true lets it list nodes",
                 zones.detail());
     }
 

@@ -102,19 +102,37 @@ func TestTableNotes(t *testing.T) {
 	TableNotes([]string{"Status", "Rule"}, [][]string{{"FAIL", "brokers.count"}, {"WARN", "brokers.zones"}}, []string{"", long})
 
 	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
-	// header, separator, row, row, its note
-	if len(lines) != 5 {
-		t.Fatalf("want 5 lines, got %d:\n%s", len(lines), buf.String())
+	// header, separator, row, row, its note wrapped to three lines
+	if len(lines) != 7 {
+		t.Fatalf("want 7 lines, got %d:\n%s", len(lines), buf.String())
 	}
-	note := stripAnsi(lines[4])
-	if !strings.HasPrefix(note, strings.Repeat(" ", 2+len("Status")+2)+"pod-name") {
-		t.Errorf("note does not start under the second column: %q", note)
+	for _, l := range lines[4:] {
+		note := stripAnsi(l)
+		if !strings.HasPrefix(note, strings.Repeat(" ", 2+len("Status")+2)+"pod-name") {
+			t.Errorf("note does not start under the second column: %q", note)
+		}
+		if w := runewidth.StringWidth(note); w > TermWidth() {
+			t.Errorf("note is %d wide, wider than the terminal's %d", w, TermWidth())
+		}
 	}
-	if w := runewidth.StringWidth(note); w > TermWidth() {
-		t.Errorf("note is %d wide, wider than the terminal's %d", w, TermWidth())
+	if last := stripAnsi(lines[6]); !strings.HasSuffix(last, "…") && !strings.HasSuffix(last, "...") {
+		t.Errorf("a note cut at three lines ends with an ellipsis: %q", last)
 	}
-	if !strings.HasSuffix(note, "…") && !strings.HasSuffix(note, "...") {
-		t.Errorf("a cut note ends with an ellipsis: %q", note)
+}
+
+// A reason under a row is read whole: it wraps, it isn't cut.
+func TestTableNotesWrapAReason(t *testing.T) {
+	buf := ResetForTesting()
+	reason := "Kubernetes: nodes: Forbidden: the Kates API's service account may not list nodes, which are" +
+		" cluster-scoped. The chart's rbac.nodeReads=true lets it list nodes"
+	TableNotes([]string{"Status", "Rule"}, [][]string{{"UNKNOWN", "brokers.zones"}}, []string{reason})
+
+	var note []string
+	for _, l := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")[3:] {
+		note = append(note, strings.TrimSpace(stripAnsi(l)))
+	}
+	if got := strings.Join(note, " "); got != reason {
+		t.Errorf("the reason was not printed whole:\n got %q\nwant %q", got, reason)
 	}
 }
 
