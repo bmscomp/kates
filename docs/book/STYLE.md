@@ -19,7 +19,7 @@ A chapter written before the types keeps its objectives and Summary until its re
 
 ## Openings and Closings
 
-- Open with a problem, a concrete situation, or a claim the chapter defends. Never open with "This chapter covers / provides / walks you through / is for". Objectives are optional: 2–5 bullets, after the hook.
+- Open with a problem, a concrete situation, or a claim the chapter defends. Never open with "This chapter covers / provides / walks you through / is for". Objectives are optional: 2–5 bullets, after the hook, each a fragment that starts with a verb, in sentence case with no end punctuation.
 - The Summary has 3–5 bullets of 25 words or fewer, with no flags, paths or version numbers, and says what the reader now knows or can do.
 - The final paragraph hands off to the next chapter in `_quarto.yml` order: it names that chapter by its H1 title, gives a reason, and its last link points there. Write it by hand, and never as "With X in place, …". CI checks the chain: part pages are skipped, the last chapter before the appendices hands off to the first appendix, and appendices need no handoff.
 
@@ -47,7 +47,7 @@ A chapter written before the types keeps its objectives and Summary until its re
 - H1 is the plain chapter title — **no** "Chapter N:" prefix. Numbering comes from the order in `_quarto.yml`; filenames are stable IDs and are never renumbered.
 - H2/H3 in Title Case, unnumbered, no terminal punctuation except `?`. No heading starts with a hand-typed number (the check is `^#+ \d`), in any chapter. A procedure is an ordered list, or H3s titled "Step N — Verb the Thing".
 - Rename repeated headings so they say something.
-- Troubleshooting symptom headings: Title Case with literal error strings in backticks.
+- Troubleshooting symptom headings: Title Case with literal error strings in backticks. Under each, the entry's paragraphs open with the bold labels `**Symptom:**`, `**Cause:**` and `**Fix:**`; they are paragraphs, not the bold-label bullets the lists rule avoids.
 - Explicit ids: give a heading a `{#id}` only when it is a link target and its GitHub slug differs from Quarto's automatic id, which happens with " — ", " + ", " & " or a leading number (both drop parentheses, backticks and quotes the same way). Always make the id the GitHub slug of the heading text: lowercase, spaces become `-`, punctuation other than `-` and `_` is dropped, leading digits stay, so " — " and " + " become `--`. For example, `### Step 1 — Deploy the Chart {#step-1--deploy-the-chart}`. The link check (lychee, which computes GitHub slugs) and Quarto (which uses the explicit id) then agree; GitHub shows the `{#…}` literally. The Glossary's `{#gl-…}` ids are the one exception, as [Concepts and the Glossary](#concepts-and-the-glossary) explains.
 
 ## Cross-References
@@ -83,7 +83,7 @@ Quarto callouts are the only admonition syntax — never bold-blockquotes (`> **
 
 Every callout has a descriptive title (`::: {.callout-note title="…"}`) and uses the full `::: {.callout-*}` syntax. Beyond that:
 
-- At most one callout per H2 in guide and task chapters, never two back to back, three sentences or fewer, and never a procedure inside one.
+- At most one callout per H2 in guide and task chapters, plus one Try it; never two back to back, three sentences or fewer, and never a procedure inside one, except a Try it, which holds the commands it runs.
 - An exercise is `::: {.callout-tip title="Try it: <the question it answers>"}`, not a bold first line. It follows the concept it exercises and never repeats the Quick Start.
 - A product bug appears only as `::: {.callout-warning title="Known limitation: <what>"}`, with the issue link and the workaround; delete it when the fix ships. Never describe in prose a mismatch between help text and actual behavior.
 - Scope goes in the opening prose or in a `callout-note` titled "Scope", never in a bold blockquote.
@@ -106,7 +106,7 @@ Exactly one blank line after the closing `:::`. Genuine quotations may use plain
 
 - No `---` horizontal rules.
 - One paragraph per line, with no hard wrapping. US spelling.
-- Aim for 3,000–6,000 words per chapter, and split one that passes 8,000.
+- Aim for 3,000–6,000 words per chapter (the Introduction may be shorter), and split one that passes 8,000.
 - A Part's landing page is a top-level `part-<slug>.md` with no front matter.
 - `[TODO: …]` is for drafts only. CI fails on `[TODO` in any page of the book, so a rewrite merges only when its facts are in hand; otherwise keep the old text, or leave the section out.
 
@@ -162,6 +162,7 @@ Use the left column in prose; commands, fields, flags, UI labels and resource na
 ## Punctuation
 
 - Spaced em dash ( — ) for asides; straight quotes only; `--` never as a prose dash (kubectl/CLI flag separators in code excepted).
+- No serial comma unless it prevents a misreading: "Kafka, Strimzi and Helm".
 
 ## Facts
 

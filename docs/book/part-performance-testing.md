@@ -27,4 +27,4 @@ When a run passes, `kates test baseline set <run-id>` makes it the LOAD baseline
 
 [Tutorial 2: Running Every Test Type](../tutorials/02-all-test-types.md) runs each test type on the lab, from flags or from the built-in templates. The tutorial is for practice; the chapters explain what its numbers mean.
 
-When you compare runs, run them one after another. The Kates API runs at most three tests at once and refuses a fourth, and runs of one type that set no topic share that type's default topic (`load-test` for LOAD), so runs that overlap measure each other's load.
+When you compare runs, run them one after another, as [Multiple Runs](04-performance-theory.md#multiple-runs) does, because runs that overlap measure each other's load.

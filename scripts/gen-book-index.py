@@ -168,7 +168,7 @@ for e in sorted(entries, key=lambda e: (e['term'].lower(),)):
         lines += [f'## {letter}', '']
     slug = pandoc_id(e['term'])
     if e['see']:
-        lines += [f'[{e["term"]}]{{#idx-{slug}}}', f':   See [{e["see"]}](#idx-{pandoc_id(e["see"])}).', '']
+        lines += [f'[{e["term"]}]{{#idx-{slug}}}', f':   See *{e["see"]}*.', '']
         continue
     lines += [f'[{e["term"]}]{{#idx-{slug}}}', f':   {refs(e)}', '']
     for sub in sorted(by_parent.get(e['term'].lower(), []), key=lambda s: s['term'].lower()):

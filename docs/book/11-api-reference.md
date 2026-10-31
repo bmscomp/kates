@@ -1026,7 +1026,7 @@ The body is checked before the stream starts and before any fault is injected, a
 
 While another disruption holds the cluster, the call gets `409 Conflict` instead.
 
-An unknown `id` gets `404 Not Found`. The `node-maintenance` scenario is listed, but every call to run it gets a `400`. A scenario can't name the node its `NODE_DRAIN` drains, and Kates sets no `TARGET_NODE`, so the Litmus `node-drain` experiment would drain the node of a random pod in any namespace. To drain a node, send a `NODE_DRAIN` to `POST /api/resilience` with the node in `chaosSpec.envOverrides.TARGET_NODE`, as [LitmusChaos Integration](07-chaos-practice.md#litmuschaos-integration) describes.
+An unknown `id` gets `404 Not Found`. The `node-maintenance` scenario is listed, but every call to run it gets a `400`. A scenario can't name the node its `NODE_DRAIN` drains, and Kates sets no `TARGET_NODE`, so the Litmus `node-drain` experiment would drain the node of a random pod in any namespace. To drain a node, send a `NODE_DRAIN` to `POST /api/resilience` with the node in `chaosSpec.envOverrides.TARGET_NODE`, as [The `litmus-crd` Provider](07-chaos-practice.md#litmuschaos-integration) describes.
 
 ---
 
@@ -1207,7 +1207,11 @@ AUTH="X-API-Key: $KATES_API_KEY"
 # Create a load test
 TEST_ID=$(curl -s -X POST "$BASE/api/tests" -H "$AUTH" \
   -H "Content-Type: application/json" \
-  -d '{"type":"LOAD","spec":{"numRecords":100000,"acks":"all","topic":"perf-test","partitions":3,"replicationFactor":3}}' \
+  -d '{
+        "type": "LOAD",
+        "spec": {"numRecords": 100000, "acks": "all", "topic": "perf-test",
+                 "partitions": 3, "replicationFactor": 3}
+      }' \
   | jq -r '.id')
 echo "Created test: $TEST_ID"
 
@@ -1233,13 +1237,33 @@ Disruption execution is asynchronous. The `POST` validates the plan, returns `20
 set -euo pipefail
 BASE="http://localhost:30083"
 AUTH="X-API-Key: $KATES_API_KEY"
-PLAN='{"name":"broker-kill-test","maxAffectedBrokers":1,"autoRollback":true,"steps":[{"name":"kill-broker-0","faultSpec":{"experimentName":"broker-kill","disruptionType":"POD_KILL","targetNamespace":"kafka","targetLabel":"strimzi.io/component-type=kafka,strimzi.io/broker-role=true","targetBrokerId":0,"chaosDurationSec":30},"steadyStateSec":15,"observationWindowSec":60,"requireRecovery":true}]}'
+PLAN='{
+  "name": "broker-kill-test",
+  "maxAffectedBrokers": 1,
+  "autoRollback": true,
+  "steps": [{
+    "name": "kill-broker-0",
+    "faultSpec": {
+      "experimentName": "broker-kill",
+      "disruptionType": "POD_KILL",
+      "targetNamespace": "kafka",
+      "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true",
+      "targetBrokerId": 0,
+      "chaosDurationSec": 30
+    },
+    "steadyStateSec": 15,
+    "observationWindowSec": 60,
+    "requireRecovery": true
+  }]
+}'
 
 # Dry-run to validate (no faults injected)
-curl -s -X POST "$BASE/api/disruptions?dryRun=true" -H "$AUTH" -H "Content-Type: application/json" -d "$PLAN" | jq .
+curl -s -X POST "$BASE/api/disruptions?dryRun=true" -H "$AUTH" \
+  -H "Content-Type: application/json" -d "$PLAN" | jq .
 
 # Execute — returns 202 immediately with the report id
-DISRUPT_ID=$(curl -s -X POST "$BASE/api/disruptions" -H "$AUTH" -H "Content-Type: application/json" -d "$PLAN" | jq -r '.id')
+DISRUPT_ID=$(curl -s -X POST "$BASE/api/disruptions" -H "$AUTH" \
+  -H "Content-Type: application/json" -d "$PLAN" | jq -r '.id')
 echo "Disruption started: $DISRUPT_ID"
 
 # Poll until the report reaches a terminal status

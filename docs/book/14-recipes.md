@@ -1,126 +1,113 @@
 # Recipes & Patterns
 
-Practical, ready-to-use recipes for common Kates workflows. Each recipe is a self-contained procedure you can adapt to your environment — this chapter is for you once you know the individual commands and want to combine them into end-to-end procedures. After this chapter, you can:
+You have run every kind of test on [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test. What's left is the work no test type does on its own: proving an upgrade changed nothing, catching a regression the night it lands, finding the cluster's ceiling, and signing `krafter` off for the payments workload. Each recipe below chains commands you already know into one of those procedures.
 
-- Validate a Kafka upgrade by diffing before-and-after runs of the same scenario file with `kates report diff`
-- Schedule a nightly regression suite with `kates schedule create` and spot anomalies with `kates trend`
-- Certify a cluster's resilience with disruption playbooks and a combined `kates resilience run`
-- Diagnose a latency regression, and find the cluster's sustainable capacity by comparing CAPACITY runs at rising producer counts
-- Gate a CI pipeline on Kafka's performance, integrity and architecture, whether Kates is installed cluster-wide or in one namespace
+Pick a recipe by the question you need answered. Some recipes disrupt the cluster on purpose, and Recipe 7 does with its optional chaos gate, so check the last column before you run one where other people depend on the cluster:
 
-Pick a recipe by the question you need answered. Two of them disrupt the cluster on purpose, and Recipe 7 does with its optional chaos gate, so check the Disrupts the cluster column before you run one where other people depend on the cluster:
+| Recipe | Question it answers | Disrupts the cluster |
+|:--------------------|:------------------------------------------------|:------------------------------|
+| [Recipe 1: Validate a Kafka Upgrade](#recipe-1-validate-a-kafka-upgrade) | Did the upgrade change performance? | The upgrade rolls every broker; the tests don't disrupt |
+| [Recipe 2: Nightly Regression Suite](#recipe-2-nightly-regression-suite) | Is performance drifting from night to night? | No |
+| [Recipe 3: Pre-Production Chaos Certification](#recipe-3-pre-production-chaos-certification) | Does the cluster keep working through broker loss, a partition and a zone outage? | Yes: it kills Kafka pods and cuts one broker off |
+| [Recipe 4: Investigate a Latency Regression](#recipe-4-investigate-a-latency-regression) | Why did [P99](appendix-a-glossary.md#gl-percentile) latency rise between two runs? | No |
+| [Recipe 5: Capacity Planning](#recipe-5-capacity-planning) | What throughput can the cluster sustain? | Yes: it drives the brokers to their limit |
+| [Recipe 6: Producer Tuning](#recipe-6-producer-tuning) | Which producer settings suit your workload? | No |
+| [Recipe 7: Gate a CI Pipeline on Kafka](#recipe-7-gate-a-ci-pipeline-on-kafka) | Does a change regress Kafka's performance, integrity or architecture? | Only its optional chaos gate |
+| [Recipe 8: Sign Off krafter for Payments](#recipe-8-sign-off-krafter-for-payments) | Is `krafter` ready for the payments workload? | Yes: its plans kill a broker and a zone |
 
-| Recipe | Question it answers | Run time | Disrupts the cluster | Prerequisites |
-|--------|---------------------|----------|----------------------|---------------|
-| [Recipe 1: Validate a Kafka Upgrade](#recipe-1-validate-a-kafka-upgrade) | Did the upgrade change performance or data integrity? | Two runs of a three-scenario suite, with the upgrade between them | The upgrade rolls every broker; the tests don't disrupt | The recipe's scenario file, and the [Upgrade Playbook](18-upgrade-playbook.md) procedure |
-| [Recipe 2: Nightly Regression Suite](#recipe-2-nightly-regression-suite) | Is performance drifting from night to night? | One LOAD run of 100,000 records a night; the trend commands read 30 days | No | A running Kates API, where the scheduler runs |
-| [Recipe 3: Pre-Production Chaos Certification](#recipe-3-pre-production-chaos-certification) | Does the cluster keep working through broker loss, a network partition and a zone outage? | Two tests and three playbooks, then a 360 s LOAD run during a broker kill | Yes: it kills Kafka pods and cuts one broker off the network | A cluster nothing else depends on, with a Kafka pool pinned to zone `alpha` for `az-failure` |
-| [Recipe 4: Investigate a Latency Regression](#recipe-4-investigate-a-latency-regression) | Why did P99 latency rise between two runs? | No new runs: it reads results you already have | No | Two finished runs to compare |
-| [Recipe 5: Capacity Planning](#recipe-5-capacity-planning) | What throughput can the cluster sustain? | Five CAPACITY runs of up to five minutes each, one after another | Yes: it drives the brokers to their limit | A cluster nothing else depends on, `jq`, and your P99 SLA threshold |
-| [Recipe 6: Producer Tuning](#recipe-6-producer-tuning) | Which producer settings suit your workload? | Four LOAD runs of 100,000 records each | No | The recipe's scenario file |
-| [Recipe 7: Gate a CI Pipeline on Kafka](#recipe-7-gate-a-ci-pipeline-on-kafka) | Does a change regress Kafka's performance, integrity or architecture? | A LOAD and an INTEGRITY run each pipeline run | Only its optional chaos gate | A route from the runner to the Kates API, and its API key |
+Every recipe runs the same loop, and only the middle step and the command that compares change from one to the next:
+
+```mermaid
+%%| label: fig-recipes-loop
+%%| fig-cap: "Every recipe is the same loop; what changes is the middle step and the command that compares."
+%%| fig-alt: "Four boxes left to right: Baseline, Change or fault, Re-measure, Compare, each feeding the next."
+graph LR
+    B["Baseline"] --> C["Change<br/>or fault"] --> R["Re-measure"] --> D["Compare"]
+```
 
 ## Recipe 1: Validate a Kafka Upgrade {#recipe-1-validate-a-kafka-upgrade}
 
-**Goal:** Prove that a Kafka version upgrade doesn't introduce regressions in performance or data integrity.
+This recipe proves that a Kafka version upgrade didn't change performance, by running one [scenario file](appendix-a-glossary.md#gl-scenario-file) before and after the upgrade and diffing the two runs. The suite is the Part II file, `payments-scenarios.yaml`, so the diff is against a [baseline](appendix-a-glossary.md#gl-baseline) whose [gates](appendix-a-glossary.md#gl-gate) you already trust; [The Payments Question](part-performance-testing.md#the-payments-question) describes it. Any scenario file works, as long as both runs use the same one. You need the [Upgrade Playbook](18-upgrade-playbook.md) procedure, and the time is two runs of the file plus the rolling upgrade.
 
-### Procedure
+### Step 1 — Capture the Baseline
 
-The verification follows four steps before and after the rolling upgrade:
-
-```mermaid
-%%| label: fig-recipes-upgrade-validation
-%%| fig-cap: "Pre- and post-upgrade verification loop: baseline capture on the current Kafka version, rolling upgrade, re-test, and report diff."
-%%| fig-alt: "Flowchart from left to right: Baseline on current version, Upgrade Kafka, Re-test on new version, and Diff results."
-graph LR
-    B[Baseline\non current version] --> U[Upgrade\nKafka] --> R[Re-test\non new version] --> D[Diff\nresults]
-```
-
-**Step 1 — Capture baseline on the current version:**
+Run the suite on the current version and note the run ID that `kates test apply` prints:
 
 ```bash
-kates test apply -f upgrade-suite.yaml --wait
-# Note the test IDs from the output
+kates test apply -f payments-scenarios.yaml --wait
 ```
 
-**Step 2 — Perform the upgrade** with the procedure in [Upgrade Playbook](18-upgrade-playbook.md#kafka-version-upgrade): a `helm upgrade` of the Kafka release that starts from its current values (`helm get values`), sets the new `kafkaVersion`, and pins `kafka.metadataVersion` where it is so the upgrade stays reversible. Do not rebuild the values from the repository's files, which can rename the node pools, and do not use `kates deploy --kafka-version`, which leaves a running cluster alone. Confirm the cluster runs the new version before you re-test, or Step 4 compares two runs of the old one:
+### Step 2 — Upgrade Kafka
+
+Upgrade with the procedure in [Kafka Version Upgrade](18-upgrade-playbook.md#kafka-version-upgrade): a `helm upgrade` of the Kafka release from its current values (`helm get values`) that sets the new `kafkaVersion`. Leave `kafka.metadataVersion` where it is, so the upgrade stays reversible. Don't rebuild the values from the repository's files, which can rename the node pools, and don't use `kates deploy --kafka-version`, which leaves a running cluster alone. Confirm the cluster runs the new version before you re-test, or Step 4 compares two runs of the old one:
 
 ```bash
 kubectl get kafka krafter -n kafka -o jsonpath='{.status.kafkaVersion}{"\n"}'
 ```
 
-**Step 3 — Re-run the same suite:**
+### Step 3 — Re-Run the Suite
+
+Run the same file again on the new version, and note the new run ID:
 
 ```bash
-kates test apply -f upgrade-suite.yaml --wait
+kates test apply -f payments-scenarios.yaml --wait
 ```
 
-**Step 4 — Compare results:**
+### Step 4 — Diff the Runs {#step-4--diff-the-runs}
+
+`kates report diff` sets the two runs' summaries side by side, baseline first:
 
 ```bash
 kates report diff <baseline-id> <new-id>
 ```
 
-Expected output:
+Output, with illustrative numbers:
 
 ```text
-  ▸ Report Diff: a1b2c3d4 vs e5f6a7b8
-  ┌─────────────────────┬───────────┬───────────┬────────┐
-  │ Metric              │ Baseline  │ New       │ Delta  │
-  ├─────────────────────┼───────────┼───────────┼────────┤
-  │ P99 Latency (ms)    │ 12.4      │ 13.1      │ +5.6%  │
-  │ Throughput (rec/s)   │ 18,432    │ 17,891    │ -2.9%  │
-  │ Error Rate           │ 0.000%    │ 0.000%    │  0.0%  │
-  │ Data Loss            │ 0         │ 0         │  0     │
-  └─────────────────────┴───────────┴───────────┴────────┘
-  ✓ All metrics within 10% tolerance
+╭──────────────────────────╮
+│   Report Diff            │
+│   a1b2c3d4 vs e5f6a7b8   │
+╰──────────────────────────╯
+  Metric           a1b2c3d4     e5f6a7b8     Delta
+  ───────────────  ───────────  ───────────  ──────  ─
+  Avg Throughput   18.4K rec/s  17.9K rec/s  -2.9%   ▼
+  Peak Throughput  21.2K rec/s  20.9K rec/s  -1.2%   =
+  Avg MB/s         18.00 MB/s   17.47 MB/s   -2.9%   ▼
+  Avg Latency      4.10 ms      4.20 ms      +2.4%   ▼
+  P50 Latency      3.20 ms      3.20 ms      +0.0%   =
+  P95 Latency      8.90 ms      9.40 ms      +5.6%   ▼
+  P99 Latency      12.40 ms     13.10 ms     +5.6%   ▼
+  Max Latency      61.00 ms     88.00 ms     +44.3%  ▼
+  Error Rate       0.0000%      0.0000%
+
+  Baseline: a1b2c3d4 │ Comparison: e5f6a7b8
+  ▲ = improved │ ▼ = regressed │ = ≈ no change
 ```
 
-::: {.callout-tip}
-If you see `Test run not found` errors, make sure you noted the test IDs from Step 1 output before starting the upgrade. Test IDs are printed after each `kates test apply` or `kates test create` command.
+Reading the output:
+
+1. `▼` marks a metric that got worse by 2% or more, `▲` one that got better, and `=` one that moved less than 2%. A metric that was 0 in the baseline, such as an error rate of 0, gets no delta.
+2. The command applies no tolerance of its own. Read the `▼` rows, and decide against the thresholds you set in the scenario file's `validate` block.
+
+::: {.callout-tip title="Test run not found"}
+Note the run IDs from Step 1 before you start the upgrade. `kates test apply` and `kates test create` print them, and `kates test list` lists them again.
 :::
 
-### Suggested Scenario File
+### Verify the Upgrade
 
-```yaml
-scenarios:
-  - name: "Load Baseline"
-    type: LOAD
-    spec:
-      records: 200000
-      acks: all
-    validate:
-      maxP99LatencyMs: 50
-      minThroughputRecPerSec: 15000
+Both runs finished `DONE` within their gates, and the diff shows no `▼` row beyond what you accept. `kates test list` shows the two runs and their status.
 
-  - name: "Integrity Check"
-    type: INTEGRITY
-    spec:
-      records: 100000
-      acks: all
-    validate:
-      maxDataLossPercent: 0
-      maxCrcFailures: 0
+### Roll Back
 
-  - name: "Round-Trip Latency"
-    type: ROUND_TRIP
-    spec:
-      records: 10000
-    validate:
-      maxP99LatencyMs: 30
-```
-
-The integrity scenario relies on `acks: all`, which also makes the producer idempotent. `enableIdempotence`, `enableTransactions` and `enableCrc` in a scenario file turn idempotence, transactions and CRC checks on or off explicitly. The Kates API refuses a combination the producer cannot run, such as transactions with `acks: 1` (see [Scenario Files & SLA Gates](13-scenario-files.md)).
-
----
+If the diff shows a regression you can't accept, roll the brokers back with [Kafka Version Rollback](18-upgrade-playbook.md#kafka-version-rollback), then run the suite once more to confirm the old numbers return.
 
 ## Recipe 2: Nightly Regression Suite {#recipe-2-nightly-regression-suite}
 
-**Goal:** Detect performance regressions early by running a test suite every night and monitoring trends.
+This recipe catches a performance regression the night it lands: a schedule runs one LOAD test every night, and a weekly look at `kates trend` finds the run that moved. You need a running Kates API, where the scheduler runs, and the cost is one LOAD run of 100,000 records a night.
 
-### Procedure
+### Step 1 — Write the Request
 
-**Step 1 — Create the test request JSON:**
+`kates schedule create --request` takes the JSON the API itself receives, so the fields are the API's: `numRecords` and `recordSize`, not a scenario file's `records` and `recordSizeBytes`. Write the request:
 
 ```bash
 cat > nightly-load.json << 'EOF'
@@ -135,7 +122,9 @@ cat > nightly-load.json << 'EOF'
 EOF
 ```
 
-**Step 2 — Create the schedule:**
+### Step 2 — Create the Schedule
+
+The cron expression runs in UTC, so `0 2 * * *` fires at 02:00 UTC every night; adjust it for your time zone:
 
 ```bash
 kates schedule create \
@@ -144,86 +133,127 @@ kates schedule create \
   --request nightly-load.json
 ```
 
-**Step 3 — Monitor trends weekly:**
+### Step 3 — Read the Trend Each Week
+
+Once a week, chart the last seven nights' P99 and throughput:
 
 ```bash
-kates trend --type LOAD --metric p99LatencyMs --days 30
-kates trend --type LOAD --metric avgThroughputRecPerSec --days 30
+kates trend --type LOAD --metric p99LatencyMs --days 7
+kates trend --type LOAD --metric avgThroughputRecPerSec --days 7
 ```
 
-Expected output:
+Output of the first command, with illustrative numbers:
 
 ```text
-  ▸ Trend: LOAD / p99LatencyMs (30 days, 30 runs)
-    Min: 8.2ms  Max: 14.1ms  Avg: 10.5ms
-    ▁▁▂▁▁▁▂▁▃▁▁▁▂▁▁▁▁▂▁▁▁▁▁▁▁▇▁▁▁▁
-                                 ↑ anomaly (run #26)
+╭─────────────────────────────────────╮
+│   Trend Analysis                    │
+│   LOAD · p99LatencyMs · 7d window   │
+╰─────────────────────────────────────╯
+  Baseline                 11.20
 
-  ▸ Trend: LOAD / avgThroughputRecPerSec (30 days, 30 runs)
-    Min: 15,201  Max: 19,843  Avg: 18,102
-    ▇▇▆▇▇▇▆▇▅▇▇▇▆▇▇▇▇▆▇▇▇▇▇▇▇▂▇▇▇▇
-                                 ↑ anomaly (run #26)
+ ▸ Trend Chart
+  ▁▁▂▁█▁▁  →  (7 data points)
+
+  Min                      9.80
+  Max                      14.90
+  Average                  10.86
+
+ ▸ Data Points
+  Run ID    Timestamp            Value
+  ────────  ───────────────────  ─────  ─
+  7c1e04a2  2026-10-24T02:00:04  10.20
+  91d3b6f0  2026-10-25T02:00:04  9.80
+  2a8f7e15  2026-10-26T02:00:04  10.60
+  e40c9b37  2026-10-27T02:00:04  10.10
+  5b62d1c8  2026-10-28T02:00:04  14.90  ▲
+  c8f05a93  2026-10-29T02:00:04  10.40
+  0d7e3f6b  2026-10-30T02:00:04  10.00
+
+ ▸ ⚠ Regressions Detected
+  Run ID    Value  Baseline  Deviation
+  ────────  ─────  ────────  ─────────
+  5b62d1c8  14.90  11.20     +33.0%
 ```
 
-::: {.callout-tip}
-If the schedule doesn't trigger, verify the Kates API pod is running with `kubectl get pods -n kates -l app.kubernetes.io/name=kates` — the scheduler runs inside the Kates API, not as a separate pod. The cron expression uses UTC — adjust for your timezone.
+Reading the output:
+
+1. `Baseline` is the mean of the window's five most recent runs; `--baseline` sets the count. The [sparkline](appendix-a-glossary.md#gl-sparkline) draws every run in the window, oldest first.
+2. A run in the Regressions Detected table is more than 20% off the baseline in the bad direction, and `▲` or `▼` in the Data Points table marks any run more than 20% above or below it. The regression is the run to diff: `kates report diff <previous-run> <that-run>`, as in [Recipe 4: Investigate a Latency Regression](#recipe-4-investigate-a-latency-regression).
+
+::: {.callout-tip title="Try it: does the schedule fire?"}
+Create a second schedule with `--cron` set a few minutes ahead in UTC, and wait for it. `kates schedule list` then shows the run under Last Run, and `kates trend --type LOAD --metric p99LatencyMs --days 1` shows it as a data point. Delete the schedule with `kates schedule delete <id>` when you're done.
 :::
 
-A sudden spike in the sparkline indicates a regression. Use `kates report diff` to compare the anomalous run against its predecessor.
+### Verify the Schedule Fires
 
----
+`kates schedule list` shows the schedule as `enabled`, and the morning after it fires, its Last Run column names the night's run. If nothing fires, check that the Kates API pod is running with `kubectl get pods -n kates -l app.kubernetes.io/name=kates`: the scheduler runs inside the Kates API, not as a separate pod.
+
+### Stop It
+
+`kates schedule delete <id>` removes the schedule, with the ID that `kates schedule list` shows. The runs it already made stay, and so does their trend.
 
 ## Recipe 3: Pre-Production Chaos Certification {#recipe-3-pre-production-chaos-certification}
 
-**Goal:** Build confidence that a Kafka cluster meets resilience SLAs before deploying to production.
+This recipe builds confidence that a Kafka cluster meets its resilience targets before it takes production traffic. It runs a LOAD baseline and an INTEGRITY run, three [playbooks](appendix-a-glossary.md#gl-playbook), and a [resilience run](appendix-a-glossary.md#gl-resilience-run) that kills a broker during a 360 s LOAD test. You need a cluster nothing else depends on, with a Kafka pool pinned to zone `alpha` for `az-failure`.
 
-::: {.callout-caution}
-This recipe breaks the cluster on purpose. `leader-cascade` kills the brokers leading `__consumer_offsets` partitions 0 and 1, one after the other; `split-brain` aims a `NETWORK_PARTITION` fault at broker 0 for 60 seconds; `az-failure` kills every Kafka pod in zone `alpha`; and Step 4 kills a broker while a LOAD test runs. Anything else using the cluster goes through the same failures, so run the recipe on a cluster nothing else depends on, before it takes production traffic.
+::: {.callout-caution title="This recipe breaks the cluster"}
+`leader-cascade` kills the brokers leading `__consumer_offsets` partitions 0 and 1, one after the other. `split-brain` cuts broker 0 off the network for 60 s, `az-failure` kills every Kafka pod in zone `alpha`, and Step 4 kills a broker during a LOAD test. Anything else using the cluster goes through the same failures, so run the recipe before the cluster takes production traffic.
 :::
 
-Certification is the production-like step of [3. Run Experiments in Production (or Production-Like)](06-chaos-theory.md#3-run-experiments-in-production-or-production-like), and that's why the recipe stays out of production. Its playbooks climb to a zone outage, the top rung of [5. Minimize Blast Radius](06-chaos-theory.md#5-minimize-blast-radius). Once the cluster is live, repeat its experiments there one at a time, from the lowest rung up.
+Certification is the production-like step of the chaos principles, [Run Experiments in Production or Production-Like](06-chaos-theory.md#3-run-experiments-in-production-or-production-like), and that's why the recipe stays out of production. Its playbooks climb to a zone outage, the top rung of [Minimize Blast Radius](06-chaos-theory.md#5-minimize-blast-radius). Once the cluster is live, repeat its experiments there one at a time, from the lowest rung up.
 
-### Procedure
+Run the stages in order, and stop at the first one that fails. Each stage assumes the ones before it passed:
 
-Run these tests sequentially. All must pass before the cluster is certified.
+| Stage | What it proves | It passes when |
+|:-------------------|:--------------------------------------|:------------------------------------|
+| LOAD run | The performance baseline | It finishes `DONE` |
+| INTEGRITY run | No loss under `acks=all` | It finishes `DONE` within its integrity gates |
+| `leader-cascade` | Leaders move and clients follow | The disruption ends `COMPLETED` |
+| `split-brain` | The cluster tolerates a network partition | The disruption ends `COMPLETED` |
+| `az-failure` | The cluster survives a zone outage | The disruption ends `COMPLETED` |
+| Resilience run | Performance holds through a broker kill | Its `Status` is `COMPLETED` |
 
-```mermaid
-%%| label: fig-recipes-production-certification
-%%| fig-cap: "Sequential six-stage production readiness certification pipeline combining performance, data integrity, chaos playbooks, and resilience under fault."
-%%| fig-alt: "Top-down flowchart chaining six stages: LOAD run (Baseline perf), INTEGRITY run (Zero data loss), leader-cascade (Election recovery), split-brain (Network partition), az-failure (Zone outage), and Resilience run (Perf under chaos), ending at Certified."
-graph TD
-    L[LOAD run\nBaseline perf] --> I[INTEGRITY run\nZero data loss]
-    I --> C1[leader-cascade\nElection recovery]
-    C1 --> C2[split-brain\nNetwork partition]
-    C2 --> C3[az-failure\nZone outage]
-    C3 --> R[Resilience run\nPerf under chaos]
-    R --> CERT[Certified: Ready for production]
-```
+### Step 1 — Run the Baseline
 
-**Step 1 — Performance baseline:**
+A LOAD run of 200,000 records with `acks=all` sets the performance the later stages are judged against:
 
 ```bash
 kates test create --type LOAD --records 200000 --acks all --wait
 ```
 
-**Step 2 — Data integrity:**
+### Step 2 — Verify Integrity
+
+The built-in `integrity-tx` template runs a transactional INTEGRITY test with zero-loss, ordering and CRC gates. Export it and run it:
 
 ```bash
 kates test scaffold export integrity-tx
 kates test apply -f integrity-tx.yaml --wait
 ```
 
-**Step 3 — Disruption playbooks:**
+### Step 3 — Run the Playbooks {#step-3--run-the-playbooks}
+
+Each dry run previews the cluster as it is just before its playbook, starts nothing, and exits 1 when the [safety guard](appendix-a-glossary.md#gl-safety-guard) would refuse the playbook. The `&&` runs the playbook only when its dry run passes:
 
 ```bash
-# Each dry run previews the cluster as it is just before its playbook, starts
-# nothing, and exits 1 when the safety guard would refuse the playbook
-kates disruption playbook run leader-cascade --dry-run && kates disruption playbook run leader-cascade
-kates disruption playbook run split-brain --dry-run && kates disruption playbook run split-brain
-kates disruption playbook run az-failure --dry-run && kates disruption playbook run az-failure
+kates disruption playbook run leader-cascade --dry-run \
+  && kates disruption playbook run leader-cascade
+kates disruption playbook run split-brain --dry-run \
+  && kates disruption playbook run split-brain
+kates disruption playbook run az-failure --dry-run \
+  && kates disruption playbook run az-failure
 ```
 
-**Step 4 — Resilience run (performance + chaos combined):**
+A playbook run prints the disruption ID and the final status, and gets no [SLA](appendix-a-glossary.md#gl-sla) grade, because playbook YAML can't carry an `sla` block. Kates calls such targets an SLA: SLO-style thresholds, not an agreement. `kates disruption playbook list` shows the available playbooks and what each one does.
+
+To fail a CI job with [exit code](appendix-a-glossary.md#gl-exit-code) 1 on a breached target, grade the playbook's [disruption plan](appendix-a-glossary.md#gl-disruption-plan) yourself:
+
+1. Save the plan with `kates disruption playbook show <name> -o json > plan.json`.
+2. Add an `sla` block to `plan.json`.
+3. Run it with `kates disruption run --config plan.json --fail-on-sla-breach`.
+
+### Step 4 — Run Load Through a Broker Kill
+
+A resilience run starts one LOAD test and injects one [fault](appendix-a-glossary.md#gl-fault) into it after `steadyStateSec`. Write the request and run it:
 
 ```bash
 cat > resilience.json << 'EOF'
@@ -245,9 +275,11 @@ EOF
 kates resilience run -f resilience.json
 ```
 
-The rate limit keeps the load running across the fault: 180,000 records at 500 records per second take 360 s, while the fault is triggered after `steadyStateSec` (30 s) and lasts `chaosDurationSec` (30 s). An unthrottled run can finish before the fault. If it has ended when `steadyStateSec` is up, Kates injects nothing and the report is `ERROR`; if it ends after that, before the fault goes in, both summaries describe a run the fault never touched. The `spec` goes to the API as written, so it takes the API's field names: `throughput` sets the rate, and LOAD runs one producer and one consumer whatever `numProducers` says. The selector adds `strimzi.io/broker-role=true` because `strimzi.io/component-type=kafka` alone also matches the KRaft controllers, and a random pick could then kill a controller instead of a broker. [Chaos Engineering in Practice](07-chaos-practice.md) covers the fields.
+The rate limit keeps the load running across the fault: 180,000 records at 500 records per second take 360 s. The fault goes in after `steadyStateSec` (30 s) and lasts `chaosDurationSec` (30 s). An unthrottled run can finish before the fault. If it has ended when `steadyStateSec` is up, Kates injects nothing and the report is `ERROR`. If it ends after that, before the fault goes in, both summaries describe a run the fault never touched.
 
-Expected output, with illustrative numbers:
+The `spec` goes to the API as written, so it takes the API's field names: `throughput` sets the rate, and LOAD runs one producer and one consumer whatever `numProducers` says. The selector adds `strimzi.io/broker-role=true` because `strimzi.io/component-type=kafka` alone also matches the [KRaft](appendix-a-glossary.md#gl-kraft) controllers, and a random pick could then kill a controller instead of a broker. [Chaos Engineering in Practice](07-chaos-practice.md) covers the fields.
+
+Output, with illustrative numbers:
 
 ```text
 ◉ Running resilience test...
@@ -300,62 +332,68 @@ Expected output, with illustrative numbers:
 
 `Status` is `COMPLETED` only when the chaos outcome's verdict is `Pass`. The Impact Analysis rows come in a different order from run to run. The command returns as soon as its recovery probes pass, usually while the LOAD run is still producing, so the post-chaos summary covers the run up to that moment. `Test Run` names that LOAD run, and the last line reads it with `kates test get`. With the rate held at 500 records per second, throughput barely moves, and the fault shows in the latency rows.
 
-::: {.callout-tip}
-A playbook run prints the disruption ID and the final status, and gets no SLA grade: playbook YAML cannot carry an `sla` block. To fail a CI job on an SLA violation, with exit code 1, save a playbook's plan with `kates disruption playbook show <name> -o json > plan.json`, add an `sla` block, and run it with `kates disruption run --config plan.json --fail-on-sla-breach`. Use `kates disruption playbook list` to see the available playbooks and what each one does.
-:::
+### Verify Each Stage
 
----
+Check each stage against the table above. `kates test get <id>` shows the LOAD and INTEGRITY runs as `DONE`, and `kates disruption status <id>` shows each playbook's disruption as `COMPLETED`, with the IDs the playbook runs printed.
+
+### Clean Up
+
+The runs leave their topics on the cluster. List them with `kates kafka topics`, and delete the ones you don't keep with `kates kafka delete-topic <name> --yes`.
 
 ## Recipe 4: Investigate a Latency Regression {#recipe-4-investigate-a-latency-regression}
 
-**Goal:** Diagnose why P99 latency increased between two test runs.
+This recipe works out why P99 latency rose between two runs. It starts no new runs, so it doesn't disrupt the cluster: it reads two finished runs, a good one and a bad one, and the cluster as it is now.
 
-### Procedure
+### Step 1 — Find the Metric That Moved
 
-**Step 1 — Identify the regression with diff:**
+`kates report diff` shows which metrics moved, as [Step 4 — Diff the Runs](#step-4--diff-the-runs) in Recipe 1 reads it:
 
 ```bash
 kates report diff <good-id> <bad-id>
 ```
 
-Look for which metric regressed most: throughput drop, latency spike, or error increase.
+Look for the metric that regressed most: a throughput drop, a latency rise in the P99 and Max rows, or an error rate.
 
-**Step 2 — Check broker-level metrics:**
+### Step 2 — Check Broker Share
+
+A broker that leads more than its share of the topic's partitions can become a hotspot. `kates report brokers` shows each broker's share:
 
 ```bash
 kates report brokers <bad-id>
 ```
 
-If one broker leads a disproportionate share of the topic's partitions, it may have become a hotspot due to partition imbalance. `report brokers` shows that share as projected throughput and skew: it splits the run's throughput by each broker's share of the topic's partition leaders, taken when the report was built rather than during the run. It doesn't measure each broker's bytes or request rate.
+It shows that share as projected throughput and skew: it splits the run's throughput by each broker's share of the topic's [partition leaders](appendix-a-glossary.md#gl-partition-leader), taken when the report was built rather than during the run. It doesn't measure each broker's bytes or request rate.
 
-**Step 3 — Export and compare heatmaps:**
+### Step 3 — Compare Heatmaps
+
+A latency [heatmap](appendix-a-glossary.md#gl-heatmap) shows when in the run the slow records fell. Export one for each run:
 
 ```bash
 kates report export <good-id> --format heatmap > good-heatmap.json
 kates report export <bad-id> --format heatmap > bad-heatmap.json
 ```
 
-(When run interactively without a redirect, the heatmap is written to `kates-heatmap-<id>.json` in the current directory.)
+Without a redirect, in a terminal, the export is written to `kates-heatmap-<id>.json` in the current directory. Heatmap rows live only in the Kates API's memory, for its 50 most recent `native` runs and until its pod restarts; [Observability Architecture](09-observability.md#observability-architecture) says what lasts how long.
 
-Both exports work only while the two runs are among the Kates API's 50 most recent `native` runs and its pod hasn't restarted since, because heatmap rows live only in its memory. Kates keeps runs in PostgreSQL, not in Kafka, and some of what you see about a run lives only in the Kates API's memory; [Architecture & Design](02-architecture.md) says what lasts how long.
-
-Heatmap patterns to look for:
+Each pattern in the bad run's heatmap points at a different cause:
 
 | Pattern | Diagnosis |
 |---------|-----------|
-| Vertical stripe in bad run | Point-in-time spike — likely GC pause or leader election |
-| Two horizontal bands | Bimodal latency — some messages hitting hot path, others cold |
-| Gradual upward drift | Saturation — cluster can't keep up with the load |
+| Vertical stripe in bad run | Point-in-time spike: a GC pause or a leader election |
+| Two horizontal bands | Bimodal latency: some records take a slow path, others a fast one |
+| Gradual upward drift | Saturation: the cluster can't keep up with the load |
 
-**Step 4 — Check cluster health during the bad run:**
+### Step 4 — Check Cluster Health
+
+`kates cluster check` reads the cluster as it is now, not as it was during the bad run, so run it while the regression reproduces:
 
 ```bash
 kates cluster check -o json
 ```
 
-Expected output:
+Output, with illustrative numbers and the `kraftQuorum` object trimmed:
 
-```json
+```text
 {
   "clusterId": "lZ0T3AqiTtqzXWkGkDXG3g",
   "brokers": 3,
@@ -367,24 +405,32 @@ Expected output:
     "underReplicated": 3,
     "offline": 0,
     "problems": [
-      {"topic": "kates-load-test", "partition": 4, "issue": "UNDER_REPLICATED", "isr": 2, "replicas": 3}
+      {
+        "topic": "kates-load-test",
+        "partition": 4,
+        "issue": "UNDER_REPLICATED",
+        "isr": 2,
+        "replicas": 3
+      }
     ]
   },
   "status": "WARNING"
 }
 ```
 
-::: {.callout-tip}
-If the diff shows degraded throughput but the heatmap has no obvious pattern, check the GC logs. Run `kubectl logs <broker-pod> -n kafka | grep 'GC pause'` — JVM garbage collection pauses are a common hidden cause of latency spikes.
+[Under-replicated](appendix-a-glossary.md#gl-under-replicated-partition) or offline partitions during the test mean the cluster was under stress: a follower fell behind, or a broker left.
+
+::: {.callout-tip title="No pattern in the heatmap"}
+If throughput dropped but the heatmap shows no pattern, look for long GC pauses with `kubectl logs <broker-pod> -n kafka | grep -i pause`. A long pause shows as a large trailing figure in milliseconds.
 :::
 
-If under-replicated or offline partitions show up during the test, the cluster was under stress.
+### Next
 
----
+Each diagnosis leads somewhere else. A hotspot broker needs its partitions moved, which [Cruise Control](15-kafka-deployment.md#cruise-control) does. Saturation means the load is past the cluster's ceiling, which [Recipe 5: Capacity Planning](#recipe-5-capacity-planning) finds. A GC pause points at the broker's JVM, whose heap and pause time the Strimzi Kafka board in [The Dashboard Set](09-observability.md#the-dashboard-set) shows.
 
 ## Recipe 5: Capacity Planning {#recipe-5-capacity-planning}
 
-A CAPACITY run starts all its producers at once and reports one set of numbers, so a single run can't show where the cluster tops out. To find the ceiling, run CAPACITY tests with 1, 2, 4, 8 and 16 producers, compare them, and read where total throughput stops rising. You need a cluster nothing else depends on, `jq`, and your P99 SLA threshold, and the series takes up to half an hour.
+A CAPACITY run starts all its producers at once and reports one set of numbers, so a single run can't show where the cluster tops out. To find the ceiling, run CAPACITY tests with 1, 2, 4, 8 and 16 producers, compare them, and read where total throughput stops rising. You need a cluster nothing else depends on, `jq`, and your P99 target, and the series takes up to half an hour.
 
 ::: {.callout-caution title="The series saturates the cluster"}
 Every CAPACITY producer runs unthrottled, so each run drives the brokers to their limit. Other clients compete with it for the brokers' network, disk and CPU while it runs, so run the series where nothing else depends on the cluster, and never on production.
@@ -410,7 +456,7 @@ done
 
 Because each run writes to its own topic and the loop deletes it, only one run's records sit on the brokers' disks at a time. At the Kates API's defaults, a 16-producer run can send about 160 GB, and each of the topic's three replicas keeps a copy.
 
-### Step 2 — Compare the Runs
+### Step 2 — Compare the Runs {#step-2--compare-the-runs}
 
 `kates report compare` takes the IDs in the order the loop collected them, and prints every run's summary as JSON:
 
@@ -478,7 +524,7 @@ Multiply each run's `avgThroughputRecPerSec` by its producer count to get the ru
 | 8 | 25,050 rec/s | 200,400 rec/s | 38.4 ms |
 | 16 | 12,200 rec/s | 195,200 rec/s | 212.7 ms |
 
-The total stops rising between 8 and 16 producers, so this cluster's ceiling is about 200,000 records per second. The sustainable figure is the highest total whose P99 meets your SLA [@jain1991art]. With a 50 ms SLA, that's the 8-producer run's 200,400 records per second; with 20 ms, it's the 4-producer run's 170,200.
+The total stops rising between 8 and 16 producers, so this cluster's ceiling is about 200,000 records per second. The sustainable figure is the highest total whose P99 meets your target [@jain1991art]. With a 50 ms target, that's the 8-producer run's 200,400 records per second; with 20 ms, it's the 4-producer run's 170,200.
 
 ### Verify the Runs
 
@@ -502,15 +548,13 @@ kates trend --type CAPACITY --metric avgThroughputRecPerSec --days 90
 
 The trend plots every `DONE` CAPACITY run's per-producer mean, whatever its producer count, so a series shows up in it as a falling staircase and can flag its larger runs as regressions. It tracks the ceiling when you rerun one producer count at regular intervals, such as the count at the ceiling. To raise the ceiling on the producer side, continue with [Recipe 6: Producer Tuning](#recipe-6-producer-tuning).
 
----
-
 ## Recipe 6: Producer Tuning {#recipe-6-producer-tuning}
 
-**Goal:** Find the optimal producer configuration for your workload.
+This recipe finds the producer settings that suit your workload, by running one LOAD scenario per setting and comparing the runs. It needs no extra prerequisites and doesn't disrupt the cluster: the cost is four LOAD runs of 100,000 records each.
 
-### Procedure
+### Step 1 — Write the Suite
 
-Create a scenario file that tests multiple configurations side-by-side:
+A LOAD run's producer defaults to 64 KiB batches, a 5 ms linger and `lz4`. Save the four scenarios as `tuning-suite.yaml`; they differ only in `batchSize`, `lingerMs` and `compressionType`:
 
 ```yaml
 scenarios:
@@ -519,61 +563,66 @@ scenarios:
     spec:
       records: 100000
 
-  - name: "High Batch + Linger"
+  - name: "No Compression"
     type: LOAD
     spec:
       records: 100000
-      batchSize: 65536
+      compressionType: none
+
+  - name: "Bigger Batches"
+    type: LOAD
+    spec:
+      records: 100000
+      batchSize: 262144
       lingerMs: 50
 
-  - name: "LZ4 Compression"
+  - name: "Bigger Batches + zstd"
     type: LOAD
     spec:
       records: 100000
-      compressionType: lz4
-
-  - name: "Full Optimization"
-    type: LOAD
-    spec:
-      records: 100000
-      batchSize: 65536
+      batchSize: 262144
       lingerMs: 50
-      compressionType: lz4
+      compressionType: zstd
 ```
+
+### Step 2 — Run It
+
+Run the suite and wait for all four runs, noting the run ID of each scenario:
 
 ```bash
 kates test apply -f tuning-suite.yaml --wait
 ```
 
-After completion, compare all four runs:
+### Step 3 — Compare the Settings
+
+`kates report compare` takes the four run IDs and prints every run's summary as JSON, in the shape [Step 2 — Compare the Runs](#step-2--compare-the-runs) in Recipe 5 reads:
 
 ```bash
 kates report compare <id1>,<id2>,<id3>,<id4>
 ```
 
-Expected output:
+Each entry's `scenarioName` names its scenario. Set the runs' `avgThroughputRecPerSec` and `p99LatencyMs` side by side, as in this table with illustrative numbers:
 
-```text
-  ▸ Comparison: 4 runs
-  ┌───────────────────────┬───────────────┬──────────────┬───────────────────┐
-  │ Scenario              │ Throughput    │ P99 Latency  │ Error Rate        │
-  ├───────────────────────┼───────────────┼──────────────┼───────────────────┤
-  │ Defaults              │ 14,200 rec/s  │ 18.3ms       │ 0.000%            │
-  │ High Batch + Linger   │ 22,800 rec/s  │ 52.1ms       │ 0.000%            │
-  │ LZ4 Compression       │ 19,500 rec/s  │ 15.7ms       │ 0.000%            │
-  │ Full Optimization     │ 28,100 rec/s  │ 48.9ms       │ 0.000%            │
-  └───────────────────────┴───────────────┴──────────────┴───────────────────┘
-  Best throughput:  Full Optimization (28,100 rec/s, +97.9% vs Defaults)
-  Best latency:    LZ4 Compression (15.7ms, -14.2% vs Defaults)
-```
+| Scenario | `avgThroughputRecPerSec` | `p99LatencyMs` |
+|:----------------------|--:|--:|
+| Defaults | 14,200 | 18.3 |
+| No Compression | 12,900 | 21.4 |
+| Bigger Batches | 22,800 | 52.1 |
+| Bigger Batches + zstd | 24,100 | 55.0 |
 
-::: {.callout-tip}
-If all four runs show nearly identical throughput, the bottleneck is likely not the producer configuration. Check network bandwidth between producers and brokers with `kubectl exec <broker-pod> -n kafka -- cat /proc/net/dev` and verify the cluster isn't network-bound.
+Batching and linger trade latency for throughput: pick the fastest setting whose P99 still meets your target.
+
+::: {.callout-tip title="All four runs look the same"}
+If the four runs show nearly the same throughput, the producer configuration isn't the bottleneck. Check the network between the producers and the brokers with `kubectl exec <broker-pod> -n kafka -- cat /proc/net/dev`.
 :::
+
+### Verify the Winner
+
+Rerun the scenario you picked on its own, a few times, and check that its numbers hold before you adopt the setting in your clients.
 
 ## Recipe 7: Gate a CI Pipeline on Kafka {#recipe-7-gate-a-ci-pipeline-on-kafka}
 
-A pipeline step can fail the build when Kafka regresses. Every install can run a performance [gate](appendix-a-glossary.md#gl-gate), an integrity gate and a [compliance check](appendix-a-glossary.md#gl-compliance-check) against the architecture you wrote down. Where a cluster admin installed Kates cluster-wide with a chaos provider, a chaos [SLA](appendix-a-glossary.md#gl-sla) can gate it too. The runner needs a route to the Kates API, its [API key](appendix-a-glossary.md#gl-api-key) and the `kates` CLI. The gates below run a LOAD test of 100,000 records and an INTEGRITY test of 50,000, so a pipeline run takes a few minutes.
+A pipeline step can fail the build when Kafka regresses. Every install can run a performance gate, an integrity gate and a [compliance check](appendix-a-glossary.md#gl-compliance-check) against the architecture you wrote down. Where a cluster admin installed Kates cluster-wide with a chaos provider, a chaos SLA can gate it too. The runner needs a route to the Kates API, its [API key](appendix-a-glossary.md#gl-api-key) and the `kates` CLI. The gates below run a LOAD test of 100,000 records and an INTEGRITY test of 50,000, so a pipeline run takes a few minutes.
 
 Which gates a pipeline can run depends on how Kates was installed. The cluster-wide install is the chart's default, or `kates deploy`; the namespace-only install is `rbac.scope=namespace`, which [Running Without Cluster Admin](12-deployment.md#running-without-cluster-admin) sets up for a team with only `edit` rights:
 
@@ -629,7 +678,7 @@ scenarios:
       maxCrcFailures: 0
 ```
 
-A run that finishes `DONE` passes unless it breaks a gate. So the INTEGRITY scenario needs its three integrity gates to fail the pipeline on a lost, reordered or corrupted record. Each command below turns its result into an [exit code](appendix-a-glossary.md#gl-exit-code) the pipeline reads:
+A run that finishes `DONE` passes unless it breaks a gate. So the INTEGRITY scenario needs its three integrity gates to fail the pipeline on a lost, reordered or corrupted record. Each command below turns its result into an exit code the pipeline reads:
 
 | Command | Exits 0 when | Exits non-zero when |
 |:----------------------------------------------|:--------------------------------|:----------------------------------------------|
@@ -638,13 +687,13 @@ A run that finishes `DONE` passes unless it breaks a gate. So the INTEGRITY scen
 | `kates compliance check -f ci/reference.yaml` | Every rule with severity `fail` holds | 1: a rule fails. 2: the check can't tell or can't run |
 | `kates disruption run --config ci/plan.json --fail-on-sla-breach` | The plan doesn't breach its `sla`, or has none | 1: the plan's `sla` is breached |
 
-The chaos gate fails only on a breached `sla` block: a plan without one, or one that ends `PARTIAL` or `FAILED`, exits 0. So give `ci/plan.json` an `sla` block, as the tip in [Pre-Production Chaos Certification](#recipe-3-pre-production-chaos-certification) shows.
+The chaos gate fails only on a breached `sla` block: a plan without one, or one that ends `PARTIAL` or `FAILED`, exits 0. So give `ci/plan.json` an `sla` block, as [Step 3 — Run the Playbooks](#step-3--run-the-playbooks) in Recipe 3 shows.
 
 On [`panda`](appendix-a-glossary.md#gl-panda), the lab's three-node Kind cluster, the LOAD run of this file broke its P99 gate, `p99=1484ms > 500ms`, while the INTEGRITY run met all three of its gates, so `kates test apply` exited 1. Set the thresholds from your own cluster's runs, not from these.
 
 `ci/reference.yaml` is a `KafkaReference`, the file [Compliance Checks](compliance.md) teaches you to write.
 
-For a CI system's test report, `kates test apply -o json` prints a summary with each scenario's `runId`, and `kates report export <id> --format junit` writes one run's report as JUnit XML. `kates compliance check --output-junit <file>` and `kates disruption run --output-junit <file>` write theirs directly.
+For a CI system's test report, `kates test apply --output-junit <file>` writes one JUnit test case per scenario, and `kates compliance check` and `kates disruption run` take the same flag. `kates report export <id> --format junit` writes a single run's report as JUnit XML.
 
 ### Step 4 — Wire It Into GitHub Actions
 
@@ -693,7 +742,7 @@ jobs:
           cat "${RUNNER_TEMP}/port-forward.log"; exit 1
 
       - name: Performance and integrity
-        run: exec kates test apply -f ci/kafka-gates.yaml --wait -o json > gates.json
+        run: exec kates test apply -f ci/kafka-gates.yaml --wait --output-junit gates.xml
 
       - name: Compliance
         run: kates compliance check -f ci/reference.yaml --output-junit compliance.xml
@@ -703,13 +752,6 @@ jobs:
         run: |
           kates disruption run --config ci/plan.json \
             --fail-on-sla-breach --output-junit chaos.xml
-
-      - name: JUnit reports
-        if: always()
-        run: |
-          for id in $(jq -r '.scenarios[] | select(.runId) | .runId' gates.json); do
-            kates report export "${id}" --format junit > "run-${id}.xml"
-          done
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -723,26 +765,63 @@ Read the workflow from the top:
 1. The CLI comes from a pinned release, and `sha256sum -c` checks it against the release's `checksums.txt` before it runs. `gh attestation verify kates-linux-amd64.tar.gz --repo bmscomp/kates` also checks where it was built.
 2. The port-forward runs in the background and outlives its step, so the later steps reach the API on `localhost:8080`. A self-hosted runner inside the cluster skips this step and sets `KATES_URL` to the Service instead.
 3. `exec` makes `kates test apply` the step's own process, so cancelling the job signals it directly and it cancels the run it waits for.
-4. Each gate is its own step, so the job's page shows which one failed. The last two steps run even after a failure, so the reports still upload.
+4. Each gate is its own step, so the job's page shows which one failed. The upload step runs even after a failure, so the reports still upload.
 
 ### Limits
 
 The recipe leans on the install's own limits:
 
 - A namespace-only install runs no chaos, so its pipeline leaves `KATES_CHAOS` unset.
-- Under a namespace-only install, a compliance rule that reads a custom `zoneLabel` is UNKNOWN, unless that label is the Kafka CR's `spec.kafka.rack.topologyKey`, and even then for a pod on a node without a broker. So is `monitoring.podMonitor` when no PodMonitor in the Kafka namespace selects every broker pod. Each exits 2, so give such a rule `severity: warn` in the reference.
-- The compliance check needs a Kates API of 1.27.0 or later. An older one answers it with a 404, and the CLI exits 2.
+- Under a namespace-only install, some zone and monitoring rules are UNKNOWN and exit 2. [What the Namespace Scope Changes](compliance.md#what-the-namespace-scope-changes) says which, so give such a rule `severity: warn` in the reference.
+- A Kates API too old to serve the compliance check answers it with a 404, and the CLI exits 2. The [Version & Compatibility Matrix](appendix-d-versions.md) gives the versions.
 - Cancelling the job cancels a run `kates test apply` waits for, but not a disruption plan, which keeps running in the Kates API.
 - On a cluster that enforces Kafka ACLs, the Kates API's Kafka user needs the grants that [Running Without Cluster Admin](12-deployment.md#running-without-cluster-admin) lists.
 
-## Summary
+## Recipe 8: Sign Off krafter for Payments {#recipe-8-sign-off-krafter-for-payments}
 
-- Upgrade validation is a baseline-upgrade-retest-diff loop: run the same scenario file before and after, then compare with `kates report diff` against your tolerance.
-- Nightly regressions are cheapest to catch with `kates schedule create` plus a weekly `kates trend` review — a spike in the sparkline points you at the run to diff.
-- Chaos certification layers its tests: a LOAD baseline, an INTEGRITY check, disruption playbooks, and finally `kates resilience run`, which measures performance during failure.
-- Latency investigations move from `kates report diff` to `kates report brokers` to heatmap export — vertical stripes suggest GC pauses or leader elections, horizontal bands bimodal paths, upward drift saturation.
-- Capacity planning compares CAPACITY runs at rising producer counts: total throughput levels off at the ceiling, and your P99 SLA picks the sustainable point.
-- Producer tuning is a multi-scenario suite compared with `kates report compare` — batching and linger buy throughput at a latency cost, while compression often improves both.
-- A CI pipeline gates on exit codes: scenario gates, a performance grade and a compliance check on any install, a chaos SLA on a cluster-wide one.
+This recipe answers the book's running question: is `krafter` ready for the payments workload? It runs the files the earlier Parts built and holds them to three checks. You need `payments-scenarios.yaml` from Part II, and from Part III the two disruption plans, `payments-broker-loss.json` and `payments-zone-loss.json`, and the two resilience files, `payments-integrity-broker.yaml` and `payments-integrity-zone.yaml`. [The Payments Question](part-chaos-integrity.md#the-payments-question) in Part III describes them. The plans and the resilience runs kill a broker and a zone, so run the recipe before `krafter` takes payments traffic.
+
+### Step 1 — Run the Scenario File
+
+The scenario file's gates hold the throughput and P99 targets:
+
+```bash
+kates test apply -f payments-scenarios.yaml --wait
+```
+
+### Step 2 — Run the Resilience Files
+
+Each resilience file runs an INTEGRITY test with one fault injected. Run the broker file first:
+
+```bash
+kates resilience run -f payments-integrity-broker.yaml
+```
+
+The command returns after the fault, often while its INTEGRITY run is still producing, and names that run as `Test Run`. Read it with `kates test get <id>` once it's `DONE`. Then run `payments-integrity-zone.yaml` the same way: both files use the same topic and consumer group, so start the zone file only after the broker file's run is `DONE`.
+
+### Step 3 — Run the Plans
+
+A plan runs no workload of its own and reads the brokers' metrics from Prometheus, so submit the scenario file without `--wait` and run each plan while that LOAD run produces:
+
+```bash
+kates test apply -f payments-scenarios.yaml
+kates disruption run --config payments-broker-loss.json --fail-on-sla-breach
+```
+
+Wait for that LOAD run to finish, then repeat both commands with `payments-zone-loss.json`.
+
+### Verify the Three Checks
+
+`krafter` is ready when all three checks hold:
+
+1. `kates test apply -f payments-scenarios.yaml --wait` exits 0.
+2. Both resilience runs report `Status` COMPLETED, and their INTEGRITY runs, once `DONE`, show `Lost` 0 and an RPO rather than "not measured".
+3. Both plans report `Status` COMPLETED and `Grade` A, and exit 0 under `--fail-on-sla-breach`.
+
+The third check reads the status and the grade as well as the exit code, because `--fail-on-sla-breach` exits 1 only on a violated constraint. A PARTIAL plan with no violation exits 0, and so does a grade of `-`, which means nothing was graded.
+
+## What the Recipes Share
+
+Every recipe is the same loop: a baseline, a change or a fault, a re-measure, and a comparison the pipeline can read as an exit code. The sign-off recipe is that loop run once for one workload.
 
 Every command these recipes lean on has more flags and output formats than shown here — the [CLI Reference](10-cli-reference.md) documents the full command surface.

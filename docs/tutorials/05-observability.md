@@ -13,10 +13,11 @@ Heatmaps show the **full latency distribution over time** — something percenti
 
 ### Export a Heatmap
 
-`kates report export` has no output-file flag. On a terminal it writes a
-default file beside you and tells you the name — `kates-heatmap-<id>.<ext>` for
-the two heatmap formats, `kates-report-<id>.<ext>` for the rest; redirect it
-when you want a name of your own:
+`kates report export` writes to the file `-f` (`--file`) names. Without `-f`,
+on a terminal it writes a default file beside you and tells you the name —
+`kates-heatmap-<id>.<ext>` for the two heatmap formats, `kates-report-<id>.<ext>`
+for the rest. Piped or redirected, it writes to stdout, for every format
+including `html`:
 
 ```bash
 # JSON format (Grafana-compatible)
