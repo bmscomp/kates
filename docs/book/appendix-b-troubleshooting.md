@@ -8,8 +8,8 @@ The cluster exists but isn't healthy: the Strimzi operator, the brokers, the con
 
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
-| Strimzi operator `CrashLoopBackOff` with `UnsupportedVersionException` | Local chart has mismatched Kafka image map | [Kafka Deployment Engineering](15-kafka-deployment.md#strimzi-operator-crashloopbackoff) |
-| Brokers crash with `ConfigException: Invalid value -1 for local.retention.bytes` | Kafka 4.1+ tightened validation — `-1` rejected when `retention.bytes` is set | [Kafka Deployment Engineering](15-kafka-deployment.md#brokers-crash-with-configexception) |
+| Strimzi operator `CrashLoopBackOff` with `UnsupportedVersionException` | The operator's image map names a Kafka version its binary doesn't support: the release came from a chart not published beside that binary | [Kafka Deployment Engineering](15-kafka-deployment.md#strimzi-operator-crashloopbackoff) |
+| Brokers crash with `ConfigException: Invalid value -1 for local.retention.bytes` | Values set `local.retention.bytes` (`log.local.retention.bytes`) to `-1` while `retention.bytes` is set; Kafka refuses a local retention larger than the total | [Kafka Deployment Engineering](15-kafka-deployment.md#brokers-crash-with-configexception) |
 | Brokers crash immediately with `remote.log.storage.system.enable=true` | Tiered storage enabled without remote storage manager plugin JAR | [Kafka Deployment Engineering](15-kafka-deployment.md#brokers-crash-with-remotelogmanager) |
 | `KafkaActiveControllerCount != 1` alert | Controller quorum lost or election in progress | [Kafka Deployment Engineering](15-kafka-deployment.md#prometheus-alerts) |
 | Under-replicated partitions for extended period | Broker disk I/O saturated, network issues, or follower falling behind | [The Cluster Under Test](03-cluster.md#failure-tolerance-matrix) |
@@ -97,9 +97,9 @@ Something that worked before an operator or Kafka upgrade fails or slows down af
 
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
-| `UnsupportedVersionException` after operator upgrade | Kafka version not supported by new operator version | [Upgrade Playbook](18-upgrade-playbook.md#version-compatibility-matrix) |
+| `Kafka` resource NotReady after setting `kafkaVersion` | Kafka version outside the running operator's window | [Upgrade Playbook](18-upgrade-playbook.md#two-versions-two-steps) |
 | Topics not reconciling after CRD API change | CRDs still using deprecated `v1beta2` | [Upgrade Playbook](18-upgrade-playbook.md#strimzi-operator-upgrade) |
-| Performance regression after Kafka upgrade | New version defaults changed — compare baseline tests | [Upgrade Playbook](18-upgrade-playbook.md#procedure) |
+| Performance regression after Kafka upgrade | New version defaults changed — compare baseline tests | [Upgrade Playbook](18-upgrade-playbook.md#post-upgrade-checks) |
 
 ## Connectivity Debugging Flowchart
 

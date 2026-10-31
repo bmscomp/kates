@@ -40,6 +40,7 @@ jobs:
               - 'scripts/book-metrics-baseline.json'
               - 'scripts/check-book-contrast.py'
               - 'scripts/check-mermaid.sh'
+              - 'scripts/gen-book-index.py'
               - '.github/workflows/docs.yml'
 
   readme-chart-table:
@@ -61,6 +62,9 @@ jobs:
 
       - name: Verify book theme colours meet WCAG AA
         run: ./scripts/check-book-contrast.py
+
+      - name: Verify the book's Index page matches index-terms.txt
+        run: python3 scripts/gen-book-index.py docs/book --check
 
   mermaid:
     name: Mermaid Diagrams Parse

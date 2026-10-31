@@ -1,14 +1,26 @@
 # Compliance Language Reference
 
-Every field of a [`KafkaReference`](appendix-a-glossary.md#gl-kafkareference), the `conformity.kates.io/v1alpha1` language, with the values it accepts, what a [compliance check](appendix-a-glossary.md#gl-compliance-check) reads for each rule, what the report says, and every finding `kates compliance lint` reports. [Compliance Checks](compliance.md) teaches the language on [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test; look here once you write references of your own. The JSON Schema in `cli/examples/conformity` and the [Kates API](appendix-a-glossary.md#gl-kates-api)'s reader define the language, and lint refuses what the Kates API refuses, so everything below holds in an editor, in the CLI and in the API alike.
+Every field of a [`KafkaReference`](appendix-a-glossary.md#gl-kafkareference), the `conformity.kates.io/v1alpha1` language, with the values it accepts, what a [compliance check](appendix-a-glossary.md#gl-compliance-check) reads for each rule, what the report says, and every finding `kates compliance lint` reports. [Compliance Checks](compliance.md) teaches the language on [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test; look here once you write references of your own. The JSON Schema in `cli/examples/conformity` and the [Kates API](appendix-a-glossary.md#gl-kates-api)'s reader define the language. The JSON Schema gives an editor the shape of the language; lint adds the checks the Kates API makes beyond the schema and the cross-rule checks; the Kates API alone measures the file's size. What one of them refuses, the next one refuses too, so a file that passes lint is a file the Kates API reads.
 
 ## How to Read an Entry
 
 The sections follow the order of a file: the document's own fields, the values a rule can take, how rules are named, the settings, then the rules section by section under `spec`. The last sections cover waivers, the report, lint's findings, the canonical form and the size limits.
 
-Each rule section opens with a table of its fields, and the prose beside the table says how their rule ids read. The Kind column names one of the kinds in [Value Kinds](#value-kinds), which sets the forms a field accepts and how the check compares, and the Observes column says what the check reads on the cluster. The paragraphs under the table say which subjects a failing rule names, and when the rule is UNKNOWN rather than FAIL.
+Each rule section opens with a table of its fields, and the lead-in above the table says how their rule IDs read. The Kind column names one of the kinds in [Value Kinds](#value-kinds), which sets the forms a field accepts and how the check compares, and the Observes column says what the check reads on the cluster. The paragraphs under the table say which subjects a failing rule names, and when the rule is UNKNOWN rather than FAIL.
 
-A path such as `spec.brokers.count` says where a field sits in the file, and lint's findings use it. A rule id drops the `spec.` prefix, so the report and a waiver say `brokers.count`.
+A result has one of five statuses, which the report and this appendix use throughout:
+
+| Status | Means |
+|:----------|:--------------------------------------------------------------|
+| PASS | The constraint holds for every subject |
+| FAIL | It doesn't, and the check fails |
+| WARN | It doesn't, on a rule declared `severity: warn`, which never fails the check |
+| WAIVED | It doesn't, under an active waiver |
+| UNKNOWN | The check couldn't read what the rule needs |
+
+[Statuses and the Overall Result](compliance.md#statuses-and-the-overall-result) in Compliance Checks shows how they combine into the verdict and the exit code.
+
+A path such as `spec.brokers.count` says where a field sits in the file, and lint's findings use it. A rule ID drops the `spec.` prefix, so the report and a waiver say `brokers.count`.
 
 ## The Document
 
@@ -18,7 +30,7 @@ A reference has four top-level fields, all required, and nothing else. The field
 |:-------------------|:----------------------------------------------------------|
 | `apiVersion` | `conformity.kates.io/v1alpha1`, exactly |
 | `kind` | `KafkaReference`, exactly |
-| `metadata.name` | Required: a DNS label of up to 63 lower-case letters, digits and `-`. The report shows it as `reference` |
+| `metadata.name` | Required: a DNS label of up to 63 lowercase letters, digits and `-`. The report shows it as `reference` |
 | `metadata.description` | Optional: text of up to 500 characters |
 | `spec` | The settings and rules; at least one rule |
 
@@ -46,7 +58,7 @@ A map names an operator, and the operator says how the observed value is compare
 | `{oneOf: [jbod, persistent-claim]}` | Any one of 1 to 50 listed values | Every kind but boolean |
 | `severity: warn`, inside any map form | A rule that doesn't hold is WARN, not FAIL | Every kind |
 
-The ordered kinds are counts, ports, quantities, versions and broker settings. `equals` and `oneOf` each stand alone, while `min` and `max` combine, and a map needs at least one of the four operators. A `min` above its `max` is refused, because nothing could meet it.
+The ordered kinds are counts, ports, quantities, versions and [broker](appendix-a-glossary.md#gl-broker) settings. `equals` and `oneOf` each stand alone, while `min` and `max` combine, and a map needs at least one of the four operators. A `min` above its `max` is refused, because nothing could meet it.
 
 ### Value Kinds
 
@@ -63,24 +75,27 @@ Each field holds one kind of value, and the kind decides how a declared value an
 | Boolean | `true` or `false`, unquoted | As is |
 | Broker setting | Text, a number, or `true` or `false` | `equals` and `oneOf` as text; `min` and `max` as numbers |
 
-The kinds have rules of their own:
+The kinds have rules of their own. Counts and ports are never quoted and never have a decimal point: `"3"` and `3.0` are both refused. A quantity takes the suffixes `m`, `k`, `M`, `G`, `T`, `P`, `E`, `Ki`, `Mi`, `Gi`, `Ti`, `Pi` and `Ei`, and no other, so `8GB` is refused; `500m` is less than `1`.
 
-- A count or a port is never quoted and never has a decimal point: `"3"` and `3.0` are both refused.
-- A quantity takes the suffixes `m`, `k`, `M`, `G`, `T`, `P`, `E`, `Ki`, `Mi`, `Gi`, `Ti`, `Pi` and `Ei`, and no other, so `8GB` is refused. `500m` is less than `1`.
-- A version compares `"4.10"` above `"4.9"` and `"4.2"` equal to `"4.2.0"`. Unquoted, YAML reads `4.10` as the number 4.1, so lint refuses it. A version the cluster reports loses its build suffix before the comparison: `v1.34.11+k3s1` is 1.34.11.
-- A choice or text field takes the bare form, `equals` or `oneOf`, never `min` or `max`. A choice is not ordered, so `antiAffinity: preferred` refuses a pod whose anti-affinity is `required`; write `{oneOf: [required, preferred]}` to accept either.
-- A boolean takes only the bare form or `equals`, never `oneOf`. A quoted `"true"` is text, and refused.
-- A broker setting compared with `equals` or `oneOf` matches by text. `true` and `false` match in any case, and a number is sent as JSON writes it, so `2.0` matches a broker's `2`. Its `min` and `max` must be numbers, and an observed value that isn't a number never meets them.
+A version compares `"4.10"` above `"4.9"` and `"4.2"` equal to `"4.2.0"`. A version the cluster reports loses its build suffix before the comparison: `v1.34.11+k3s1` is 1.34.11.
+
+Choice and text fields take the bare form, `equals` or `oneOf`, never `min` or `max`. A choice is not ordered, so `antiAffinity: preferred` refuses a pod whose anti-affinity is `required`; write `{oneOf: [required, preferred]}` to accept either. A boolean takes only the bare form or `equals`, never `oneOf`, and a quoted `"true"` is text, and refused.
+
+A broker setting compared with `equals` or `oneOf` matches by text. `true` and `false` match in any case, and a number is sent as JSON writes it, so `2.0` matches a broker's `2`. Its `min` and `max` must be numbers, and an observed value that isn't a number never meets them.
+
+::: {.callout-warning title="Quote every version"}
+Unquoted, YAML reads `4.10` as the number 4.1, so lint refuses it. Write `kafka: "4.10"`.
+:::
 
 ### Severity
 
-Every rule has the severity `fail` unless its map form says `severity: warn`. A `warn` rule that doesn't hold is WARN, which never fails the check. A required listener carries its severity on the listener, not on its properties. [Statuses and the Overall Result](compliance.md#statuses-and-the-overall-result) in Compliance Checks shows how severity, status and the [exit code](appendix-a-glossary.md#gl-exit-code) fit together.
+Every rule has the severity `fail` unless its map form says `severity: warn`. A `warn` rule that doesn't hold is WARN, which never fails the check. [Statuses and the Overall Result](compliance.md#statuses-and-the-overall-result) in Compliance Checks shows how severity, status and the [exit code](appendix-a-glossary.md#gl-exit-code) fit together.
 
-## Rule Ids
+## Rule IDs
 
-A rule's id is its path under `spec`, so the report, a waiver and JUnit all name the rule the same way. Three cases go in brackets rather than after a dot:
+A rule's ID is its path under `spec`, so the report, a waiver and the JUnit file `kates compliance check --output-junit` writes all name the rule the same way. Three cases go in brackets rather than after a dot:
 
-| Declared at | Rule id |
+| Declared at | Rule ID |
 |:------------------------------------------------|:--------------------------------------|
 | `spec.brokers.count` | `brokers.count` |
 | `spec.brokers.requests.memory` | `brokers.requests.memory` |
@@ -89,7 +104,7 @@ A rule's id is its path under `spec`, so the report, a waiver and JUnit all name
 | The item named `tls` under `spec.kafka.listeners.require` | `kafka.listeners.require[tls]` |
 | `spec.kafka.listeners.every.auth` | `kafka.listeners.every.auth` |
 
-A required listener is one rule, whatever properties it lists, so `kafka.listeners.require[tls].port` isn't a rule id and no waiver can name it. Settings aren't rules either. Lint's paths keep the `spec.` prefix and count list items from 0, as in `spec.kafka.listeners.require[0].port` and `spec.waivers[1].until`.
+A required listener is one rule, whatever properties it lists, so `kafka.listeners.require[tls].port` isn't a rule ID and no waiver can name it. Settings aren't rules either. Lint's paths keep the `spec.` prefix and count list items from 0, as in `spec.kafka.listeners.require[0].port` and `spec.waivers[1].until`.
 
 ## Settings
 
@@ -100,7 +115,7 @@ Settings say which cluster a reference is for and how to read it. They all have 
 | `target.platform` | `strimzi` | `strimzi` | The platform; v1alpha1 knows only [Strimzi](appendix-a-glossary.md#gl-strimzi) |
 | `target.namespace` | A DNS label | The Kates API's Kafka namespace | The namespace of the `Kafka` resource the file is for |
 | `target.name` | A DNS label | The Kates API's Kafka cluster | The name of that `Kafka` resource |
-| `target.clusterId` | 22 letters, digits, `-` or `_` | None | The cluster id the `Kafka` resource must report |
+| `target.clusterId` | 22 letters, digits, `-` or `_` | None | The cluster ID the `Kafka` resource must report |
 | `zoneLabel` | A Kubernetes label key | `topology.kubernetes.io/zone` | The node label that names a [zone](appendix-a-glossary.md#gl-zone) |
 | `kafka.source` | `cr` or `brokers` | `cr` | Where `kafka.config` and `kafka.rackAwareness` read |
 | `topics.exclude` | Up to 50 topic-name prefixes | None | Topics the `topics` rules skip |
@@ -115,15 +130,15 @@ An `exclude` entry is the start of a topic name, up to 249 letters, digits, `.`,
 
 The check only reads, and it reads each source once, the first time a rule needs it. A source it can't read, such as a Kubernetes call that's refused or a Kafka Admin call with no answer within 30 seconds, makes every rule that needs it UNKNOWN, with the reason in the result's `detail`. Each result's `source` names what it read, such as `Kubernetes: pods kafka/strimzi.io/cluster=krafter`. The `Kafka` resource is the exception: a check that can't read it stops before any rule, and the Kates API answers 503, naming the missing grant when the read is refused.
 
-Installed with the `kates` chart's `rbac.scope=namespace`, the Kates API reads the cluster through one Role in the Kafka namespace, so it can list neither nodes, which are cluster-scoped, nor the PodMonitors of other namespaces. [Placement](#placement) and [Monitoring](#monitoring) say what those rules read instead, and [Running Without Cluster Admin](12-deployment.md#running-without-cluster-admin) in the Deployment Guide sets such an install up.
+Installed with the `kates` chart's `rbac.scope=namespace`, the Kates API reads the cluster through one Role in the Kafka namespace, so it can list neither nodes, which are cluster-scoped, nor the [PodMonitors](appendix-a-glossary.md#gl-podmonitor) of other namespaces. [Placement](#placement) and [Monitoring](#monitoring) say what those rules read instead, and [Running Without Cluster Admin](12-deployment.md#running-without-cluster-admin) in the Deployment Guide sets such an install up.
 
-A role's pods are the pods in the Kafka namespace labelled `strimzi.io/cluster` with the cluster's name and `strimzi.io/kind=Kafka`, leaving out any pod being deleted. Brokers are the ones labelled `strimzi.io/broker-role=true`, and controllers `strimzi.io/controller-role=true`, so a pod of a [`KafkaNodePool`](appendix-a-glossary.md#gl-kafkanodepool) with both roles counts as both.
+A role's pods are the pods in the Kafka namespace labeled `strimzi.io/cluster` with the cluster's name and `strimzi.io/kind=Kafka`, leaving out any pod being deleted. Brokers are the ones labeled `strimzi.io/broker-role=true`, and controllers `strimzi.io/controller-role=true`, so a pod of a [`KafkaNodePool`](appendix-a-glossary.md#gl-kafkanodepool) with both roles counts as both.
 
 Most rules compare one value per subject: a pod, node, node pool, volume claim, listener, broker or topic. Such a rule holds when every subject's value meets the constraint. A subject with no value never does, and the report shows its value as `unset`. A rule with no subject at all doesn't hold, so `brokers.requests.memory` fails on a cluster with no broker pod; `perNode` and the `topics` rules are the exceptions, and the sections below say why. When a rule fails, the report names the subjects that fall short.
 
 ## Versions
 
-The `versions` section holds the platform's three versions, each to a quoted version. It needs at least one of them, and each rule id starts with `versions.`, as in `versions.kafka`:
+The `versions` section holds the platform's three versions, each to a quoted version. It needs at least one of them, and each rule ID starts with `versions.`, as in `versions.kafka`:
 
 | Field | Kind | Observes |
 |:--------------|:---------|:----------------------------------------------|
@@ -135,7 +150,7 @@ The `versions` section holds the platform's three versions, each to a quoted ver
 
 ## Brokers and Controllers
 
-The `brokers` and `controllers` sections take the same fields, except that only `controllers` takes `dedicated`. Each rule id starts with the section's name, as in `brokers.count` or `controllers.perNode`, and each section needs at least one field:
+The `brokers` and `controllers` sections take the same fields, except that only `controllers` takes `dedicated`. Each rule ID starts with the section's name, as in `brokers.count` or `controllers.perNode`, and each section needs at least one field:
 
 | Field | Kind | Observes |
 |:-------------------------------------|:------------------------------|:----------------------------------------------|
@@ -171,13 +186,22 @@ The `requests` and `limits` rules read the container named `kafka` in each pod, 
 
 `zones` and `skew` find each pod's zone in its node's zone label, `zoneLabel`. A pod that isn't scheduled, or runs on a node without the label, fails both rules and is named, because the spread can't be shown. Their `detail` lists the pods per zone, as in `alpha: 1, gamma: 1, sigma: 1`. `skew` counts only the zones that host a pod, so one zone with pods gives a skew of 0.
 
-When the Kates API may not list nodes, which are cluster-scoped, both rules take each pod's zone from the EndpointSlices of Strimzi's headless Service, `<cluster>-kafka-brokers`, and the `detail` ends `zones from the EndpointSlices of kafka/krafter-kafka-brokers`. Endpoints carry only `topology.kubernetes.io/zone`. With another `zoneLabel` that is the Kafka CR's `spec.kafka.rack.topologyKey`, they take it from the racks the brokers report through the Kafka Admin API, since Strimzi copies that node label into each broker's rack, and the `detail` ends `zones from Kafka Admin: describeCluster racks`. A pod on a node that runs no broker Kafka reports, such as a dedicated controller's, makes the rule UNKNOWN. With any other `zoneLabel` the rules are UNKNOWN. The rule's `source` names where the zones came from. A pod with no address yet has no endpoint, so it counts as in no zone unless another Kafka pod runs on its node.
+Nodes are cluster-scoped, and where a pod's zone comes from depends on whether the Kates API may list them and on `zoneLabel`:
+
+| May list nodes | `zoneLabel` | Zones come from | The `detail` ends |
+|:----|:--------------------|:----------------------------------|:------------------------------|
+| Yes | Any | The pod's node label | Nothing more |
+| No | `topology.kubernetes.io/zone` | The [EndpointSlices](appendix-a-glossary.md#gl-endpointslice) of Strimzi's headless Service, `<cluster>-kafka-brokers` | `zones from the EndpointSlices of kafka/krafter-kafka-brokers` |
+| No | The `Kafka` resource's `spec.kafka.rack.topologyKey` | The racks the brokers report through the Kafka Admin API | `zones from Kafka Admin: describeCluster racks` |
+| No | Any other | Nothing: the rules are UNKNOWN | |
+
+Endpoints carry only `topology.kubernetes.io/zone`, and Strimzi copies the rack key's node label into each broker's rack. With the racks, a pod on a node that runs no broker Kafka reports, such as a dedicated controller's, makes the rule UNKNOWN. The chart's `rbac.nodeReads=true` grants the Kates API `get` and `list` on nodes under a namespace-only install, so the rules read the node label as a cluster-scoped install does; [Step 1 — Grant the Team's Kates Access to Kafka](12-deployment.md#step-1--grant-the-teams-kates-access-to-kafka) applies it. The rule's `source` names where the zones came from. A pod with no address yet has no endpoint, so it counts as in no zone unless another Kafka pod runs on its node.
 
 `perNode` names each node that runs more of the role's pods than the rule allows. A pod that isn't scheduled runs on no node, so it counts nowhere, and a role with no pods holds the rule: no node runs too many.
 
 `antiAffinity` reads each pod's scheduling rules. It observes `required` when a required pod anti-affinity term with the topology key `kubernetes.io/hostname` selects the pod's own labels, `preferred` when only a preferred term does, and `none` otherwise. It reads the rule Kubernetes was given, while `perNode` reads where the pods run today.
 
-`dedicated` observes `true` when no node pool lists both the `broker` and `controller` roles, leaving out pools scaled to 0 replicas, and its `detail` names any pool that does. Keeping the roles apart keeps a broker's load and restarts away from the KRaft [quorum](appendix-a-glossary.md#gl-quorum). `brokers.dedicated` is refused: only controllers take it.
+`dedicated` observes `true` when no node pool lists both the `broker` and `controller` roles, leaving out pools scaled to 0 replicas, and its `detail` names any pool that does. Keeping the roles apart keeps a broker's load and restarts away from the [KRaft](appendix-a-glossary.md#gl-kraft) [quorum](appendix-a-glossary.md#gl-quorum). `brokers.dedicated` is refused: only controllers take it.
 
 ## Kafka Settings
 
@@ -193,7 +217,7 @@ The `kafka` section reads the `Kafka` resource: its authorization, its [listener
 | `listeners.every.auth` | Choice: `none`, `tls`, `scram-sha-512`, `oauth`, `custom` | Each listener's `authentication.type`, `none` when unset |
 | A key of `config` | Broker setting | The value the `Kafka` resource sets, or the value each broker uses |
 
-Each rule id starts with `kafka.`, as in `kafka.rackAwareness`. A required listener's id carries its name, `kafka.listeners.require[<name>]`, and a broker setting's its key, `kafka.config[<key>]`. `authorization` and the listener rules always read the `Kafka` resource, whatever `kafka.source` says.
+Each rule ID starts with `kafka.`, as in `kafka.rackAwareness`. A required listener's id carries its name, `kafka.listeners.require[<name>]`, and a broker setting's its key, `kafka.config[<key>]`. `authorization` and the listener rules always read the `Kafka` resource, whatever `kafka.source` says.
 
 ### Rack Awareness
 
@@ -202,9 +226,9 @@ Each rule id starts with `kafka.`, as in `kafka.rackAwareness`. A required liste
 | `kafka.source` | Every broker must | A broker that falls short |
 |:---------------|:-------------------------------------------|:------------------------------------|
 | `cr`, the default | Run on a node that carries the zone label | Is named by its pod |
-| `brokers` | Report a rack to the Kafka Admin API | Is named by its broker id |
+| `brokers` | Report a rack to the Kafka Admin API | Is named by its broker ID |
 
-With `cr`, it reads the zone label as the [placement](#placement) rules do, from the EndpointSlices when the Kates API may not list nodes. With `brokers`, a broker that a node pool's `status.nodeIds` lists but Kafka doesn't report, because it's fenced or hasn't started, makes the rule UNKNOWN when no reported broker falls short.
+With `cr`, it reads the zone label as the rules under [Placement](#placement) do: from the EndpointSlices when the Kates API may not list nodes, unless `rbac.nodeReads=true` lets it. With `brokers`, a broker that a node pool's `status.nodeIds` lists but Kafka doesn't report, because it's fenced or hasn't started, makes the rule UNKNOWN when no reported broker falls short.
 
 ### Listeners
 
@@ -222,7 +246,7 @@ spec:
           severity: warn
 ```
 
-The rule holds when `spec.kafka.listeners` has a listener of that name and each listed property meets its constraint. Without one, the rule observes `missing`, with the `detail` `no listener named external`. With one that differs, the `detail` lists each property that does, as in `tls is false`. A name is a Strimzi listener name, up to 11 lower-case letters and digits, and a file lists at most 50 required listeners, each name once.
+The rule holds when `spec.kafka.listeners` has a listener of that name and each listed property meets its constraint. Without one, the rule observes `missing`, with the `detail` `no listener named external`. With one that differs, the `detail` lists each property that does, as in `tls is false`. A name is a Strimzi listener name, up to 11 lowercase letters and digits, and a file lists at most 50 required listeners, each name once.
 
 `port` is the port inside Kafka, not the one clients reach through a route, an ingress, a load balancer or a node port. Strimzi refuses a listener port below 9092, so lint refuses a required port that allows nothing from 9092 up.
 
@@ -230,16 +254,28 @@ The `every` rules hold every listener in the `Kafka` resource to a type, TLS or 
 
 ### Broker Settings
 
-`config` maps a broker setting's name to a constraint. A name is lower-case letters and digits joined by `.`, `_` or `-`, up to 128 characters, and a file holds at most 200 of them. Where the value comes from depends on `kafka.source`:
+`config` maps a broker setting's name to a constraint. A name is lowercase letters and digits joined by `.`, `_` or `-`, up to 128 characters, and a file holds at most 200 of them. Where the value comes from depends on `kafka.source`:
 
 | `kafka.source` | `config` reads | Subjects | Needs |
 |:----------------|:----------------------------------------|:-------------|:-----------------------------|
 | `cr`, the default | What `spec.kafka.config` sets | None: one value | The Kubernetes API only |
-| `brokers` | The value each broker uses, its default included | `broker 0`, `broker 1`… | The Kates API's connection to Kafka |
+| `brokers` | The value each broker uses, its default included | `broker 0`, `broker 1`, one per broker | The Kates API's connection to Kafka |
 
+::: {.callout-warning title="With kafka.source: cr, an unset default fails"}
 With `cr`, a setting the `Kafka` resource leaves to Kafka's default observes `unset`, with the `detail` `not set in the Kafka CR`, and fails even when the default would meet the rule. Write the setting into the resource, or use `brokers`.
+:::
 
-With `brokers`, the Kates API first checks that its Kafka connection reaches the cluster whose id the `Kafka` resource reports, and the rule is UNKNOWN when it doesn't. A sensitive setting, such as a password, is always UNKNOWN, because Kafka never returns its value. So is a rule whose brokers show no gap while some broker couldn't be read. A broker can't be read when it doesn't answer, when a node pool lists it but Kafka doesn't report it, or when it reports no value because Kafka derives the setting from another one, as `log.retention.ms` from `log.retention.hours`. When another broker does show a gap, the rule fails, and the `detail` names the brokers it couldn't read. A setting that no broker reports fails, with the `detail` `brokers do not report <key>`.
+With `brokers`, the Kates API first checks that its Kafka connection reaches the cluster whose ID the `Kafka` resource reports. What the check then finds decides the status:
+
+| What the check finds | Status | The `detail` |
+|:----------------------------------------------|:---------|:------------------------------|
+| The Kafka connection reaches another cluster | UNKNOWN | The two cluster IDs |
+| A sensitive setting, such as a password | UNKNOWN | Kafka never returns its value |
+| Some broker unread, none showing a gap | UNKNOWN | The brokers it couldn't read |
+| Some broker unread, another showing a gap | FAIL | The brokers it couldn't read |
+| No broker reports the key | FAIL | `brokers do not report <key>` |
+
+A broker can't be read when it doesn't answer, when a node pool lists it but Kafka doesn't report it, or when it reports no value because Kafka derives the setting from another one, as `log.retention.ms` from `log.retention.hours`.
 
 ## Topics
 
@@ -256,7 +292,7 @@ A failing rule names the first 50 topics that fall short, and its `detail` count
 
 ## Monitoring
 
-The `monitoring` section checks that the cluster can be watched: its metrics, its [Kafka Exporter](appendix-a-glossary.md#gl-kafka-exporter), and a PodMonitor that scrapes its brokers. It needs at least one field, and each rule id starts with `monitoring.`, as in `monitoring.podMonitor`:
+The `monitoring` section checks that the cluster can be watched: its metrics, its [Kafka Exporter](appendix-a-glossary.md#gl-kafka-exporter), and a PodMonitor that scrapes its brokers. It needs at least one field, and each rule ID starts with `monitoring.`, as in `monitoring.podMonitor`:
 
 | Field | Kind | Observes |
 |:----------------|:------------------------|:----------------------------------------------|
@@ -274,7 +310,7 @@ When the Kates API may not list PodMonitors in every namespace, it lists those o
 
 | Field | Accepts |
 |:---------|:--------------------------------------------------------------------|
-| `rule` | The id of a rule this file declares, up to 200 characters; each rule takes at most one waiver |
+| `rule` | The ID of a rule this file declares, up to 200 characters; each rule takes at most one waiver |
 | `reason` | 1 to 500 characters: why the gap is accepted |
 | `by` | 1 to 100 characters: who owns it |
 | `until` | A date such as `2027-03-31`: the last day the waiver applies, read in UTC |
@@ -291,7 +327,9 @@ A waiver covers any status but PASS, UNKNOWN included, and a WAIVED rule never f
 
 ## The Report
 
-`POST /api/conformity/check` answers 200 with a report whatever the verdict, and `kates compliance check -o json` prints it. Its top-level fields describe the check:
+`POST /api/conformity/check` answers 200 with a report whatever the verdict, and `kates compliance check -o json` prints it. The Kates API stores every report and answers with a `Location` header that names it under `/api/conformity/checks`. [GET /api/conformity/checks](11-api-reference.md#get-apiconformitychecks) lists them, and `GET /api/conformity/checks/{id}` returns one. `--output-junit <file>` writes the same results as a JUnit report, one test case per rule, for a CI server; the [compliance check](10-cli-reference.md#compliance-check) entry lists its flags.
+
+The report's top-level fields describe the check:
 
 | Field | Holds |
 |:--------------|:----------------------------------------------------------------|
@@ -310,7 +348,7 @@ Each result describes one rule. A field with nothing to say is left out:
 
 | Field | Holds |
 |:------------|:--------------------------------------------------------------------|
-| `rule` | The rule id |
+| `rule` | The rule ID |
 | `status` | `PASS`, `FAIL`, `WARN`, `WAIVED` or `UNKNOWN` |
 | `severity` | `fail` or `warn` |
 | `expected` | The constraint in its map form, such as `{"min": 3}` |
@@ -321,7 +359,7 @@ Each result describes one rule. A field with nothing to say is left out:
 | `waiver` | Under an active waiver: the rule's own `status`, `reason`, `by` and `until` |
 | `note` | `waiver no longer needed` or `waiver expired on <date>` |
 
-Results sort by status, FAIL first, then UNKNOWN, WARN, WAIVED and PASS, and by rule id within a status. When more than 50 subjects fall short, the `detail` says how many, and that the first 50 are listed.
+Results sort by status, FAIL first, then UNKNOWN, WARN, WAIVED and PASS, and by rule ID within a status. When more than 50 subjects fall short, the `detail` says how many, and that the first 50 are listed.
 
 The `verdict` is `FAIL` when any result is FAIL. Otherwise it is `UNKNOWN` when a rule with severity `fail` is UNKNOWN, and `PASS` in every other case. [POST /api/conformity/check](11-api-reference.md#post-apiconformitycheck) lists the error statuses for a reference the check can't run.
 
@@ -347,7 +385,7 @@ These codes report a file the language can't read as written. Every one is an er
 | `required` | A required field is missing |
 | `type` | A value of the wrong kind, such as an unquoted version, or a key with no value |
 | `enum` | A choice outside its field's list |
-| `pattern` | A name, cluster id, label key, quantity, version, rule id or prefix in the wrong shape |
+| `pattern` | A name, cluster ID, label key, quantity, version, rule ID or prefix in the wrong shape |
 | `format` | An `until` that isn't a date such as `2026-12-31` |
 | `length` | Text that is empty or too long |
 | `range` | A number outside its field's range, such as a count above 10,000 |
@@ -361,7 +399,7 @@ These codes report a file the language can't read as written. Every one is an er
 | `unknown-rule` | A waiver names no rule the file declares |
 | `min-above-max` | A constraint's `min` is above its `max` |
 
-### Rules No Cluster Can Meet
+### Findings Across Rules
 
 The cross-rule checks read several constraints together. An error means no cluster can pass the file. A warning means it can, but promises less than it seems to. The constraints these checks read include a [replication factor](appendix-a-glossary.md#gl-replication-factor) and `min.insync.replicas` set under `kafka.config` or `topics`:
 
@@ -370,31 +408,31 @@ The cross-rule checks read several constraints together. An error means no clust
 | `zones-unreachable` | Error | No allowed `count` and `zones` fit: each zone needs a pod, and every pod a zone |
 | `skew-unreachable` | Error | No allowed count split over allowed zones gives an allowed `skew` |
 | `pernode-cannot-place-count` | Error | `perNode` can't spread any allowed count over enough nodes, while another rule requires every pod scheduled |
+| `config-value-kafka-refuses` | Error | With `kafka.source: brokers`, a constraint on a replication factor, a minimum [ISR](appendix-a-glossary.md#gl-isr) or unclean election admits no value Kafka accepts |
+| `sensitive-config-from-brokers` | Error | With `kafka.source: brokers`, a password-type setting, whose value Kafka never returns |
+| `request-above-limit` | Error | A request's least allowed value is above its limit's greatest, and `count` requires at least one pod |
+| `strimzi-1-with-pre-kraft-kafka` | Error | `versions.strimzi` requires 1.0 or later, and `versions.kafka` allows nothing from 3.0 up |
+| `listener-contradicts-every` | Error | A required listener's `type`, `tls` or `auth` shares no value with `listeners.every` |
+| `listener-port-below-9092` | Error | A required listener's `port` allows nothing from 9092 up |
 | `controller-quorum-even` | Warning | `controllers.count` allows only even sizes, which tolerate no more failures than one fewer |
 | `controller-quorum-zone-loss` | Warning | No allowed controller count keeps a majority after losing the zone with the most controllers |
-| `config-value-kafka-refuses` | Error | With `kafka.source: brokers`, a constraint on a replication factor, a minimum ISR or unclean election admits no value Kafka accepts |
-| `sensitive-config-from-brokers` | Error | With `kafka.source: brokers`, a password-type setting, whose value Kafka never returns |
 | `replication-factor-exceeds-brokers` | Warning | A replication factor needs more brokers than `brokers.count` allows |
 | `min-isr-not-below-rf` | Warning | A minimum ISR isn't below its replication factor or broker count, so `acks=all` writes get refused |
 | `isr-lost-with-one-zone` | Warning | Losing one zone leaves fewer replicas than the minimum ISR, even with the most zones and replicas allowed |
 | `unclean-election-required` | Warning | `unclean.leader.election.enable` must be `true`, on a cluster that may have more than one broker |
-| `request-above-limit` | Error | A request's least allowed value is above its limit's greatest, and `count` requires at least one pod |
 | `byte-quantity-too-small` | Warning | A memory or storage size below a mebibyte, usually a lost unit: `512m` means milli |
 | `ephemeral-single-node` | Warning | `storage.type` allows only `ephemeral`, and `count` allows at most one pod |
-| `strimzi-1-with-pre-kraft-kafka` | Error | `versions.strimzi` requires 1.0 or later, and `versions.kafka` allows nothing from 3.0 up |
-| `listener-contradicts-every` | Error | A required listener's `type`, `tls` or `auth` shares no value with `listeners.every` |
-| `listener-port-below-9092` | Error | A required listener's `port` allows nothing from 9092 up |
 | `podmonitor-without-metrics` | Warning | `podMonitor: true` with `metrics: none` and no Kafka Exporter required |
 | `authorization-without-authentication` | Warning | `simple` or `keycloak` authorization, with every listener's `auth` only `none` |
 | `setting-without-effect` | Warning | `zoneLabel` or `kafka.source: brokers` set, with no rule that reads it |
 | `waiver-expired` | Warning | A waiver's `until` has passed, so its rule counts again |
 | `rule-never-passes` | Warning | One of the errors above, on a rule the check tolerates |
 
-The durability warnings rest on how Kafka acknowledges a write: with [`acks=all`](appendix-a-glossary.md#gl-acks), a write waits for every in-sync replica, and Kafka refuses it when fewer than `min.insync.replicas` are in sync. [Unclean leader election](appendix-a-glossary.md#gl-unclean-leader-election) lets a replica that fell behind become leader, discarding writes the old leader acknowledged.
+The durability warnings follow from [`acks=all`](appendix-a-glossary.md#gl-acks), under which the leader acknowledges a write only once every replica in the ISR has it, and `min.insync.replicas` is the smallest ISR it accepts such a write with. They also follow from [unclean leader election](appendix-a-glossary.md#gl-unclean-leader-election), which, when off, keeps a replica that fell behind from leading and truncating acknowledged records. [Replication Configuration](03-cluster.md#replication-configuration) in The Cluster Under Test explains both.
 
 ### Tolerated Rules
 
-Every error in the cross-rule table can fire on a rule the check tolerates: one whose severity is `warn`, or that an active waiver covers. The check can then still pass, so lint reports `rule-never-passes` instead, a warning that names how each rule is tolerated. The `spec` of this file, `tolerated.yaml`, waives a zones rule that two brokers can never meet:
+Every error in the Findings Across Rules table can fire on a rule the check tolerates: one whose severity is `warn`, or that an active waiver covers. The check can then still pass, so lint reports `rule-never-passes` instead, a warning that names how each rule is tolerated. The `spec` of this file, `tolerated.yaml`, waives a zones rule that two brokers can never meet:
 
 ```yaml
 spec:
@@ -436,7 +474,7 @@ It refuses a file that doesn't parse, or one that sets a key to two different va
 
 ## Size Limits
 
-These are the bounds on a reference and its report. Lint, the JSON Schema and the Kates API hold a reference to the same ones, except the size of the whole reference, which only the Kates API measures:
+These are the bounds on a reference and its report. Lint, the JSON Schema and the Kates API hold a reference to the same ones, except the size of the whole reference, which only the Kates API measures. It answers 413 when a file is over it, so `kates compliance check` exits 2:
 
 | What | At most |
 |:--------------------------------------------|:-------------------------------|
@@ -464,3 +502,5 @@ These are the bounds on a reference and its report. Lint, the JSON Schema and th
 | `prod-3az.yaml` | Production Kafka in three zones, dedicated controllers, TLS on every listener |
 | `kind-ci.yaml` | The single-broker cluster CI deploys on [Kind](appendix-a-glossary.md#gl-kind), which must pass every rule |
 | `kafkareference.v1alpha1.schema.json` | The JSON Schema editors validate against |
+
+Copy the one nearest your cluster, run `kates compliance lint` on it, then `kates compliance check -f`. [Compliance Checks](compliance.md) reads the first report with you, and the [Glossary](appendix-a-glossary.md) has every term this appendix uses.

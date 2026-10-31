@@ -246,3 +246,45 @@
   \fi
   \kates@maketitle}
 \makeatother
+
+% ── Copyright page ──────────────────────────────────────────────────────────
+% The back of the title page, as in a printed book: the license, where the
+% edition comes from, how to report an error, and what set it.
+\lowertitleback{\small
+  \textit{Kates — The Definitive Guide}\par\smallskip
+  Licensed under the Apache License, Version 2.0, like the Kates source code:
+  \url{https://www.apache.org/licenses/LICENSE-2.0}.\par\smallskip
+  This edition was produced on \today\ from the \texttt{docs/book} sources of
+  \url{https://github.com/bmscomp/kates}. The book tracks the versions pinned
+  in that repository, which the Version \& Compatibility Matrix lists.\par\smallskip
+  Report an error at \url{https://github.com/bmscomp/kates/issues}.\par\smallskip
+  Apache Kafka and Kafka are trademarks of the Apache Software Foundation, and
+  Kubernetes is a trademark of the Linux Foundation. Other names may be
+  trademarks of their owners.\par\medskip
+  \textsc{Colophon.} Set in EB Garamond, with Inter for labels and JetBrains
+  Mono for code. Typeset with Quarto, Pandoc and LuaLaTeX on KOMA-Script's
+  \texttt{scrbook}, with diagrams drawn by Mermaid.\par}
+
+% ── Long lines ──────────────────────────────────────────────────────────────
+% A code line wider than the measure wraps at a space or after / , = : ; &,
+% and its continuation is marked with a muted arrow, instead of running into
+% the margin (fvextra extends the fancyvrb Verbatim that Pandoc's Highlighting
+% and the output panels use). theme/pdf-inline-code.lua and
+% theme/pdf-tables.lua do the same for inline code and table columns.
+\usepackage{fvextra}
+\fvset{breaklines=true, breakanywhere=false, breakindent=0pt,
+  breakafter={/,=:;\&}, breakaftersymbolpre={}, breakaftersymbolpost={},
+  breaksymbolleft={\color{katesmuted}\scriptsize\ensuremath{\hookrightarrow}},
+  breaksymbolsepleft=0.4em, breaksymbolindentleft=1.5em}
+
+% No single line of a paragraph alone at the top or the foot of a page.
+\clubpenalty=10000
+\widowpenalty=10000
+\displaywidowpenalty=10000
+
+% ── Index ───────────────────────────────────────────────────────────────────
+% theme/index-entries.lua marks the sections that teach each term in
+% index-terms.txt; Quarto runs makeindex, and the Index appendix prints it.
+\usepackage{makeidx}
+\makeindex
+\KOMAoptions{index=totoc}

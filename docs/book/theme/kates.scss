@@ -299,27 +299,12 @@ body:not(:has(.sidebar-link.active:is([href$="10-cli-reference.html"], [href$="1
 
 // ── Prose ───────────────────────────────────────────────────────────────────
 
-// A reading measure for running text: 66 to 75 characters a line. Inter's
-// `ch` (the width of a zero) is wider than its average character, so 68ch
-// barely narrows the 749px column: lines keep a median of 79 characters in
-// Introduction and 84 in Performance Theory. 58ch sets 70 and 71. Tables,
-// code, diagrams and callouts keep the full column. So does the landing
-// page's cover, which Quarto floats inside a paragraph of its own: capping
-// that paragraph would pull the cover in from the column's edge. From 1200px
-// up the column is itself the measure ("The page, from 1200px up"), and
-// running text fills it.
-@include media-breakpoint-down(xl) {
-  #quarto-document-content,
-  #quarto-document-content section {
-    > :is(p:not(:has(> .quarto-cover-image)), dl, blockquote) {
-      max-width: $kates-measure;
-    }
-
-    > :is(ul, ol) {
-      max-width: calc(#{$kates-measure} + 2rem);
-    }
-  }
-}
+// One width for everything in the chapter: text, code, output, tables,
+// callouts, diagrams and screenshots share the column's edges, as on a
+// printed page. Below 1200px the column itself is held to the reading
+// measure ("Side panels"); from 1200px up the column is the measure ("The
+// page, from 1200px up"). Nothing steps out of it: a table too wide scrolls
+// in its own box, and a diagram too wide shrinks or opens full screen.
 
 // Lists: tighter leading inside an item and a clear step between items, so
 // an item that wraps reads as one. The breadcrumbs, the navigation lists and
@@ -1214,9 +1199,10 @@ dialog.kates-diagram-viewer {
     --kates-panel-width: clamp(210px, 15.5vw, 290px);
     --kates-gap: clamp(24px, 2vw, 44px);
     --kates-column: clamp(680px, 48vw, 920px);
-    // How far wide material may step out on each side: the room the other
-    // bands leave, less 16px of air, and never more than 260px
-    --kates-bleed: clamp(0px, calc((100vw - 2 * var(--kates-edge) - 2 * var(--kates-panel-width) - 2 * var(--kates-gap) - var(--kates-column)) / 2 - 16px), 260px);
+    // How far wide material may step out of the column: not at all, so code,
+    // tables, diagrams and screenshots keep the text's edges (theme/reader.html
+    // and the figure rules below read it)
+    --kates-bleed: 0px;
   }
 
   #quarto-content.page-columns {
@@ -2114,7 +2100,8 @@ $kates-part-hang: 2.15em; // the part numerals' column
     grid-column: body-content-start / page-end;
     justify-self: center;
     width: 100%;
-    max-width: min(100%, 920px);
+    // the reading measure, which code, tables and diagrams share with the text
+    max-width: min(100%, #{$kates-measure});
   }
 }
 

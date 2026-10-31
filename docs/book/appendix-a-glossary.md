@@ -28,7 +28,7 @@ A Kubernetes extension point that sees each API request before the object is sto
 
 ### API Key {#gl-api-key}
 
-The shared secret every REST and gRPC call to the Kates API must carry, as `Authorization: Bearer <key>` or `X-API-Key: <key>`, except REST `/api/health` and Quarkus's own `/q/` endpoints such as `/q/metrics`. The `kates` chart generates it into the `kates-api-key` Secret and keeps it across upgrades; a CLI context carries it. Whoever holds it can start load and faults. See [REST API Reference](11-api-reference.md#authentication).
+The shared secret every REST and gRPC call to the Kates API must carry, as `Authorization: Bearer <key>` or `X-API-Key: <key>`, except REST `/api/health` and Quarkus's own `/q/` endpoints such as `/q/metrics`. The `kates` chart generates it into the `kates-api-key` Secret and keeps it across upgrades; a CLI context carries it. Whoever holds it can start load and faults. See [Security & Compliance](17-security.md#securing-kates).
 
 ### Apicurio Registry {#gl-apicurio-registry}
 
@@ -193,6 +193,10 @@ The replicas of a partition that left its ISR while it was below `min.insync.rep
 ### emptyDir {#gl-emptydir}
 
 A Kubernetes volume that starts empty on the pod's node and is deleted with the pod, used for writable scratch paths when the root filesystem is read-only. See [Deployment Guide](12-deployment.md#read-only-filesystem-compliance).
+
+### EndpointSlice {#gl-endpointslice}
+
+The Kubernetes resource that lists a Service's ready addresses, each with its node and zone. In Kates, the zone rules of a compliance check read it when the Kates API may not list nodes. See [Compliance Language Reference](appendix-compliance-language.md#placement).
 
 ### Entity Operator {#gl-entity-operator}
 
@@ -396,7 +400,7 @@ The replicated log in which KRaft controllers record every metadata change — t
 
 ### Metadata Version {#gl-metadata-version}
 
-The KRaft metadata format a cluster runs, which can be no newer than its Kafka version and is raised as a separate step after a Kafka upgrade. The `kafka-cluster` chart refuses a `kafka.metadataVersion` newer than `kafkaVersion`, and `kates deploy` refuses a Kafka version outside the operator's supported window. See [Upgrade Playbook](18-upgrade-playbook.md#kafka-version-upgrade).
+The KRaft metadata format a cluster runs, which can be no newer than its Kafka version and is raised as a separate step after a Kafka upgrade. The `kafka-cluster` chart refuses a `kafka.metadataVersion` newer than `kafkaVersion`, and `kates deploy` refuses a Kafka version outside the operator's supported window. See [Upgrade Playbook](18-upgrade-playbook.md#two-versions-two-steps).
 
 ### Metric Contract {#gl-metric-contract}
 
@@ -415,6 +419,10 @@ Kafka Connect connectors that copy topics from a source cluster to a target clus
 Mutual TLS: both client and server present certificates, so each authenticates the other [@rfc8446]. `krafter`'s `tls` listener, on port 9093, authenticates clients this way. See [Security & Compliance](17-security.md#mtls-mutual-tls).
 
 ## N
+
+### Network Partition {#gl-network-partition}
+
+A failure that splits a network so that some nodes can't reach others while each side keeps running [@bailis2014network]. In Kates, the `NETWORK_PARTITION` disruption type cuts one pod off by adding a NetworkPolicy with no allow rules to it, on either chaos provider. See [Chaos Engineering in Practice](07-chaos-practice.md#split-brain).
 
 ### NetworkPolicy {#gl-networkpolicy}
 
@@ -504,6 +512,10 @@ A disruption plan that ships inside Kates as YAML and runs by name; there are si
 
 See [PDB](#gl-pdb).
 
+### PodMonitor {#gl-podmonitor}
+
+A Prometheus Operator resource that tells Prometheus which pods to scrape, by label selector and namespace. In Kates, `monitoring.podMonitor` holds when one selects every broker pod. See [Compliance Language Reference](appendix-compliance-language.md#monitoring).
+
 ### PolicyException {#gl-policyexception}
 
 A Kyverno resource that exempts named resources or namespaces from specific policy rules without disabling the policy. In Kates, the `kates` and `kates-chaos` charts render one from `kyvernoPolicy.exceptions` for some of their own pods, the Litmus operator among them, against any policy the cluster runs. See [Security & Compliance](17-security.md#policy-exceptions).
@@ -556,7 +568,7 @@ The majority of Raft voters that must agree before a metadata change commits: tw
 
 ### Quota {#gl-quota}
 
-A broker-enforced cap on a client's byte rate or request time, measured over a time window; the broker enforces it by delaying responses, so a throttled client sees latency rather than errors [@kip13]. See [Multi-Tenancy](19-multi-tenancy.md#quota-strategy).
+A broker-enforced cap on a client's byte rate or request time, measured over a time window; the broker enforces it by delaying responses, so a throttled client sees latency rather than errors [@kip13]. See [Multi-Tenancy](19-multi-tenancy.md#how-quotas-work).
 
 ## R
 
@@ -696,6 +708,10 @@ A Kafka principal that ACLs never restrict, listed in the `Kafka` resource's `su
 
 ## T
 
+### Tail Latency {#gl-tail-latency}
+
+The latency of the slowest fraction of requests, which rare but long events set. In Kates, you read it as the P99 and Max of the `produce` row. See [Performance Theory](04-performance-theory.md#the-long-tail-problem).
+
 ### Task (Kafka Connect) {#gl-connect-task}
 
 One unit of a connector's work, run by one Kafka Connect worker; a connector splits into up to `tasksMax` tasks. See [Kafka Connect & CDC Pipelines](21-kafka-connect.md).
@@ -738,11 +754,15 @@ In this book, the namespace layout `kates deploy --topology` picks: the [isolate
 
 ### Transactional Outbox {#gl-transactional-outbox}
 
-A pattern that writes a change and an event about it to the database in one transaction, then has a separate relay publish the event, so neither is lost if the process dies in between [@richardson2018microservices]. The Kates API stores each run in PostgreSQL and, whenever its status changes, records a lifecycle event in the same transaction; a separate poller sends the event to Kafka and deletes it only once the broker acknowledges it. See [Architecture & Design](02-architecture.md#graceful-degradation).
+A pattern that writes a change and an event about it to the database in one transaction, then has a separate relay publish the event, so neither is lost if the process dies in between [@richardson2018microservices]. The Kates API stores each run in PostgreSQL and, whenever its status changes, records a lifecycle event in the same transaction; a separate poller sends the event to Kafka and deletes it only once the broker acknowledges it. See [Architecture & Design](02-architecture.md#where-results-live).
 
 ### Trogdor {#gl-trogdor}
 
 Apache Kafka's distributed test framework, in which a coordinator hands JSON task specs to agents. One of the two benchmark backends (`backend: trogdor`): Kates submits only produce, consume and round-trip workload specs, and never uses Trogdor to inject faults. See [Test Types Deep Dive](05-test-types.md).
+
+### TUI {#gl-tui}
+
+A terminal user interface: a full-screen program drawn with text in a terminal and driven from the keyboard. In Kates, `kates lab` and `kates dashboard` are TUIs. See [Lab — Interactive Performance Tuning](10b-lab.md).
 
 ## U
 
@@ -770,7 +790,7 @@ An INTEGRITY run's outcome: DATA_LOSS if an acknowledged record is missing, othe
 
 ### Virtual Thread {#gl-virtual-thread}
 
-A lightweight Java thread (Java 21) that the JVM schedules onto a few operating-system threads, so blocking one is cheap. The native benchmark backend runs each test task on its own virtual thread. See [Architecture & Design](02-architecture.md#technology-stack).
+A lightweight Java thread (Java 21) that the JVM schedules onto a few operating-system threads, so blocking one is cheap. The native benchmark backend runs each test task on its own virtual thread. See [Architecture & Design](02-architecture.md#the-native-benchmark-backend).
 
 ## W
 

@@ -1,0 +1,189 @@
+# Index terms for both editions. Format, one entry per line:
+#   Term; alias; alias        aliases match too (case-insensitive, whole words)
+#   Parent > Child; alias     a sub-entry under Parent
+#   Term -> Other             a see-entry
+# scripts/gen-book-index.py writes appendix-index.md from this list, and
+# theme/index-entries.lua marks the PDF. Prefer specific terms: one that
+# every section uses lists nothing useful.
+
+acks; acks=all
+ACL
+Admission Webhook
+API Key
+Apicurio Registry
+appVersion
+Availability Zone
+AZ
+Baseline
+Benchmark Backend
+Blast Radius
+Broker
+CDC
+Change Data Capture -> CDC
+Chaos Backend
+Chaos Experiment
+Chaos Provider
+Clients CA
+Cluster CA
+ClusterPolicy
+Committed Offset
+Compliance Check
+Connector
+Consumer Group
+Consumer Lag
+Context
+Controller
+Coordinated Omission
+Cosign
+CRC32
+CRD
+Cruise Control
+Custom Resource
+Dead Letter Queue -> DLQ
+Debezium
+Disruption
+Disruption Plan
+Disruption Rollback
+Disruption Type
+DLQ
+Drain Cleaner
+Eligible Leader Replicas
+emptyDir
+Entity Operator
+Exactly-Once Semantics
+Exit Code
+Fault
+Fencing
+Game Day
+Gate
+GraalVM Native Image
+Grade
+Grafana
+gRPC
+Guardrail
+Heatmap
+Helm Release
+Helm Test
+High Watermark
+Idempotent Producer
+Isolated Topology
+ISR
+ISR Shrink
+Jaeger
+JMX
+Kafka Connect
+Kafka Exporter
+Kafka UI
+KafkaConnector
+KafkaNodePool
+KafkaRebalance
+KafkaReference
+KafkaTopic
+KafkaUser
+Kates API
+Kind
+KRaft
+krafter
+Kyverno
+Lab
+Leader Election
+Library Chart
+Listener
+LitmusChaos
+Log Truncation
+Lost Record
+MCP
+Metadata Log
+Metadata Version
+Metric Contract
+min.insync.replicas
+MirrorMaker 2
+mTLS
+NetworkPolicy
+networkPolicyPeers
+Node ID
+Noise Floor
+Offset
+Offset Translation
+Open-Loop Load
+Operator
+OTLP
+Page Cache
+panda
+Partition
+Partition Leader
+PDB
+Percentile; P50; P95; P99; P99.9
+Performance Grade
+PersistentVolumeClaim -> PVC
+Plan -> disruption plan
+Platform Profile
+Playbook
+PodDisruptionBudget -> PDB
+PolicyException
+PolicyReport
+PostgreSQL
+productionMode
+Profile
+Prometheus
+PrometheusRule
+Protobuf
+Protocol Floor
+Purgatory
+PVC
+Quorum
+Quota
+Rack
+readOnlyRootFilesystem
+Rebalance
+Recipe
+Reconciliation
+Replication Factor -> RF
+Replication Slot
+Request Handler Idle Ratio
+Resilience Run
+Resilience Test
+RF
+RPO
+RTO
+Safety Guard
+Saturation Point
+Scenario File
+SCRAM-SHA-512
+Secret
+Security Grade
+Share Group
+Single-Namespace Topology
+SLA
+SLA Grade
+SLI
+SLO
+SMT
+Snapshot
+Sparkline
+SSE
+Steady-State Hypothesis
+Strimzi
+StrimziPodSet
+Super User
+Task
+Tenant
+Test Run
+Test Spec
+Test Type
+Throughput
+Tiered Storage
+Tombstone
+Topic
+Topology
+Transactional Outbox
+Trogdor
+Unclean Leader Election
+Under-Replicated Partition
+Values Overlay
+Velero
+Verdict
+Virtual Thread
+Waiver
+Worker
+Zone

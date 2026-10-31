@@ -47,7 +47,7 @@ The last chapter closes this Part but draws more on Parts II and III: it combine
 
 ## The Payments Question
 
-This Part moves the payments question from the lab to a cluster you run. Compliance Checks writes the architecture the payments workload needs into `payments-krafter.yaml` and holds `krafter` to it. In Multi-Tenancy a tenant is one block of `kafka-cluster` chart values in `tenants.yaml`, applied with one `helm upgrade`, and the payments workload becomes the `payments` tenant: a `payments-events` topic and a `KafkaUser` with prefix ACLs on `payments`. The Upgrade Playbook's re-test becomes `payments-scenarios.yaml`, run before and after an upgrade, and `kates report compare <pre-id>,<post-id>` compares the two runs. On that cluster, the answer comes from the same gates, grades and verdicts as in Parts II and III.
+This Part moves the payments question from the lab to a cluster you run. Compliance Checks writes the architecture the payments workload needs into `payments-krafter.yaml` and holds `krafter` to it. In Multi-Tenancy a tenant is one block of `kafka-cluster` chart values in `tenants.yaml`, applied with one `helm upgrade`, and the payments workload becomes the `payments` tenant: a `payments-events` topic and a `KafkaUser` with prefix ACLs on `payments`. The Upgrade Playbook's re-test becomes `payments-scenarios.yaml`, run before and after an upgrade, and `kates report diff <pre-id> <post-id>` compares the two runs. On that cluster, the answer comes from the same gates, grades and verdicts as in Parts II and III, and [Recipe 8: Sign Off krafter for Payments](14-recipes.md#recipe-8-sign-off-krafter-for-payments) gathers them into the readiness sign-off.
 
 ## Practice
 

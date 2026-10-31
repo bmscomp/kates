@@ -1,19 +1,21 @@
 # Kafka Deployment Engineering
 
-> **Scope**: this chapter owns the *why* — the production engineering behind the cluster: node pools, listeners design, certificates, Cruise Control, alerting, and backup. For the step-by-step install walkthrough, see [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md); for deploying the Kates stack, see [Deployment Guide](12-deployment.md).
+Three controllers, three brokers, one broker per zone, `min.insync.replicas: 2`, a fixed broker heap: every number in [`krafter`](appendix-a-glossary.md#gl-krafter)'s definition is a decision, and sooner or later a review asks you to defend each one. This chapter gives the reasons, and the failure you see when a number is wrong.
 
-This chapter is the operations manual for the **krafter** Kafka cluster — the Strimzi-managed, KRaft-mode deployment that underpins the entire Kates platform. It covers every layer from the operator to the broker JVM, with the reasoning behind each decision. It's written for the platform engineers who run `krafter` and for anyone who has to defend its design in review.
+::: {.callout-note title="Scope"}
+This chapter owns the why behind `krafter`: node pools, listener design, certificates, Cruise Control, alerting and backup. For the step-by-step install, see [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md); for deploying the Kates stack, see [Deployment Guide](12-deployment.md).
+:::
 
 After this chapter, you can:
 
-- Explain why the cluster separates KRaft controllers from brokers, and why three of each is the fault-tolerance floor
-- Read a `KafkaNodePool` spec and justify its storage, JVM, and zone-affinity choices
-- Trace how listeners, `KafkaUser` credentials, and NetworkPolicies compose the cluster's security posture, and which ports the shipped policies leave open
+- Explain why the cluster separates [KRaft](appendix-a-glossary.md#gl-kraft) controllers from brokers, and why three of each is the fault-tolerance floor
+- Read a [`KafkaNodePool`](appendix-a-glossary.md#gl-kafkanodepool) spec and justify its storage, JVM, and [zone](appendix-a-glossary.md#gl-zone)-affinity choices
+- Trace how [listeners](appendix-a-glossary.md#gl-listener), [`KafkaUser`](appendix-a-glossary.md#gl-kafkauser) credentials, and [NetworkPolicies](appendix-a-glossary.md#gl-networkpolicy) compose the cluster's security posture, and which ports the shipped policies leave open
 - Diagnose the common Strimzi failure modes, from empty-egress NetworkPolicies to missing user Secrets
 
 ## Strimzi Operator
 
-Kafka on Kubernetes is managed by the **Strimzi Kafka Operator** (`1.2.0`), installed into a dedicated `strimzi-operator` namespace from this repository's wrapper chart, `charts/strimzi-operator` (chart `0.3.0`). This is what `scripts/deploy-kafka.sh` runs on every deploy, unconditionally:
+Kafka on Kubernetes is managed by the [Strimzi](appendix-a-glossary.md#gl-strimzi) Cluster Operator, installed into its own `strimzi-operator` namespace from the repository's wrapper chart, `charts/strimzi-operator`. The [Version & Compatibility Matrix](appendix-d-versions.md) gives the operator and chart versions. Both install scripts, `scripts/deploy-kafka.sh` and the `scripts/deploy-kafka-generic.sh` that `make kafka` runs, install the operator this way on every deploy:
 
 ```bash
 helm dependency build charts/strimzi-operator
@@ -23,9 +25,9 @@ helm upgrade --install strimzi-operator charts/strimzi-operator \
   --timeout 10m --wait
 ```
 
-The wrapper declares the upstream `strimzi-kafka-operator` chart as a subchart — which is why `helm dependency build` comes first — and adds what the operator needs to be a managed part of the platform rather than a one-off `--set` invocation: a CRD-upgrade hook that owns the Strimzi CRDs across upgrades, pinned defaults (`watchAnyNamespace`, replicas, resources, reconciliation timeouts) in place of drifting flags, a strict values schema that nests every operator setting under the `strimzi-kafka-operator:` key, the optional Drain Cleaner, and the operator's own PodMonitor, alerts and Grafana dashboards. The install is unconditional by design: the CRD hook is what keeps the CRDs current, so skipping the upgrade when the operator is already there would freeze them at whatever version installed them first. The full lifecycle — adoption, upgrade, rollback, namespace scope — is [Deploying the Strimzi Operator](deploying-strimzi-operator.md).
+The wrapper declares the upstream `strimzi-kafka-operator` chart as a subchart, which is why `helm dependency build` comes first. It adds what makes the operator a managed part of the platform. A CRD-upgrade hook owns the Strimzi CRDs across upgrades, and pinned defaults cover `watchAnyNamespace`, replicas, resources and reconciliation timeouts. A strict values schema nests every operator setting under `strimzi-kafka-operator:`. It also ships the optional Drain Cleaner and the operator's PodMonitor, alerts and dashboards. The install is unconditional on purpose: the hook keeps the CRDs current, and skipping the upgrade would freeze them at the version that first installed them. The full lifecycle — adoption, upgrade, rollback, namespace scope — is [Deploying the Strimzi Operator](deploying-strimzi-operator.md).
 
-Strimzi watches for `Kafka`, `KafkaNodePool`, `KafkaTopic`, and `KafkaUser` custom resources and reconciles the desired state into StatefulSets, ConfigMaps, Secrets, and Services.
+Strimzi watches for `Kafka`, `KafkaNodePool`, [`KafkaTopic`](appendix-a-glossary.md#gl-kafkatopic) and `KafkaUser` custom resources. It reconciles the desired state into [StrimziPodSets](appendix-a-glossary.md#gl-strimzipodset), which manage each Kafka node's pod on its own so the operator can roll one broker at a time, and into ConfigMaps, Secrets and Services.
 
 ### Reconciliation Loop
 
@@ -50,21 +52,24 @@ sequenceDiagram
     Operator->>K8s: Update Kafka status → Ready: True
 ```
 
-Key behaviors:
+What a change costs depends on the key:
 
-- **Config-only changes** (e.g., `num.io.threads`) trigger a rolling restart of affected pods
-- **Storage changes** require manual intervention — Strimzi will not shrink PVCs
-- **Version upgrades** are performed as a rolling update, one broker at a time
-- **Reconciliation interval** is 120s by default — the operator re-checks cluster state periodically
+| Change | What Strimzi does |
+|--------------------------|--------------------------------------------------|
+| A dynamic broker setting, such as `num.io.threads` or `log.retention.bytes` | Applies it to the running brokers, with no restart |
+| A static setting, a listener, JVM options, the image or the Kafka version | Rolls the pods, one at a time |
+| Storage | Grows a PVC where the StorageClass allows expansion, and never shrinks one |
+
+The operator also re-checks the cluster every 120 seconds by default, whether or not a resource changed.
 
 ## Cluster Architecture
 
-The krafter cluster uses **dedicated roles** — controllers and brokers run in separate pods. This is the production-recommended topology for Kafka 4.x with KRaft.
+`krafter` keeps its metadata in a KRaft [quorum](appendix-a-glossary.md#gl-quorum) of three controllers, which needs a majority of two to commit a change, so it survives exactly one controller loss ([The KRaft Quorum](03-cluster.md#the-kraft-quorum)). Controllers and brokers run in separate pods, the node layout recommended for KRaft. What follows is the trade-off each number makes, and the alert that fires when it breaks.
 
 ```mermaid
 %%| label: fig-kde-cluster-architecture
 %%| fig-cap: "Dedicated KRaft controller quorum and zone-pinned broker pools in the krafter cluster."
-%%| fig-alt: "Architecture diagram showing a 3-voter KRaft Controller Quorum (controllers-3, controllers-4, controllers-5) exchanging Raft metadata, and three zone-pinned brokers (brokers-alpha-0 in Zone alpha, brokers-sigma-2 in Zone sigma, and brokers-gamma-1 in Zone gamma, each with 4Gi RAM, 50Gi PVC, and 2Gi JVM heap) fetching metadata from the controllers and replicating partitions across zones."
+%%| fig-alt: "Architecture diagram showing a 3-voter KRaft Controller Quorum (controllers-3, controllers-4, controllers-5) exchanging Raft metadata, and three zone-pinned brokers (brokers-alpha-0 in Zone alpha, brokers-sigma-2 in Zone sigma, and brokers-gamma-1 in Zone gamma) fetching metadata from the controllers and replicating partitions across zones."
 graph TB
     subgraph Controllers["KRaft Controller Quorum (Raft consensus)"]
         C3["controllers-3<br/>voter"]
@@ -73,15 +78,15 @@ graph TB
     end
 
     subgraph Alpha["Zone: alpha"]
-        B0["brokers-alpha-0<br/>4Gi RAM | 50Gi PVC<br/>JVM: -Xms2g -Xmx2g"]
+        B0["brokers-alpha-0"]
     end
 
     subgraph Sigma["Zone: sigma"]
-        B2["brokers-sigma-2<br/>4Gi RAM | 50Gi PVC<br/>JVM: -Xms2g -Xmx2g"]
+        B2["brokers-sigma-2"]
     end
 
     subgraph Gamma["Zone: gamma"]
-        B1["brokers-gamma-1<br/>4Gi RAM | 50Gi PVC<br/>JVM: -Xms2g -Xmx2g"]
+        B1["brokers-gamma-1"]
     end
 
     C3 <-->|"Raft<br/>metadata"| C4
@@ -99,119 +104,120 @@ graph TB
 
 ### Why Dedicated Roles?
 
-| Aspect | Combined (controller+broker) | Dedicated (separate pools) |
-|--------|:---:|:---:|
-| Metadata isolation | Poor: heavy I/O can delay elections | Good: controllers have predictable latency |
-| Independent scaling | Poor: must scale together | Good: add brokers without touching quorum |
-| Failure blast radius | Poor: one pod loss = quorum + data risk | Good: broker loss doesn't affect quorum |
-| Resource tuning | Poor: single memory/CPU profile | Good: controllers 1Gi, brokers 4Gi |
+The two layouts differ on four counts:
+
+| Aspect | Combined (controller and broker) | Dedicated (separate pools) |
+|--------|-----------------------|-----------------------|
+| Metadata isolation | Heavy broker I/O can delay an election | Controllers keep predictable latency |
+| Scaling | Controllers and brokers scale together | Brokers scale without touching the quorum |
+| Blast radius | One pod loss costs a voter and a replica | A broker loss leaves the quorum whole |
+| Resource tuning | One memory and CPU profile for both | Controllers 1 GiB, brokers 4 GiB |
 
 ### Why 3 Controllers?
 
-KRaft uses **Raft consensus** requiring a majority quorum for metadata operations [@ongaro2014search; @kip595]:
-
-| Controllers | Quorum | Tolerated failures |
-|:-----------:|:------:|:------------------:|
-| 1 | 1 | 0 — single point of failure |
-| 2 | 2 | 0 — both must agree (worse than 1) |
-| **3** | **2** | **1** — survives one failure |
-| 5 | 3 | 2 — more resilient but higher cost |
-
-Three is the minimum for fault tolerance. Five gives diminishing returns for local/dev environments.
+KRaft uses Raft consensus, which commits a metadata change once a majority of the voters has it [@ongaro2014search; @kip595]. Three voters need two, so they survive one failure. Two voters need both, which tolerates no failure and is worse than one. Five survive two failures, at the cost of two more pods to run. When the quorum has no active controller, `KafkaActiveControllerCount` fires, and no metadata change commits until a majority is back.
 
 ### Why 3 Brokers?
+
+Three brokers, one per zone, is what four other settings need:
 
 | Reason | Configuration |
 |--------|--------------|
 | Matches `default.replication.factor: 3` | Each partition has a replica on every broker |
-| Satisfies `min.insync.replicas: 2` | Survives 1 broker failure while accepting writes |
+| Satisfies [`min.insync.replicas`](appendix-a-glossary.md#gl-min-insync-replicas)`: 2` | Survives 1 broker failure while accepting writes |
 | Enables rack awareness | Each broker pinned to a different zone (alpha, sigma, gamma) |
-| Balanced partition leadership | 3 brokers = even leader distribution |
+| Balanced partition leadership | Each broker leads a third of the partitions |
 
 ## KafkaNodePool Configuration
 
-Each component type is modeled as a `KafkaNodePool` — the modern Strimzi way to manage heterogeneous node groups.
+Each role is a `KafkaNodePool`, and the `kafka-cluster` chart renders one per entry in `nodePools.pools`. Its defaults are two pools, `controllers` and `brokers`, of three nodes each and with no zone.
 
 ### Controller Pool
 
-One pool holds the three KRaft controllers, and gives them the `controller` role only:
+The chart's `nodePools.roleDefaults.controller` gives each controller a small volume and heap:
 
 ```yaml
-apiVersion: kafka.strimzi.io/v1
-kind: KafkaNodePool
-metadata:
-  name: controllers
-spec:
-  replicas: 3
-  roles: [controller]
-  storage:
-    type: jbod
-    volumes:
-      - id: 0
-        type: persistent-claim
-        size: 5Gi
-        deleteClaim: false
-  resources:
-    requests: { memory: 1Gi, cpu: 500m }
-    limits:   { memory: 1Gi, cpu: 1000m }
+nodePools:
+  roleDefaults:
+    controller:
+      replicas: 3
+      storage:
+        volumes:
+          - id: 0
+            size: 10Gi
+      jvmOptions:
+        -Xms: 512m
+        -Xmx: 512m
+        gcLoggingEnabled: true
+      resources:
+        requests: { memory: 1Gi, cpu: 500m }
+        limits:   { memory: 1Gi, cpu: 1000m }
 ```
 
-Controllers need minimal storage (metadata only) and limited CPU. The 1Gi memory limit is sufficient since the Raft log is compact.
+Controllers hold only the metadata log, so they need little disk or CPU.
 
-### Broker Pools (per-zone)
+### One Broker Pool per Zone
 
-Each zone gets its own pool, pinned via `nodeAffinity`:
+`roleDefaults.broker` sets the heap and resources every broker pool starts from, and `nodePools.defaults.storage` gives every pool a 100 GiB volume:
 
 ```yaml
-apiVersion: kafka.strimzi.io/v1
-kind: KafkaNodePool
-metadata:
-  name: brokers-alpha
-spec:
-  replicas: 1
-  roles: [broker]
-  jvmOptions:
-    -Xms: 2048m
-    -Xmx: 2048m
-    gcLoggingEnabled: true
-  storage:
-    type: jbod
-    volumes:
-      - id: 0
-        type: persistent-claim
-        size: 50Gi
-        class: local-storage-alpha
-        deleteClaim: false
-  resources:
-    requests: { memory: 4Gi, cpu: 1000m }
-    limits:   { memory: 4Gi, cpu: 2000m }
-  template:
-    pod:
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: topology.kubernetes.io/zone
-                    operator: In
-                    values: [alpha]
+nodePools:
+  roleDefaults:
+    broker:
+      replicas: 3
+      jvmOptions:
+        -Xms: 2048m
+        -Xmx: 2048m
+        gcLoggingEnabled: true
+      resources:
+        requests: { memory: 4Gi, cpu: 1000m }
+        limits:   { memory: 4Gi, cpu: 2000m }
 ```
 
-**Design decisions:**
+A pool pins to one zone with its `zone` key, as in this list of pools:
+
+```yaml
+nodePools:
+  pools:
+    - name: controllers
+      roles: [controller]
+    - name: brokers-alpha
+      roles: [broker]
+      zone: alpha
+      replicas: 1
+```
+
+`zone` renders a required nodeAffinity on `topology.kubernetes.io/zone` and a `zone` pod label. Four of the settings above are decisions rather than defaults:
 
 | Setting | Value | Rationale |
 |---------|-------|-----------|
 | `jvmOptions -Xms/-Xmx` | 2048m | Fixed heap prevents dynamic resizing under load |
 | `gcLoggingEnabled` | true | GC logs for diagnosing latency spikes |
-| Memory requests = limits | 4Gi | Guaranteed QoS — pod won't be evicted under memory pressure |
-| `deleteClaim: false` | — | PVCs survive pod deletion — data preserved for recovery |
-| StorageClass per zone | `local-storage-*` | Data locality — reads don't cross network boundaries |
+| Memory requests = limits | 4Gi | Guaranteed QoS: the pod is the last evicted under memory pressure |
+| `deleteClaim: false` | `false` | PVCs survive pod deletion, so the data is there for recovery |
+| StorageClass per zone | `local-storage-*` on [`panda`](appendix-a-glossary.md#gl-panda) | Data locality: reads don't cross network boundaries |
 
-## Kafka Broker Configuration
+### Where the Numbers Come From
 
-The Kafka CR's `spec.kafka.config` section controls broker behavior:
+Three sources set a pool's numbers, and the later one wins:
+
+| Source | Sets | Applies when |
+|--------|------------------------|----------------|
+| The chart's `roleDefaults` and `defaults` | Three controllers and three brokers, 10 and 100 GiB volumes, 512m and 2048m heaps | Nothing else sets them |
+| `kates detect --generate-values` | One broker pool per zone, sized from the nodes' allocatable CPU and memory | `kates deploy` and `scripts/deploy-kafka-generic.sh` run it first |
+| The environment overlay and your `-f` files | Anything above, and listeners, policies and Cruise Control on or off | Always, last in the chain |
+
+### Limits
+
+The numbers on `panda` fit three Kind nodes on one machine, and they are not production numbers. The chart can't size a pool for your traffic. With `productionMode: true` the chart refuses to render some unsafe choices, such as `deleteClaim: true` ([Production](20-installation-guide.md#production)).
+
+## Broker Settings and Why
+
+The Kafka CR's `spec.kafka.config` section controls broker behavior, and the chart's values fill it.
 
 ### Replication & Durability
+
+Five keys set how many copies of each record the cluster keeps:
 
 ```yaml
 offsets.topic.replication.factor: 3
@@ -223,41 +229,24 @@ min.insync.replicas: 2
 
 With RF=3 and `min.insync.replicas=2`, every `acks=all` write requires at least one follower acknowledgment [@wang2015building]. This is the primary contributor to producer latency but guarantees zero data loss under single-broker failure.
 
-### Retention & Storage
+### Retention, Threads and Quotas
 
-```yaml
-log.retention.hours: 24        # Time-based retention
-log.retention.bytes: 10737418240  # 10GB per partition
-log.segment.bytes: 1073741824  # 1GB segments
-log.cleanup.policy: delete     # No compaction by default
-```
+The other keys the chart sets, with the reason for each value:
 
-### Threading Model
+| Setting | Value | Why |
+|---------|-------|-----------|
+| `log.retention.hours` | 24 | A test's records expire a day later, so repeated runs don't fill the volume |
+| `log.retention.bytes` | 10 GiB | Caps each partition; whichever limit comes first deletes |
+| `log.segment.bytes` | 1 GiB | Kafka's default; retention deletes whole segments |
+| `log.cleanup.policy` | delete | No compaction unless a topic asks for it |
+| `num.io.threads` | 8 | Kafka's default; the threads that run requests, four per CPU of a broker's limit |
+| `num.network.threads` | 5 | The threads that read requests from the sockets; Kafka's default is 3 |
+| `num.replica.fetchers` | 3 | Fetcher threads per source broker; Kafka's default is 1 |
+| `quota.producer.default` | 50 MiB/s | Keeps one runaway producer from starving the others |
+| `quota.consumer.default` | 100 MiB/s | The same for consumers; `KafkaUser` quotas override both per user |
+| `group.share.enable` | true | Turns on share groups; rendered only when `kafkaVersion` is 4.2.0 or newer |
 
-```yaml
-num.io.threads: 8          # Disk I/O threads
-num.network.threads: 5     # Network handler threads
-num.replica.fetchers: 3    # One fetcher per remote broker
-```
-
-### Quotas
-
-```yaml
-quota.producer.default: 52428800   # 50MB/s per producer
-quota.consumer.default: 104857600  # 100MB/s per consumer
-```
-
-Default quotas prevent a single runaway producer or consumer from starving others. These are overridden per-user via `KafkaUser` quotas.
-
-### Kafka 4.x Features
-
-The key below turns on share groups. The chart renders it, like every `group.share.*` and `share.*` key, only when `kafkaVersion` is 4.2.0 or newer:
-
-```yaml
-group.share.enable: true  # KIP-932 Share Groups
-```
-
-Share Groups enable queue-style (competing consumer) semantics alongside traditional consumer groups [@kip932; @hohpe2003enterprise] — useful for job distribution workloads.
+[Share groups](appendix-a-glossary.md#gl-share-group) give queue-style (competing consumer) semantics alongside traditional consumer groups [@kip932; @hohpe2003enterprise], which suits job distribution workloads. The chart renders every `group.share.*` and `share.*` key only for Kafka 4.2.0 or newer.
 
 ### KRaft Quorum Tuning
 
@@ -300,19 +289,15 @@ graph LR
     Kates -.->|"encrypted"| T
 ```
 
-The table adds each listener's type and whether it encrypts the traffic:
+`plain` authenticates with [SCRAM-SHA-512](appendix-a-glossary.md#gl-scram-sha-512) without TLS and `tls` with [mTLS](appendix-a-glossary.md#gl-mtls), so "plain" means no TLS, not no authentication ([Listeners](03-cluster.md#listeners)). The base values declare only `plain` and `tls`. `kafka.externalAccess.type` defaults to `none`, and of the chart's overlays only `values-prod.yaml` turns the preset on, as a NodePort. `kates deploy` and `scripts/deploy-kafka-generic.sh` declare `external` on every cluster but kind, in the generated `.build/values-detected.yaml`. It is a NodePort, or a LoadBalancer on EKS, GKE and AKS, whose broker load balancers usually get public addresses ([What the Shipped Policies Block](17-security.md#what-the-shipped-policies-block) explains). `kafka.externalAccess.allowedCidrs` does not limit who can reach 9094; [Closing the Listeners](17-security.md#closing-the-listeners) shows what does.
 
-| Listener | Port | Type | Auth | TLS | Use Case |
-|----------|------|------|------|-----|----------|
-| `plain` | 9092 | internal | SCRAM-SHA-512 | No | Service-to-service within the cluster |
-| `tls` | 9093 | internal | mTLS | Yes | Encrypted internal traffic |
-| `external` | 9094 | nodeport or loadbalancer | SCRAM-SHA-512 | Yes | Access from outside the cluster, where the values chain declares it |
-
-The base values declare only `plain` and `tls`. `kafka.externalAccess.type` defaults to `none`, and of the chart's overlays only `values-prod.yaml` turns the preset on, as a NodePort. `kates deploy` and `scripts/deploy-kafka-generic.sh` declare `external` on every cluster but kind, in the generated `.build/values-detected.yaml`: a NodePort, or a LoadBalancer on EKS, GKE and AKS, whose broker load balancers usually get public addresses ([Security & Compliance](17-security.md#what-the-shipped-policies-block) explains). `kubectl get kafka krafter -n kafka -o jsonpath='{.spec.kafka.listeners[*].name}'` lists the listeners a running cluster has. `kafka.externalAccess.allowedCidrs` does not limit who can reach 9094; [Security & Compliance](17-security.md#closing-the-listeners) shows what does.
+::: {.callout-tip title="Try it: which listeners does your cluster have?"}
+Run `kubectl get kafka krafter -n kafka -o jsonpath='{.spec.kafka.listeners[*].name}'`, then `kubectl get svc -n kafka -l strimzi.io/cluster=krafter`. Does the list match what the values chain above declares for your cluster, and is there an `external` Service?
+:::
 
 ### Authorization
 
-Simple ACL authorization with `kates-backend` as a superUser:
+The brokers use simple ACL authorization, with `kates-backend` as the one [super user](appendix-a-glossary.md#gl-super-user):
 
 ```yaml
 authorization:
@@ -323,62 +308,25 @@ authorization:
 
 ## KafkaUser Management
 
-Users are declared as `KafkaUser` CRDs — Strimzi creates a Kubernetes Secret with the auto-generated SCRAM password:
-
-| User | Role | Quotas | ACLs |
-|------|------|--------|------|
-| `kates-backend` | superUser | None (unlimited) | Bypasses authorization |
-| `kafka-ui` | Read-only monitor | 1MB/s produce, 50MB/s consume, 10% CPU | Describe+Read on all topics/groups |
-| `apicurio-registry` | Schema registry | 10MB/s produce, 20MB/s consume, 15% CPU | CRUD on `__apicurio*` topics only |
-| `litmus-chaos` | Chaos testing | None | Full CRUD on all topics |
-| `kates-connect` | Kafka Connect workers | 50MB/s produce, 50MB/s consume, 25% CPU | Read/Write/Create on `kates-*` and `cdc*` topics, `connect-*` groups, transactional IDs |
-
-**Secret flow:**
-
-```text
-KafkaUser CR → Strimzi User Operator → Kubernetes Secret (name = user name)
-                                       → SCRAM credentials in Kafka
-                                       → ACLs applied to authorization
-```
-
-Other services reference the secret by name (e.g., Kafka UI mounts `secret/kafka-ui`).
+Each client of `krafter` is a `KafkaUser`. The User Operator turns each one into a Secret of the same name, a SCRAM credential in Kafka and the [ACLs](appendix-a-glossary.md#gl-acl) the resource lists, and other services mount the Secret by name, as Kafka UI mounts `secret/kafka-ui`. [Default Users](20-installation-guide.md#default-users) lists the users the [platform profile](appendix-a-glossary.md#gl-platform-profile) creates, with their quotas and ACLs. Only `kates-backend` is a super user, because a test can name any topic and no fixed ACL list could cover them in advance.
 
 ## Topic Provisioning
 
-Topics are declared as `KafkaTopic` CRDs, managed by the Topic Operator:
+Topics are `KafkaTopic` resources, managed by the Topic Operator, and [Default Topics](20-installation-guide.md#default-topics) lists the ones the platform profile creates. Two of their settings are decisions.
 
-| Topic | Partitions | Replicas | Retention | Compression | Purpose |
-|-------|:----------:|:--------:|-----------|:-----------:|---------|
-| `kates-events` | 6 | 3 | 48h | — | Created by the platform profile; the Kates API doesn't use it |
-| `kates-results` | 12 | 3 | 7d | lz4 | Read by the Kates API only through a share-group consumer you start |
-| `kates-metrics` | 6 | 3 | 24h | lz4 | Created by the platform profile; the Kates API doesn't use it |
-| `kates-audit` | 3 | 3 | 30d | — | Created by the platform profile; the Kates API doesn't use it |
-| `kates-dlq` | 3 | 3 | ∞ | — | Polled every 30 seconds by the Kates API, which logs what arrives |
-| `kates-probe-topic` | 3 | 3 | 1h | — | Written by the Kates API's `producer-throughput` probe during resilience runs; nothing reads it |
-| `cdc-schema-history` | 1 | 3 | ∞, no size limit | — | Debezium schema history |
-| `cdc-heartbeat` | 1 | 3 | 24h | — | Debezium heartbeat |
-| `test-sink-topic` | 3 | 3 | 24h | — | Connect sink-connector validation |
+Their partition counts are the platform profile's settings, not a measure of traffic. Of the `kates-*` topics, the Kates API writes only `kates-probe-topic`, ten records each time a resilience run's `producer-throughput` probe runs, and a test produces to whatever topic its spec names ([The Cluster Under Test](03-cluster.md)).
 
-**Partition counts:** these are the platform profile's settings, not a measure of traffic. Of the `kates-*` topics above, the Kates API writes only `kates-probe-topic`, ten records each time a resilience run's `producer-throughput` probe runs, and a test produces to whatever topic its spec names ([The Cluster Under Test](03-cluster.md)).
+Every topic is `cleanup.policy: delete` — none is compacted, and two of them would break if they were. Debezium writes its schema history without record keys, which a compacted topic refuses, and replays the whole history on restart. So `cdc-schema-history` keeps `retention.ms: -1` and `retention.bytes: -1`, the second overriding the brokers' 10 GiB `log.retention.bytes`. `kates-dlq` is a delete topic because compaction keeps only the latest failure per key and refuses records without one. It has no time limit, so an upgrade from a compacted `kates-dlq` deletes nothing by age; only the brokers' `log.retention.bytes` bounds it until you set a `retention.ms` to age failures out.
 
-**Cleanup policy:** every topic here is `cleanup.policy: delete` — none is compacted, and two of them would break if they were. Debezium writes its schema history without record keys, which a compacted topic refuses, and replays the whole history on restart, so `cdc-schema-history` keeps `retention.ms: -1` and `retention.bytes: -1` (the second overrides the brokers' 10 GiB `log.retention.bytes`). `kates-dlq` is a delete topic because compaction keeps only the latest failure per key and refuses records without one. It has no time limit because it keeps the retention it had as a compacted topic, so an upgrade from that topic deletes nothing by age; only the brokers' `log.retention.bytes` bounds it until you set a `retention.ms` to age failures out.
-
-**The Kates API's own topic:** `kates-test-events` carries each run's lifecycle events to the Kates API's webhook consumer, and it has no `KafkaTopic` resource. The brokers run with `auto.create.topics.enable: false`, so the Kates API creates the topic through the Kafka Admin API when it finds it missing. It checks when it starts and every minute after, and gives the topic one partition, three replicas (fewer on a smaller cluster), `cleanup.policy: delete` and 7 days' retention. The Topic Operator doesn't manage it, so `kubectl get kafkatopics` doesn't list it; `kates cluster topics describe kates-test-events` shows it.
+The one topic the Kates API writes itself, `kates-test-events`, has no `KafkaTopic`. The brokers run with `auto.create.topics.enable: false`, so the Kates API creates it through the Kafka Admin API, and `kubectl get kafkatopics` doesn't list it; `kates cluster topics describe kates-test-events` shows it.
 
 ## Certificate Management
 
-Strimzi auto-generates and rotates two CA hierarchies:
-
-| CA | Validity | Renewal | Policy | Protects |
-|----|----------|---------|--------|----------|
-| Cluster CA | 5 years | 180 days before expiry | `replace-key` | Inter-broker TLS, controller mesh |
-| Clients CA | 5 years | 180 days before expiry | `replace-key` | Client mTLS certificates |
-
-The `replace-key` policy generates a new key pair during renewal — stronger than `renew-certificate` which reuses the existing key.
+Strimzi generates and renews two CAs: the [Cluster CA](appendix-a-glossary.md#gl-cluster-ca), which protects inter-broker and controller TLS, and the [Clients CA](appendix-a-glossary.md#gl-clients-ca), which signs client certificates for mTLS. The chart gives both five years' validity, renewal 180 days before expiry and the `replace-key` policy. That policy generates a new key pair at renewal, where `renew-certificate` would reuse the old one. [Certificate Management](17-security.md#certificate-management) in Security & Compliance explains rotation.
 
 ## Network Policies
 
-With `networkPolicy.enabled` on, the chart renders a deny-all policy for the cluster's pods and one allow policy per component. It is on by default, and `values-staging.yaml` and `values-prod.yaml` keep it; `values-kind.yaml` and `values-dev.yaml` turn it off, and so does the `.build/values-detected.yaml` that `kates deploy` writes for a cluster whose CNI it cannot identify, EKS, GKE and AKS excepted. The Strimzi Cluster Operator adds a policy of its own for the brokers, and the two sets add up:
+With `networkPolicy.enabled` on, the chart renders a deny-all policy for the cluster's pods and one allow policy per component. It is on by default, and `values-staging.yaml` and `values-prod.yaml` keep it; `values-kind.yaml` and `values-dev.yaml` turn it off. So does the `.build/values-detected.yaml` that `kates deploy` writes for a cluster whose CNI it cannot identify, EKS, GKE and AKS excepted. The Strimzi Cluster Operator adds a policy of its own for the brokers, and the two sets add up:
 
 ```mermaid
 %%| label: fig-kde-network-policy-union
@@ -399,89 +347,63 @@ graph LR
     anyone -->|"9092, 9093, 9404"| Brokers
 ```
 
-Every policy kafka-cluster 1.0 renders is named `<cluster>-…`, so two clusters can share a namespace without fighting over one object:
+Every policy the chart renders is named `<cluster>-…`, so two clusters can share a namespace without fighting over one object. Strimzi renders `krafter-entity-operator` and `krafter-kafka-exporter` itself; the chart's `-egress` policies add what default-deny would otherwise take away:
 
 | Policy | What It Allows |
 |--------|---------------|
-| `krafter-default-deny` | Nothing, for every pod labelled `app.kubernetes.io/part-of: strimzi-krafter`: those pods get only what another policy allows |
+| `krafter-default-deny` | Nothing, for every pod labeled `app.kubernetes.io/part-of: strimzi-krafter`: those pods get only what another policy allows |
 | `krafter-allow-dns` | UDP/TCP port 53 for those same pods |
-| `krafter-kafka` | Brokers and controllers: inter-cluster traffic on 9090–9093, the Cluster Operator on 9090/9091/8443/9092/9093, Prometheus on 9404, and each entry in `networkPolicy.clients` on the listener ports it names |
+| `krafter-kafka` | Brokers and controllers: traffic between the cluster's pods, the Cluster Operator, Prometheus on 9404, and each `networkPolicy.clients` entry |
 | `krafter-cruise-control` | Operator and Prometheus access to Cruise Control |
-| `krafter-entity-operator` | Entity Operator metrics ingress and egress to the brokers |
-| `krafter-kafka-exporter` | Exporter metrics ingress and egress to the brokers |
+| `krafter-entity-operator-egress` | Entity Operator metrics ingress, and egress to the brokers and the Kubernetes API |
+| `krafter-kafka-exporter-egress` | Exporter metrics ingress and egress to the brokers |
 | `krafter-test-egress` | The Helm test pods' egress to the Kafka ports, DNS and the API server |
 
+The `krafter-kafka` policy opens 9090–9093 between the cluster's own pods, and 9090, 9091, 8443, 9092 and 9093 to the Cluster Operator. Each `networkPolicy.clients` entry gets the listener ports it names, derived from `kafka.listeners`. Each chart renders the policies for its own pods: the operator's and the Drain Cleaner's are in `charts/strimzi-operator`, and kafka-ui, connect-cluster and mirror-maker2 render their own.
+
 ::: {.callout-important title="The client listeners are open as shipped"}
-As the charts ship, every pod in the cluster can reach the Kafka client listeners. NetworkPolicies add up, and the policy Strimzi generates admits every pod to a listener without `networkPolicyPeers`, whatever `networkPolicy.clients` says ([Security & Compliance](17-security.md#how-the-policies-combine)). What the chart's policies add, where they render, is the limit on the brokers' egress and a deny-all for the cluster's other pods.
+As the charts ship, every pod in the cluster can reach the Kafka client listeners: NetworkPolicies add up, and Strimzi's generated policy admits every pod to a listener without [`networkPolicyPeers`](appendix-a-glossary.md#gl-networkpolicypeers) ([How the Policies Combine](17-security.md#how-the-policies-combine)). `networkPolicy.clients` becomes the real allow list only once the listeners carry them. What the chart's policies add is a limit on the brokers' egress and a deny-all for the cluster's other pods.
 :::
 
-::: {.callout-note}
-kafka-cluster 1.0 dropped the policies that selected **other releases'** pods — the Cluster Operator's, the drain cleaner's, kafka-ui's, MirrorMaker 2's and Connect's. The operator's and drain cleaner's belong to `charts/strimzi-operator`; kafka-ui, connect-cluster and mirror-maker2 each render their own. Which workloads the chart's own `krafter-kafka` policy admits to which listener is one list, `networkPolicy.clients`, with the ports derived from `kafka.listeners`. It becomes the real allow list only once the listeners carry `networkPolicyPeers`.
-:::
+### The Operator's Own NetworkPolicy
 
-### Hardened Strimzi Operator NetworkPolicy (Isolated Topology)
-
-When deploying with `kates deploy --topology isolated` (the kates CLI's default topology), the Strimzi Operator runs in a dedicated `strimzi-operator` namespace, separate from the Kafka application namespace. That needs a precisely scoped NetworkPolicy, and since strimzi-operator 0.3 the wrapper chart renders it: `operatorPolicy.enabled`, on by default, produces one policy named after the release (`strimzi-operator`) in the operator's own namespace. kafka-cluster 0.4 used to write a fixed-name policy *into* the operator's namespace, so two Kafka releases naming the same operator fought over one object; kafka-cluster 1.0 no longer renders it at all.
-
-```mermaid
-%%| label: fig-kde-operator-network-policy
-%%| fig-cap: "Ingress and egress rules of the hardened strimzi-operator NetworkPolicy in the isolated topology."
-%%| fig-alt: "Diagram showing the Strimzi Operator in the strimzi-operator namespace receiving ingress on port 8080 from Kubelet health probes, and opening egress to CoreDNS on port 53, the Kubernetes API Server on ports 443 and 6443, Brokers + controllers on ports 9090-9093 and 8443, and Connect / MirrorMaker 2 workers on port 8083 across watched namespaces."
-graph LR
-    subgraph "strimzi-operator namespace"
-        OP["Strimzi Operator"]
-    end
-
-    subgraph "watched namespaces"
-        Brokers["Brokers + controllers<br/>strimzi.io/kind"]
-        Workers["Connect / MirrorMaker 2 workers<br/>strimzi.io/kind"]
-    end
-
-    subgraph Kubernetes
-        API["API Server :443/:6443"]
-        DNS["CoreDNS :53"]
-        Kubelet["Kubelet health probes"]
-    end
-
-    Kubelet -->|"ingress :8080"| OP
-    OP -->|"egress :53"| DNS
-    OP -->|"egress :443,:6443"| API
-    OP -->|"egress :9090-9093, :8443"| Brokers
-    OP -->|"egress :8083"| Workers
-```
+In the [isolated topology](appendix-a-glossary.md#gl-isolated-topology), `kates deploy`'s default, the operator runs in its own `strimzi-operator` namespace, so its policy must reach into every namespace it watches. The wrapper chart renders it: `operatorPolicy.enabled`, on by default, produces one policy named after the release (`strimzi-operator`) in the operator's namespace. The policy's rules, with the reason each exists:
 
 | Direction | Target | Ports | Purpose |
 |-----------|--------|-------|---------|
 | Ingress | All sources | `8080` TCP | Kubelet health probes + Prometheus metrics scraping |
 | Egress | CoreDNS | `53` UDP/TCP | DNS resolution for service discovery |
 | Egress | API Server | `443`, `6443` TCP | Kubernetes API communication (watch, patch, create) |
-| Egress | Pods labelled `strimzi.io/kind` in every watched namespace | `9090`–`9093`, `8443` TCP | Broker and controller control plane, replication, clients, and the Kafka agent the operator asks for broker state during a roll |
+| Egress | Pods labeled `strimzi.io/kind` in every watched namespace | `9090`–`9093`, `8443` TCP | Control plane, replication, clients, and the Kafka agent the operator asks for broker state during a roll |
 | Egress | The same pods | `8083` TCP | Connect and MirrorMaker 2 worker REST, through which connectors are created and polled |
 | Egress | Own namespace's operator pods | All | Leader-election peers |
 
-The watch scope decides which namespaces that egress reaches: every namespace under `watchAnyNamespace`, otherwise `watchNamespaces` plus the release namespace. The policy records the answer in its `kates.io/watch-scope` annotation, which is the quickest way to confirm what the running operator is actually allowed to reach.
+The watch scope decides which namespaces that egress reaches: every namespace under `watchAnyNamespace`, otherwise `watchNamespaces` plus the release namespace. The policy records the answer in its `kates.io/watch-scope` annotation, which is the quickest way to confirm what the running operator is allowed to reach.
 
-::: {.callout-important}
-The operator ingress on port `8080` is intentionally open to **all sources** (not scoped to a specific namespace). This is required because Kubelet health probes originate from the node's host network — not from a pod with namespace labels. Restricting ingress to a namespace selector would silently block liveness and readiness checks, causing the operator pod to be restarted by the Kubelet.
-:::
+Ingress on 8080 is open to every source on purpose. Kubelet health probes come from the node's host network, not from a pod with namespace labels. A namespace selector would block the liveness and readiness checks, and the kubelet would restart the operator.
 
-::: {.callout-caution}
-**Two upstream keys are easy to confuse, and only one of them can produce an empty-egress operator policy.**
+### Two Upstream Keys That Look Alike
 
-`strimzi-kafka-operator.operatorNetworkPolicy.enabled` (upstream default `false`) renders `strimzi-cluster-operator-network-policy` from the `ingress` and `egress` lists beside it. Upstream's defaults are the metrics ingress and an unrestricted `egress: [{}]`. Enabled as shipped, it never blocks the operator, but it undoes the egress scoping in the table above: it selects the same pod as the wrapper's `strimzi-operator` policy, policies add up, and `egress: [{}]` allows every destination. `charts/strimzi-operator/values-prod.yaml` enables it, so an operator installed with that overlay has unrestricted egress; add `--set strimzi-kafka-operator.operatorNetworkPolicy.enabled=false` after the overlay to leave the scoped policy in charge. Replace that `egress` with an empty list while `operatorPolicy` is off, though, and nothing grants the operator any egress: it cannot reach the controllers' admin API on 9090 and the Kafka CR stays `NotReady` indefinitely.
+Two keys under `strimzi-kafka-operator:` sound alike and do different things:
 
-`strimzi-kafka-operator.generateNetworkPolicy` (upstream default `true`) is a different thing entirely. It sets `STRIMZI_NETWORK_POLICY_GENERATION` and controls whether the operator generates NetworkPolicies for its **operands**, including the `krafter-network-policy-kafka` that opens the listeners (see [Network Policies](#network-policies)) — it never creates a policy for the operator pod. Turning it off does not fix a deny-all operator policy.
+| Key | Upstream default | Controls | Misuse and symptom |
+|-----|:---:|----------------|----------------|
+| `operatorNetworkPolicy.enabled` | `false` | `strimzi-cluster-operator-network-policy`, a policy for the operator pod built from the `ingress` and `egress` lists beside it | Enabled as shipped, its `egress: [{}]` allows every destination and undoes the scoped policy |
+| `generateNetworkPolicy` | `true` | Whether the operator generates policies for its operands, such as `krafter-network-policy-kafka` | Never creates a policy for the operator pod, so turning it off doesn't fix a deny-all operator policy |
 
-Both live under the `strimzi-kafka-operator:` key in the wrapper chart, whose schema rejects them at the top level rather than silently ignoring them.
+`charts/strimzi-operator/values-prod.yaml` enables the first, so an operator installed with that overlay has unrestricted egress. Add `--set strimzi-kafka-operator.operatorNetworkPolicy.enabled=false` after the overlay to leave the scoped policy in charge. The wrapper's schema rejects both keys at the top level rather than ignoring them.
+
+::: {.callout-caution title="An empty egress list isolates the operator"}
+Replace upstream's `egress: [{}]` with an empty list while `operatorPolicy` is off, and nothing grants the operator any egress. It can't reach the controllers' admin API on 9090, and the `Kafka` resource stays `NotReady`.
 :::
 
 ## Operational Components
 
-Four components run beside the brokers and controllers, and none of them carries client traffic: Cruise Control rebalances partitions, Kafka Exporter publishes consumer lag, the Strimzi Drain Cleaner handles node drains, and the Entity Operator turns `KafkaTopic` and `KafkaUser` resources into topics and credentials.
+Four components run beside the brokers and controllers, and none of them carries client traffic. [Cruise Control](appendix-a-glossary.md#gl-cruise-control) rebalances partitions, [Kafka Exporter](appendix-a-glossary.md#gl-kafka-exporter) publishes [consumer lag](appendix-a-glossary.md#gl-consumer-lag), the Strimzi [Drain Cleaner](appendix-a-glossary.md#gl-drain-cleaner) handles node drains, and the [Entity Operator](appendix-a-glossary.md#gl-entity-operator) turns `KafkaTopic` and `KafkaUser` resources into topics and credentials.
 
 ### Cruise Control
 
-Cruise Control provides automated partition rebalancing based on broker resource utilization:
+Cruise Control moves partition replicas when a [`KafkaRebalance`](appendix-a-glossary.md#gl-kafkarebalance) asks it to. The chart enables it by default, but the Kind overlay and the values `kates deploy` generates turn it off ([Cruise Control & Rebalance](20-installation-guide.md#cruise-control--rebalance)). Where it runs, it needs each broker's capacity:
 
 ```yaml
 cruiseControl:
@@ -489,28 +411,13 @@ cruiseControl:
     cpu: "2000m"
     inboundNetwork: 50MiB/s
     outboundNetwork: 50MiB/s
-    disk: 50Gi
 ```
 
-The `brokerCapacity` config tells CC the physical limits of each broker, enabling accurate rebalance proposals. Without it, CC can't distinguish between "broker is 80% utilized" and "broker has headroom."
-
-**Rebalance workflow:**
-
-```bash
-# Generate a rebalance proposal
-kubectl apply -f config/kafka/kafka-rebalance.yaml
-
-# Check the proposal
-kubectl get kafkarebalance full-rebalance -n kafka -o jsonpath='{.status}'
-
-# Approve it
-kubectl annotate kafkarebalance full-rebalance \
-  strimzi.io/rebalance=approve -n kafka
-```
+The `brokerCapacity` config tells Cruise Control the physical limits of each broker, enabling accurate rebalance proposals. Without it, Cruise Control can't distinguish between "broker is 80% utilized" and "broker has headroom." Disk capacity it reads from the brokers' volumes, so only CPU and network need declaring.
 
 ### Kafka Exporter
 
-The Kafka Exporter sidecar exposes consumer lag metrics that the JMX exporter doesn't cover:
+The Kafka Exporter exposes consumer lag metrics that the JMX exporter doesn't cover:
 
 | Metric | What It Tracks |
 |--------|---------------|
@@ -519,18 +426,11 @@ The Kafka Exporter sidecar exposes consumer lag metrics that the JMX exporter do
 | `kafka_topic_partitions` | Partition count per topic |
 | `kafka_topic_partition_current_offset` | Latest offset per partition |
 
-These metrics power the consumer lag alerts in `kafka-alerts.yaml`.
+These metrics feed the `KafkaConsumerGroupLag` and `KafkaConsumerGroupLagCritical` alerts.
 
 ### Strimzi Drain Cleaner
 
-The Drain Cleaner intercepts Kubernetes node drain events and gracefully rolls Kafka pods instead of abruptly killing them:
-
-```text
-kubectl drain node → Drain Cleaner webhook intercepts →
-  Annotates pod with strimzi.io/delete-pod-and-pvc →
-  Strimzi operator performs controlled rolling restart →
-  Pod migrates to another node with data intact
-```
+When a node is drained, the Drain Cleaner's admission webhook sees the eviction request for a Kafka pod, denies it, and annotates the pod `strimzi.io/manual-rolling-update=true`. The Cluster Operator then restarts that pod in its own rolling update, one broker at a time and only while every partition keeps `min.insync.replicas`. The pod comes back where its volume allows: on `panda` a local-path volume binds a broker to its node, so it waits until that node is uncordoned.
 
 Without the Drain Cleaner, `kubectl drain` can evict broker pods simultaneously, violating ISR constraints and potentially causing data loss.
 
@@ -545,114 +445,35 @@ The Entity Operator runs two sub-operators in a single pod:
 
 ## Prometheus Alerts
 
-The alerting rules in `kafka-alerts.yaml` cover six categories:
+The `kafka-cluster` chart renders one PrometheusRule per cluster, grouped as availability, replication, kraft, performance, storage, consumers, cruise-control and slo. [PrometheusRule Alerts](20-installation-guide.md#prometheusrule-alerts) lists every alert with its threshold. The operator chart raises `StrimziOperatorDown`, `StrimziReconciliationsFailing` and the certificate-expiry alerts, because only it scrapes the operator. Each decision in this chapter has alerts that say it is failing:
 
-### Cluster Health
-
-| Alert | Condition | Severity |
-|-------|-----------|----------|
-| `KafkaOfflinePartitions` | Any partition has no leader for 2min | critical |
-| `KafkaUnderReplicatedPartitions` | Any partition's ISR < RF for 5min | warning |
-| `KafkaActiveControllerCount` | Not exactly 1 active controller for 3min | critical |
-| `KafkaBrokerDiskUsageHigh` | Disk > 80% for 10min | warning |
-| `KafkaBrokerDiskUsageCritical` | Disk > 90% for 5min | critical |
-
-### Consumer Health
-
-| Alert | Condition | Severity |
-|-------|-----------|----------|
-| `KafkaConsumerGroupLag` | Lag > 1M messages for 15min | warning |
-| `KafkaConsumerGroupLagCritical` | Lag > 10M messages for 5min | critical |
-
-### KRaft Quorum
-
-| Alert | Condition | Severity |
-|-------|-----------|----------|
-| `KafkaRaftLeaderElectionRate` | > 0.5 elections/s for 5min | warning |
-| `KafkaRaftUncommittedRecords` | > 1000 uncommitted records for 5min | warning |
-
-### Performance
-
-| Alert | Condition | Severity |
-|-------|-----------|----------|
-| `KafkaRequestLatencyHigh` | P99 > 1s for 10min | warning |
-| `KafkaLogFlushLatencyHigh` | P99 > 500ms for 10min | warning |
-| `KafkaRequestHandlerSaturated` | Handler idle < 30% for 10min | warning |
-| `KafkaISRShrinkRate` | ISR shrinking for 5min | warning |
-
-### Operator & Cruise Control
-
-| Alert | Condition | Severity |
-|-------|-----------|----------|
-| `StrimziOperatorDown` | Operator unreachable for 5min | critical |
-| `CruiseControlAnomalyDetected` | Any anomaly in 10min window | warning |
-
-### Certificates
-
-| Alert | Condition | Severity |
-|-------|-----------|----------|
-| `KafkaCertificateExpiringSoon` | Certificate expires in < 30 days (for 1h) | warning |
-| `KafkaCertificateExpiryCritical` | Certificate expires in < 7 days (for 30min) | critical |
+| Decision | Alerts that fire when it fails |
+|----------------------|-----------------------------------|
+| Three controllers, a majority of two | `KafkaActiveControllerCount`, `KafkaRaftLeaderElections`, `KafkaRaftUnknownVoters` |
+| Replication factor 3 with `min.insync.replicas: 2` | `KafkaUnderMinIsrPartitions`, `KafkaUnderReplicatedPartitions`, `KafkaISRShrinkRate` |
+| Leaders only from the ISR | `KafkaUncleanLeaderElection` |
+| Request threads sized for a 2-CPU broker | `KafkaRequestHandlerSaturated`, `KafkaRequestQueueSaturated`, `KafkaRequestLatencyHigh` |
+| Persistent volumes per broker | `KafkaOfflineLogDirectory`, `KafkaLogFlushLatencyHigh`, `KafkaBrokerDiskUsageHigh`, `KafkaBrokerDiskUsageCritical` |
+| Declared broker capacities for Cruise Control | `CruiseControlNoLoadModel`, `CruiseControlAnomalyDetected` |
 
 ## Backup & Recovery
 
-Daily backups are managed by Velero:
+Backup is opt-in. `backup.enabled: true` renders a [Velero](appendix-a-glossary.md#gl-velero) Schedule at 02:00 UTC with a 7-day TTL, and a one-shot Backup before each upgrade. Both cover the cluster's PVCs, PVs, ConfigMaps and Secrets, and its Strimzi resources: the `Kafka`, its node pools, topics, users and rebalances. The Strimzi resources are in the backup because a PVC without its `KafkaNodePool` restores nothing the operator can adopt. `backup.volumes` picks how volume data is kept: `fs-backup`, `snapshot` or `none`. [Velero Backup](20-installation-guide.md#velero-backup) covers the values and the restore.
 
-```yaml
-# Scheduled daily at 02:00 UTC, 7-day retention
-schedule: "0 2 * * *"
-includedNamespaces: [kafka]
-includedResources:
-  - persistentvolumeclaims
-  - persistentvolumes
-  - configmaps
-  - secrets
-```
+## The Install Order
 
-Pre-upgrade backups capture the full Strimzi CRD state:
+`make kafka` and `kates deploy` both install `krafter` as two Helm releases: the operator wrapper, `charts/strimzi-operator`, then the cluster, `charts/kafka-cluster`. The cluster's values chain starts with the generated `.build/values-detected.yaml`, then the platform profile, then the environment overlay; [Installation](20-installation-guide.md#installation) gives the steps. Three orderings the install depends on:
 
-```bash
-kubectl apply -f config/kafka/kafka-backup.yaml
-```
+| Order | Why |
+|-------|------------------------------|
+| Operator before cluster | The cluster's resources need the operator's CRDs, which the wrapper's `crdUpgrade` hook owns |
+| Dependency build before either upgrade | Neither chart renders with its `charts/` directory empty |
+| Profile before overlay | The overlay must be able to change any of the profile's topics, users and client grants |
 
-## Deploy Script Flow
+User Secrets appear only after the cluster is Ready, because the User Operator needs a running cluster, so `deploy-kafka-ui.sh` waits for the `kafka-ui` Secret before it deploys.
 
-`deploy-kafka.sh` is Helm-chart-driven and reconciles two releases in order: the operator wrapper (`charts/strimzi-operator`), then the cluster (`charts/kafka-cluster`, which templates the Kafka CR, node pools, users, topics, alerts and network policies). Each chart gets its own `helm dependency build` — the wrapper's fetches the upstream operator subchart, the cluster's fetches the `kafka-common` library and SeaweedFS — and the cluster's values chain is always the platform profile followed by the environment overlay:
-
-```mermaid
-%%| label: fig-kde-deploy-flow
-%%| fig-cap: "What deploy-kafka.sh does, in order: the operator release first, then the cluster release."
-%%| fig-alt: "Flowchart. deploy-kafka.sh ensures the kafka and strimzi-operator namespaces, builds the strimzi-operator chart's dependencies, installs or upgrades the strimzi-operator release, where the CRD hook runs, and waits for the kafkas CRD to be Established. It then builds the kafka-cluster chart's dependencies; on kind only, it applies the zone StorageClasses. It builds the values chain, platform profile first and environment overlay second, adopts existing KafkaTopics and KafkaUsers into the release, installs or upgrades kafka-cluster, waits up to 10 minutes for krafter to be Ready, waits for the KafkaUser Secrets and finishes."
-graph TD
-    A["Ensure kafka + strimzi-operator namespaces"] --> B["helm dependency build<br/>charts/strimzi-operator<br/>(upstream operator subchart)"]
-    B --> C["helm upgrade --install strimzi-operator<br/>charts/strimzi-operator --reset-values --wait<br/>(unconditional: the CRD hook runs here)"]
-    C --> D["kubectl wait crd kafkas.kafka.strimzi.io<br/>Established"]
-    D --> E["helm dependency build charts/kafka-cluster<br/>(kafka-common library + SeaweedFS)<br/>falls back to dependency update"]
-    E --> F{"ENV = kind?"}
-    F -->|"yes"| G["Apply zone-specific StorageClasses"]
-    F -->|"no"| H["Build the values chain:<br/>values-platform.yaml first,<br/>then values-dev / -kind / -staging / -prod"]
-    G --> H
-    H --> I["Adopt pre-existing KafkaTopics + KafkaUsers<br/>into the Helm release"]
-    I --> J["helm upgrade --install kafka-cluster<br/>charts/kafka-cluster -n kafka"]
-    J --> K["Wait for kafka/krafter Ready<br/>(up to 10 min)"]
-    K --> L["Wait for KafkaUser secrets"]
-    L --> M["Done"]
-```
-
-`deploy-kafka-generic.sh` runs the same shape on a cluster whose topology is not known ahead of time. It starts with `kates detect --generate-values`, prepends that generated file to the values chain (`values-detected` → `values-platform` → the provider overlay → any `-f` you passed), injects the detected DNS domain into the operator with `--set strimzi-kafka-operator.kubernetesServiceDnsDomain=…` and `--set global.clusterDomain=…` into the cluster, and finishes with `helm test`. Its only opt-out from installing the operator is an explicit `strimziOperator.enabled: false` in the detected values, which means a pipeline manages the operator itself.
-
-**Order matters, three times over:**
-
-- **Operator before cluster.** Its CRDs are a hard dependency, which is why it is a separate Helm release. kafka-cluster 1.0 no longer applies the CRDs at all — the wrapper's `crdUpgrade` hook owns them.
-- **Dependency build before either `helm upgrade`.** Neither chart renders with its `charts/` directory empty, and both scripts build unconditionally rather than testing for it.
-- **Profile before overlay.** `values-platform.yaml` carries the platform's topics, users and client grants; the environment overlay comes after so it can change any of them.
-
-User secrets only appear after the cluster is Ready (the User Operator needs a running cluster), so downstream scripts like `deploy-kafka-ui.sh` wait for the `kafka-ui` secret before deploying.
-
-::: {.callout-tip}
-**Try it**
-
-With the deploy script finished, confirm the quorum is healthy and the brokers actually spread across zones:
+::: {.callout-tip title="Try it: are the brokers really in three zones?"}
+With the install finished, confirm the quorum is healthy and the brokers spread across zones:
 
 ```bash
 kubectl get kafka krafter -n kafka
@@ -661,7 +482,7 @@ kubectl get pods -n kafka -l strimzi.io/controller-role=true -o wide
 kubectl get pods -n kafka -l strimzi.io/cluster=krafter -o wide -L zone
 ```
 
-Expect the Kafka CR to report Ready, every node pool at its desired replica count, three controller pods on distinct nodes, and each broker pod carrying a different `zone` label (alpha, sigma, gamma) — the rack awareness from the architecture diagrams made visible. If anything is off, the symptoms below are the place to start.
+The Kafka CR should be Ready, every node pool at its replica count, and each broker pod should carry a different `zone` label. If anything is off, the symptoms below are the place to start.
 :::
 
 ## Troubleshooting
@@ -672,9 +493,9 @@ Each entry names the symptom, then its cause and the fix.
 
 **Symptom:** Operator pod crashes with `UnsupportedVersionException`
 
-**Cause:** The Helm chart's Kafka image map includes versions not supported by the operator binary
+**Cause:** The operator's image map names a Kafka version its binary doesn't support, because the release was built from a chart other than the one published beside that binary.
 
-**Fix:** Reconcile the wrapper chart, whose vendored subchart is the OCI chart published beside the operator binary and therefore always in sync with it. The published chart carries that subchart, so the pinned Strimzi version cannot drift. `--reset-values` rebuilds the release from the chart's defaults and drops every value it was installed with, so the command passes back what the operator runs with. `helm get values` prints what the release carries now:
+**Fix:** Reconcile the wrapper chart from the published OCI chart, whose vendored subchart is published beside the operator binary and so matches it. `--reset-values` rebuilds the release from the chart's defaults and drops every value it was installed with, so the command passes back what the operator runs with. `helm get values` prints what the release carries now:
 
 ```bash
 helm get values strimzi-operator -n strimzi-operator
@@ -692,17 +513,17 @@ helm upgrade --install strimzi-operator ./strimzi-operator \
 - An operator installed with `kates deploy --operator-scope namespace` also needs `--set strimzi-kafka-operator.watchAnyNamespace=false --set 'strimzi-kafka-operator.watchNamespaces={<namespace>,<namespace>}'`. Without them it comes back watching every namespace.
 - Every other key that `helm get values` shows goes back as a `--set` after the overlay, unless the overlay or the flags above already set it, and except `strimziVersion`, which the next paragraph covers. Examples are `strimzi-kafka-operator.operatorNetworkPolicy.enabled=false`, and `strimzi-kafka-operator.defaultImageRegistry` and `crdUpgrade.url` on a restricted-egress cluster. Without its `crdUpgrade.url`, the upgrade hook fetches the public CRD bundle; where it cannot reach it, the upgrade aborts and leaves the release in `pending-upgrade`.
 
-If `helm get values` shows a `strimziVersion`, `kates deploy` installed the operator from the chart of a version other than the repository's pin, and this command moves it to the pin. That is an operator version change, which rolls every Kafka cluster the operator manages: make it with the procedure in [Deploying the Strimzi Operator](deploying-strimzi-operator.md#upgrading-the-operator) instead.
+If `helm get values` shows a `strimziVersion`, `kates deploy` installed the operator from the chart of a version other than the repository's pin, and this command moves it to the pin. That is an operator version change, which rolls every Kafka cluster the operator manages: make it with the procedure in [Upgrading the Operator](deploying-strimzi-operator.md#upgrading-the-operator) instead.
 
-`scripts/check-versions.sh` is the guard against this drifting again: it asserts that the chart `appVersion`, the dependency version, `strimziVersion` and `versions.env` all name the same Strimzi release, and that the default `kafkaVersion` is the newest entry in that operator's image map.
+`scripts/check-versions.sh` is the guard against this drifting again. It asserts that the chart `appVersion`, the dependency version, `strimziVersion` and `versions.env` all name the same Strimzi release, and that the default `kafkaVersion` is the newest in that operator's image map.
 
 ### Brokers Crash with ConfigException
 
 **Symptom:** `Invalid value -1 for configuration local.retention.bytes`
 
-**Cause:** Kafka 4.1.1 tightened validation — `local.retention.bytes` cannot be `-1` when `retention.bytes` is explicitly set
+**Cause:** Your values set `local.retention.bytes` (`log.local.retention.bytes` on the broker) to `-1`, unlimited, while `retention.bytes` is set, and Kafka refuses a local retention larger than the total. The chart itself sets only `log.local.retention.ms` for tiered storage.
 
-**Fix:** Remove `log.local.retention.bytes: -1` from `kafka.yaml`
+**Fix:** With `tieredStorage.enabled`, remove the key or set `local.retention.bytes` to a byte count no larger than `retention.bytes`.
 
 ### Brokers Crash with RemoteLogManager
 
@@ -716,13 +537,7 @@ If `helm get values` shows a `strimziVersion`, `kates deploy` installed the oper
 
 **Symptom:** `secret "kafka-ui" not found`
 
-**Cause:** The `kafka-ui` Secret is created by the Strimzi Entity Operator (User Operator sub-component) when it reconciles the `KafkaUser` CR. The dependency chain is:
-
-```text
-Kafka CR Ready → Entity Operator deploys → User Operator reconciles KafkaUser → Secret created
-```
-
-If the Kafka CR hasn't reached `Ready` (e.g., due to a NetworkPolicy blocking the operator), the Entity Operator never starts and no user secrets are created.
+**Cause:** The Entity Operator's User Operator creates the `kafka-ui` Secret when it reconciles the `KafkaUser` CR, and the Entity Operator deploys only once the `Kafka` resource is Ready. If the Kafka CR hasn't reached `Ready`, for example because a NetworkPolicy blocks the operator, no user Secrets are created ([Troubleshooting Index](appendix-b-troubleshooting.md)).
 
 **Fix:**
 
@@ -750,7 +565,8 @@ kubectl get pods -n kafka -l strimzi.io/name=krafter-entity-operator
 ```bash
 # The two policies that can select the operator pod
 kubectl describe networkpolicy strimzi-operator -n strimzi-operator
-kubectl get networkpolicy strimzi-cluster-operator-network-policy -n strimzi-operator -o yaml
+kubectl get networkpolicy strimzi-cluster-operator-network-policy \
+  -n strimzi-operator -o yaml
 # Look for: "Allowing egress traffic: <none>"
 
 # What the wrapper's policy believes the watch scope is
@@ -762,7 +578,7 @@ kubectl logs deployment/strimzi-cluster-operator -n strimzi-operator --tail=20
 # Look for: "Error getting controller config: TimeoutException"
 ```
 
-**Fix:** correct the values and reconcile the release — the policy is chart-managed, so deleting the object by hand only lasts until the next upgrade. Pass back the values the operator runs with, as in [Strimzi Operator CrashLoopBackOff](#strimzi-operator-crashloopbackoff), and its caveat holds here too: an operator whose values carry `strimziVersion` goes through the operator upgrade procedure instead, because reconciling it from the repository's chart moves it to the pin and rolls every Kafka cluster.
+**Fix:** correct the values and reconcile the release — the policy is chart-managed, so deleting the object by hand only lasts until the next upgrade. Pass back the values the operator runs with, as in [Strimzi Operator CrashLoopBackOff](#strimzi-operator-crashloopbackoff), and its caveat holds here too. An operator whose values carry `strimziVersion` goes through the operator upgrade procedure instead, because reconciling it from the repository's chart moves it to the pin and rolls every Kafka cluster.
 
 Where upstream's policy is the cause, turn it off after those values. `values-prod.yaml` is the only overlay that turns it on, so for a production operator:
 
@@ -784,48 +600,26 @@ Add the scope flags for an operator that watches only some namespaces.
 
 Where the watch scope is the cause, run the command from [Strimzi Operator CrashLoopBackOff](#strimzi-operator-crashloopbackoff) with the operator's own overlay and the scope flags, and list the Kafka namespace in `watchNamespaces`. `operatorNetworkPolicy.enabled=false` matters only with `values-prod.yaml`. The production command above is not for an operator that `kates deploy` installed: it would move that operator onto `values-prod.yaml`, with its drain cleaner, PodDisruptionBudget and `productionMode`.
 
-::: {.callout-note}
-`--reset-values` rather than `--reuse-values`: it takes `strimziVersion`, and with it the CRD bundle the upgrade hook applies, from the chart you install rather than from the release, and a release carried over from the old `oci://` install stores flat upstream keys the wrapper's schema rejects. It also drops every value the release was installed with, which is why the command passes them back.
+::: {.callout-note title="Why --reset-values, not --reuse-values"}
+`--reset-values` takes `strimziVersion`, and with it the CRD bundle the upgrade hook applies, from the chart you install rather than from the release. A release carried over from the old `oci://` install also stores flat upstream keys the wrapper's schema rejects. And it drops every value the release was installed with, which is why the command passes them back.
 :::
 
 ### Cruise Control Goal Mismatch
 
 **Symptom:** `ConfigException: unsupported goals in default.goals`
 
-**Cause:** The `goals` list in the Kafka CR doesn't include all goals that Strimzi adds to `default.goals`
+**Cause:** Cruise Control's `goals` list doesn't contain every goal in its `default.goals`, as happens when your values set `cruiseControl.config.goals` to a shorter list.
 
-**Fix:** Expand the `goals` list to include all distribution goals:
+**Fix:** List every goal of `default.goals` in `cruiseControl.config.goals`, or remove the key and let Strimzi set both lists. The goals a rebalance optimizes for are a separate list, `rebalance.goals`; the chart's defaults are in `charts/kafka-cluster/values.yaml`.
 
-```yaml
-goals: >-
-  ...RackAwareGoal,
-  ...RackAwareDistributionGoal,
-  ...MinTopicLeadersPerBrokerGoal,
-  ...ReplicaCapacityGoal,
-  ...DiskCapacityGoal,
-  ...NetworkInboundCapacityGoal,
-  ...NetworkOutboundCapacityGoal,
-  ...CpuCapacityGoal,
-  ...ReplicaDistributionGoal,
-  ...DiskUsageDistributionGoal,
-  ...CpuUsageDistributionGoal,
-  ...TopicReplicaDistributionGoal,
-  ...LeaderReplicaDistributionGoal,
-  ...PreferredLeaderElectionGoal
-```
-
-For the symptom-by-symptom index across the whole book, see the [Troubleshooting Index](appendix-b-troubleshooting.md).
-
-## Versions
-
-Component versions for the whole platform are tracked centrally in the [Version & Compatibility Matrix](appendix-d-versions.md), generated from `versions.env`. Two notes specific to this chapter: Cruise Control is bundled with the Strimzi Kafka image (no separate pin), and the Strimzi CRD API is `v1` (migrated from the deprecated `v1beta2`).
+For the symptom-by-symptom index across the whole book, see the [Troubleshooting Index](appendix-b-troubleshooting.md). Component versions for the whole platform are in the [Version & Compatibility Matrix](appendix-d-versions.md); Cruise Control ships in the Strimzi Kafka image, and the Strimzi API version is `v1`.
 
 ## Summary
 
-- `krafter` runs dedicated KRaft roles: a three-controller Raft quorum survives one failure, while zone-pinned brokers satisfy `default.replication.factor: 3` with `min.insync.replicas: 2` — writes keep flowing through a single broker loss.
-- Every `KafkaNodePool` setting is a deliberate trade-off: fixed 2048m heaps prevent resize stalls, memory requests equal to limits buy Guaranteed QoS, and `deleteClaim: false` keeps PVCs alive for recovery.
-- Listeners split traffic by trust level — SCRAM-SHA-512 on 9092 for in-cluster services, mTLS on 9093 — all gated by simple ACLs with `kates-backend` as the sole superUser. An external listener on 9094 exists only where the values chain declares one: `values-prod.yaml` through `kafka.externalAccess`, and `kates deploy` on every cluster but kind.
-- Where they render, the chart's NetworkPolicies confine the brokers' egress; the client listeners stay open until they carry `networkPolicyPeers`, and the operator chart's production overlay lifts the operator's egress scoping.
-- Cruise Control rebalances against declared broker capacities, the Kafka Exporter feeds consumer-lag alerts, and the Drain Cleaner turns node drains into controlled rolling restarts — with `kafka-alerts.yaml` watching all of it.
+- `krafter` separates controllers from brokers so metadata elections never wait on broker I/O, and three of each survive one loss.
+- One broker pool per zone keeps acknowledged writes flowing when a zone goes.
+- Fixed heaps, requests equal to limits and kept volumes trade memory for predictable latency and recoverable data.
+- The chart's NetworkPolicies confine egress; the client listeners stay open to every pod until you name their peers.
+- Cruise Control, the exporter and the Drain Cleaner each defend one decision, and the alerts tell you when it fails.
 
-With the engineering rationale behind the cluster settled, [Deployment Guide](12-deployment.md) turns to the stack that uses it — choosing a topology, sizing resources, and deploying the Kates API, monitoring, and chaos tooling.
+A Kafka cluster that can defend its design still needs a stack to test it: [Deployment Guide](12-deployment.md) chooses the namespace layout, sizes the Kates API and monitoring, and deploys them next to `krafter`.

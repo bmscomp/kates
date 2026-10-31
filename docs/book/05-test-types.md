@@ -1,356 +1,258 @@
 # Test Types Deep Dive
 
-Kates provides eight core test types, each designed to answer a specific question about your Kafka cluster's behavior — the methodology, use case, and configuration for every type. (Kates also has specialized `TUNE_*` types, covered in [CLI Reference](10-cli-reference.md), and an `INTEGRATION_CDC` type.)
+Before the payments platform moves onto [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test, you need four different answers: what its latency is at 2,000 records per second, where it saturates, how it behaves when a burst hits, and whether an acknowledged record ever disappears. Each answer is a different run, and Kates names them: eight core test types, plus the `TUNE_*` types that [CLI Reference](10-cli-reference.md) covers and an `INTEGRATION_CDC` type that [REST API Reference](11-api-reference.md) lists.
 
 Whether you're baselining a new cluster or gating a CI pipeline, after this chapter you can:
 
-- Pick the test type that answers the question you're actually asking — steady-state capacity, breaking point, burst recovery, or data safety
-- Configure each type's key parameters and know the load each one puts on the cluster, whichever [benchmark backend](appendix-a-glossary.md#gl-benchmark-backend) runs it
-- Read the results — recognize [saturation](appendix-a-glossary.md#gl-saturation-point), slow leaks, and data loss in the metrics each type reports
+- Pick the test type that answers the question you're actually asking — steady-state latency, breaking point, burst behavior, or data safety
+- Set each type's key parameters and know the load each one puts on the cluster, whichever [benchmark backend](appendix-a-glossary.md#gl-benchmark-backend) runs it
+- Read the results — recognize [saturation](appendix-a-glossary.md#gl-saturation-point), slow leaks, and data loss in the rows each type reports
 - Run any type from a built-in scenario template instead of hand-rolled flags
 
 ## Test Type Overview
 
-A test type decides the tasks its run starts: how many producers and consumers, at what rate, with which defaults. Both benchmark backends run those same tasks. The default native backend runs them inside the [Kates API](appendix-a-glossary.md#gl-kates-api), the service in the cluster that runs your tests. The [Trogdor](appendix-a-glossary.md#gl-trogdor) backend (`--backend trogdor`) submits each one to the Trogdor coordinator as a task of its own. Each load shape below therefore holds on either backend, and a section says so where Trogdor differs. The diagram groups the types by the question they answer:
+A test type decides the tasks its run starts: how many producers and consumers, at what rate, with which defaults. Each task becomes one row of `kates test get <id>`, and which row carries latency depends on the type. Each row of the table below gives a type's question, the tasks it starts and the latency it reports:
 
-```mermaid
-%%| label: fig-types-taxonomy
-%%| fig-cap: "The eight core Kates test types divide into six performance workloads and two correctness and latency verification workloads."
-%%| fig-alt: "Diagram with two groups: Performance Tests (LOAD for steady-state capacity, STRESS for breaking point, SPIKE for burst handling, ENDURANCE for long-term stability, VOLUME for large data sets, and CAPACITY for maximum throughput) and Correctness Tests (ROUND_TRIP for end-to-end latency and INTEGRITY for zero data loss)."
-graph TB
-    subgraph Performance["Performance Tests"]
-        direction LR
-        LOAD[LOAD<br/>Steady-state capacity]
-        STRESS[STRESS<br/>Breaking point]
-        SPIKE[SPIKE<br/>Burst handling]
-        ENDURANCE[ENDURANCE<br/>Long-term stability]
-        VOLUME[VOLUME<br/>Large data sets]
-        CAPACITY[CAPACITY<br/>Maximum throughput]
-    end
-    
-    subgraph Correctness["Correctness Tests"]
-        direction LR
-        RT[ROUND_TRIP<br/>End-to-end latency]
-        INT[INTEGRITY<br/>Zero data loss]
-    end
-```
+| Type | Question it answers | Tasks it starts | Latency it reports |
+|------|---------------------|-----------------|--------------------|
+| LOAD | What is the latency at a steady rate? | One producer, one consumer | `produce` row: send to acknowledgment |
+| STRESS | How does the cluster degrade near its ceiling? | `parallelProducers` producers at once | Each producer row: send to acknowledgment |
+| SPIKE | What happens when a burst hits? | One unthrottled producer | Its row: send to acknowledgment |
+| ENDURANCE | Does performance drift over hours? | One rate-limited producer, one consumer | Producer row: send to acknowledgment |
+| VOLUME | How do large records behave? | One producer of large records | Its row: send to acknowledgment |
+| CAPACITY | What is the ceiling? | `parallelProducers` unthrottled producers | Each producer row: send to acknowledgment |
+| ROUND_TRIP | How long from send to receipt? | One task that produces and consumes | Its row: send to receipt |
+| INTEGRITY | Does an acknowledged record ever disappear? | One task that produces, then verifies | Its row: send to acknowledgment |
+
+The rule behind the last column: a producer's row times each record from its send to its acknowledgment, ROUND_TRIP's row times it from send to receipt, and a consumer's row measures no latency and shows 0. The run's summary takes its latency from the rows that measured it, so for LOAD and ENDURANCE it's the producer's.
+
+### Defaults by Type
+
+The [Kates API](appendix-a-glossary.md#gl-kates-api), the service in the cluster that runs your tests, merges a run's `spec` with its type's defaults, and every value below is a `spec` key you can set. The first table is the load each type offers; for STRESS and CAPACITY, `records` counts for each producer:
+
+| Type | Producers | Records | Rate (rec/s) | Duration |
+|------|----------:|--------:|-------------:|---------:|
+| LOAD | 1 | 1,000,000 | unlimited | 600 s |
+| STRESS | 3 | 5,000,000 each | unlimited | 900 s |
+| SPIKE | 1 | 2,000,000 | unlimited, fixed | 300 s |
+| ENDURANCE | 1 | 10,000,000 | 5,000 | 3,600 s |
+| VOLUME | 1 | 2,000,000 | unlimited | 600 s |
+| CAPACITY | 5 | 10,000,000 each | unlimited, fixed | 1,200 s |
+| ROUND_TRIP | 1 | 500,000 | 10,000 | 600 s |
+| INTEGRITY | 1 | 1,000,000 | unlimited | 600 s |
+
+A run stops when its records are sent or its duration is up, whichever comes first. The second table is the producer and topic settings each type starts from:
+
+| Type | Record size | `acks` | Partitions | Compression | Batch / linger |
+|------|------------:|--------|-----------:|-------------|----------------|
+| LOAD | 1,024 B | `all` | 3 | `lz4` | 64 KiB / 5 ms |
+| STRESS | 1,024 B | `all` | 6 | `lz4` | 128 KiB / 10 ms |
+| SPIKE | 1,024 B | `1` | 3 | `none` | 128 KiB / 0 ms |
+| ENDURANCE | 1,024 B | `all` | 3 | `lz4` | 64 KiB / 5 ms |
+| VOLUME | 10,240 B | `all` | 6 | `lz4` | 256 KiB / 50 ms |
+| CAPACITY | 1,024 B | `all` | 12 | `lz4` | 128 KiB / 10 ms |
+| ROUND_TRIP | 1,024 B | `all` | 3 | `none` | 16 KiB / 0 ms |
+| INTEGRITY | 1,024 B | `all` | 3 | `lz4` | 64 KiB / 5 ms |
+
+Every type creates its topic with a replication factor of 3 and `min.insync.replicas` of 2. A Kates record is a short header padded with zeros, which `lz4` compresses to far less than its size, so a type with compression on moves fewer bytes than its record size suggests.
+
+## Two Ways to Generate Load
+
+The benchmark backend, a test's `backend` field, generates its load, and both backends start the same tasks for a type. The default `native` backend runs them inside the Kates API. The [Trogdor](appendix-a-glossary.md#gl-trogdor) backend (`--backend trogdor`) submits each task to a Trogdor coordinator as a workload of its own, and injects no faults. Every load shape in this chapter holds on either backend, and the table says where the reports differ:
+
+| What | `native` | `trogdor` |
+|------|----------|-----------|
+| INTEGRITY runs | Yes | No: the run fails as it starts, with `INTEGRITY/CDC tests require the native backend` |
+| ROUND_TRIP latency | Yes | No: every latency field reads 0, meaning not measured |
+| Max latency on a produce row | Yes | No: the field reads 0 on every produce row |
+| Latency heatmap | Yes | No |
+
+So run on the native backend whenever the latency tail or the integrity verdict matters, and use Trogdor when you want the load generated outside the Kates API.
 
 ## LOAD Test
 
-**Question:** *"What is my cluster's steady-state performance at expected production [throughput](appendix-a-glossary.md#gl-throughput)?"*
+A LOAD test answers one question: what is the cluster's steady-state latency at the [throughput](appendix-a-glossary.md#gl-throughput) you expect in production? It is the run that sets the [baseline](appendix-a-glossary.md#gl-baseline) every later run is compared with.
 
-### Methodology
+### How a LOAD Run Works
 
-A LOAD test sends a fixed number of records at a controlled, sustainable rate. It measures the [baseline](appendix-a-glossary.md#gl-baseline) performance that users experience during normal operations.
+A LOAD run starts one producer and one consumer, whatever `parallelProducers` and `numConsumers` say. The producer sends its records at `targetThroughput` records per second, or as fast as the cluster accepts them when the rate is -1, its default. The consumer reads the same topic, so the run shows whether consumption keeps up with production.
 
-```mermaid
-%%| label: fig-types-load-profile
-%%| fig-cap: "A LOAD test holds a steady, rate-limited send rate across the run before collecting summary percentiles."
-%%| fig-alt: "Flowchart from left to right inside Load Profile: Start producers and consumers, hold Steady State at a fixed rate until records are sent or duration is reached, and Collect results."
-graph LR
-    subgraph Load["Load Profile"]
-        direction LR
-        T1["Start<br/>producers + consumers"] --> T2["Steady State<br/>fixed rate until records sent<br/>or duration reached"] --> T3["Collect<br/>results"]
-    end
-```
+A consumer whose group has no committed [offsets](appendix-a-glossary.md#gl-offset) starts at the records written since the run was submitted, so records that earlier runs left on a reused topic aren't counted. A named `consumerGroup` with committed offsets resumes from them instead, so give a LOAD run a group of its own. Run LOAD to set a baseline, after a configuration change, and as the [gate](appendix-a-glossary.md#gl-gate) a CI pipeline checks before a deploy.
 
-### When to Use
+### Running LOAD on the Payments Shape
 
-- Establishing **baseline metrics** for comparison
-- Validating performance after **configuration changes**
-- **CI/CD [gates](appendix-a-glossary.md#gl-gate)** — ensure throughput and latency meet the [SLA](appendix-a-glossary.md#gl-sla) targets you set before deployment
-- **Regression detection** — compare against historical baselines
-
-### Configuration
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `records` | 1,000,000 | Total messages to produce |
-| `recordSizeBytes` | 1024 | Message payload size |
-| `parallelProducers` | 1 | Ignored: LOAD runs one producer |
-| `numConsumers` | 1 | Ignored: LOAD runs one consumer |
-| `targetThroughput` | -1 (unlimited) | Producer rate in records/s |
-| [`acks`](appendix-a-glossary.md#gl-acks) | `all` | Producer acknowledgment mode |
-| [`topic`](appendix-a-glossary.md#gl-topic) | `load-test` | Target topic name (unless overridden) |
-| [`partitions`](appendix-a-glossary.md#gl-partition) | 3 | Topic partition count |
-| [`replicationFactor`](appendix-a-glossary.md#gl-rf) | 3 | Topic replication factor |
-
-### Example
-
-The first command runs a quick baseline. The second runs closer to production, with 2048-byte records, a topic of its own and `acks=all` spelled out.
+The payments target is a LOAD run: 1 KiB records with `acks=all` on a topic of their own, offered at 2,000 records per second. The command spells out each setting, even where it matches a default:
 
 ```bash
-# Quick baseline
-kates test create --type LOAD --records 100000 --wait
-
-# Production-like configuration
-kates test create --type LOAD \
-  --records 500000 \
-  --record-size 2048 \
-  --topic perf-load-test \
-  --acks all \
-  --wait
+kates test create --type LOAD --topic payments-load --throughput 2000 \
+  --record-size 1024 --acks all --wait
 ```
 
-**[Scenario file](appendix-a-glossary.md#gl-scenario-file) equivalent** (see [Scenario Files & SLA Gates](13-scenario-files.md)):
+The same run as a [scenario file](appendix-a-glossary.md#gl-scenario-file) carries the latency target as a gate:
 
 ```yaml
 scenarios:
-  - name: "Production Load Baseline"
+  - name: payments-load
     type: LOAD
     spec:
-      records: 500000
-      recordSizeBytes: 2048
-      topic: perf-load-test
+      topic: payments-load
+      consumerGroup: payments-perf
+      recordSizeBytes: 1024
       acks: all
+      targetThroughput: 2000
     validate:
-      maxP99LatencyMs: 50
-      minThroughputRecPerSec: 10000
+      maxP99LatencyMs: 100
 ```
 
-### Interpreting Results
+[Scenario Files & SLA Gates](13-scenario-files.md) explains the gates, including why a throughput floor has to sit below the offered 2,000.
 
-Healthy ranges are environment-dependent — treat these as starting points and calibrate against your own baseline:
+### Reading a LOAD Report
 
-| Metric | Healthy Range | Warning |
-|--------|:---:|---------|
-| [P99](appendix-a-glossary.md#gl-percentile) Latency | \< 50ms | > 200ms suggests resource contention |
-| Error Rate | 0% | Any errors indicate a configuration problem |
-| Throughput variability | \< 10% stddev | High variance suggests GC or I/O pressure |
+For the payments workload the target is a [P99](appendix-a-glossary.md#gl-percentile) of 100 ms or less on the `produce` row of `kates test get <id>`. A consume rate far below the produce rate means the consumer couldn't keep up, and a row with an error means that task failed or stopped short, with the message saying why. There's no universal healthy range for these numbers; [Performance Theory](04-performance-theory.md) explains why you calibrate against your own runs instead. To tune the producer settings behind a LOAD run, the [Lab](appendix-a-glossary.md#gl-lab), `kates lab`, runs one iteration after another in a terminal UI: see [Lab — Interactive Performance Tuning](10b-lab.md).
 
-Before the native backend started a new consumer group at the run's own first record, a LOAD or ENDURANCE run on a reused topic read every record earlier runs had left there first, so its consume throughput, and the run's average, are understated by up to the ratio of all the records it read to its own.
+::: {.callout-tip title="Try it: what does krafter's produce row say at 2,000 records per second?"}
+Run the payments LOAD shape and read its rows:
 
-::: {.callout-tip}
-For iterative parameter tuning, use [`kates lab`](appendix-a-glossary.md#gl-lab) instead of individual `test create` commands. Lab lets you tweak parameters, run tests, and compare results in a single session — see [Lab — Interactive Performance Tuning](10b-lab.md).
+```bash
+kates test create --type LOAD --topic payments-load --throughput 2000 \
+  --record-size 1024 --acks all --wait
+kates test get <id>
+```
+
+Compare the `produce` row's P99 with the 100 ms target, and its rate with the `consume` row's.
 :::
-
----
 
 ## STRESS Test
 
-**Question:** *"At what point does my cluster break, and how does it degrade?"*
+A STRESS test answers how the cluster degrades as it approaches its ceiling: which resource saturates first, and what latency and errors do on the way.
 
-### Methodology
+### How a STRESS Run Works
 
-A STRESS test pushes the cluster well past its comfortable operating point to find the saturation point and characterize the degradation curve. It starts `parallelProducers` producers at once, 3 by default, and each one sends as fast as the cluster accepts unless `targetThroughput` sets a rate for it. The profile has no steps, as the diagram shows:
+A STRESS run starts `parallelProducers` producers at once, 3 by default, and no consumer. Each producer sends `records` records, as fast as the cluster accepts them unless `targetThroughput` sets a rate for it, until its records are sent or the duration is up. The profile has no steps: one run is one level of load.
 
-```mermaid
-%%| label: fig-types-stress-profile
-%%| fig-cap: "A STRESS run starts all its producers together, and each runs at full speed until its records are sent or the duration ends."
-%%| fig-alt: "Flowchart, left to right: start 3 producers at once; each sends unthrottled until its records are sent or the duration ends; collect the results."
-graph LR
-    subgraph Stress["Load Profile"]
-        direction LR
-        S1["Start<br/>3 producers at once"] --> S2["Full speed<br/>each producer unthrottled<br/>until its records are sent<br/>or the duration ends"] --> S3["Collect<br/>results"]
-    end
+### Reading a STRESS Series
+
+One STRESS run gives one point on the degradation curve, so the curve takes a series. Repeat the run with more producers each time, or a higher `targetThroughput`, and compare the runs with `kates report compare`. Across the series, the metrics pass through three stages [@gunther2007guerrilla], and the table says what each looks like:
+
+| Stage | Load | Throughput | Latency | Errors |
+|-------|------|------------|---------|--------|
+| Healthy | Low | Rises with the load | Stable | None |
+| Saturation | Near the ceiling | Levels off | Rising | None yet |
+| Overload | Past the ceiling | Falls | Spikes | Appear |
+
+The run's throughput gate reads the producers' rates added up, and its P99 is the highest of the producer rows'.
+
+::: {.callout-tip title="Try it: where does total throughput stop rising?"}
+Run three STRESS runs with one, three and six producers on the payments topic, then compare them:
+
+```bash
+kates test create --type STRESS --producers 1 --records 200000 \
+  --topic payments-load --wait
+kates test create --type STRESS --producers 3 --records 200000 \
+  --topic payments-load --wait
+kates test create --type STRESS --producers 6 --records 200000 \
+  --topic payments-load --wait
+kates report compare <id1>,<id2>,<id3>
 ```
 
-### When to Use
-
-- **Capacity planning** — how much headroom does the cluster have?
-- **Identifying bottlenecks** — which component saturates first (CPU, network, disk, memory)?
-- **Validating auto-scaling policies** — does the cluster scale before degradation?
-
-### Configuration
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `parallelProducers` | 3 | Producers started at once |
-| `targetThroughput` | -1 (unlimited) | Rate for each producer, in rec/s |
-| `durationSeconds` | 900 | Upper bound on each producer's run |
-| `records` | 5,000,000 | Records for each producer; it stops once they are sent |
-| `recordSizeBytes` | 1024 | Message size |
-
-### Interpreting Results
-
-One STRESS run gives one point on the degradation curve, because its producers start together and run at one level of load. To draw the curve, repeat the run with more producers each time, or a higher `targetThroughput`, and compare the runs with `kates report compare`. Across the series, the metrics pass through three stages [@gunther2007guerrilla]:
-
-```mermaid
-%%| label: fig-types-stress-stages
-%%| fig-cap: "Across STRESS runs at rising load, throughput first grows, then plateaus at saturation, then falls as errors appear."
-%%| fig-alt: "Flowchart, left to right, of three stages. Healthy, at low load: throughput rises with the load, latency is stable, errors are zero. Saturation, near the ceiling: throughput plateaus, latency rises, GC pressure increases. Overload, past the ceiling: throughput drops, latency spikes, errors appear."
-graph LR
-    H["Low load: Healthy<br/>throughput rises with load<br/>latency stable<br/>errors = 0"] --> S["Near the ceiling: Saturation<br/>throughput plateaus<br/>latency rising<br/>GC pressure increasing"] --> O["Past the ceiling: Overload<br/>throughput drops<br/>latency spikes<br/>errors appear"]
-```
-
----
+Find the step at which the total rate stops growing while P99 keeps climbing.
+:::
 
 ## SPIKE Test
 
-**Question:** *"Can my cluster handle sudden traffic bursts without cascading failure?"*
+A SPIKE test answers what happens when a sudden burst hits the cluster: how far latency rises during it and whether errors follow.
 
-### Methodology
+### How a SPIKE Run Works
 
-A SPIKE test simulates a flash-sale or viral event — a sudden, dramatic increase in traffic followed by a return to normal. The run is the burst alone: one producer, unthrottled from its first record, with `acks=1` by default. The baseline before it and the recovery after it come from outside the run, as the diagram shows:
+The run is the burst alone: one producer, unthrottled from its first record, with `acks=1` by default. The Kates API refuses any rate but -1 for SPIKE. With `acks=1`, the leader acknowledges a write before any follower has it, so a SPIKE run at its default doesn't measure the `acks=all` path the payments target names; set `acks: all` to burst on that path.
 
-```mermaid
-%%| label: fig-types-spike-profile
-%%| fig-cap: "A SPIKE run is only the burst: a LOAD run before it gives the baseline, and your monitoring after it shows the recovery."
-%%| fig-alt: "Flowchart, left to right: before, a LOAD run records your baseline P99; then the SPIKE run, one unthrottled producer with acks=1; after, your monitoring shows the recovery."
-graph LR
-    subgraph Spike["Around a SPIKE Run"]
-        direction LR
-        S1["Before<br/>a LOAD run records<br/>your baseline P99"] --> S2["SPIKE run<br/>1 unthrottled producer<br/>acks=1"] --> S3["After<br/>your monitoring<br/>shows the recovery"]
-    end
-```
+### Reading a SPIKE Run Around Its Burst
 
-### When to Use
+The baseline before the burst and the recovery after it come from outside the run. Each row is a moment around the burst and where its number comes from:
 
-- **Flash sale preparation** — can the cluster absorb 10x traffic?
-- **Incident simulation** — what happens when a retry storm hits?
-- **Recovery validation** — how long until the cluster returns to normal after a spike?
-
-### Configuration
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `records` | 2,000,000 | Total records for the burst |
-| `recordSizeBytes` | 1024 | Message size |
-| `durationSeconds` | 300 | Upper bound on the burst; the producer stops sooner once its records are sent |
-| `acks` | `1` | Latency-oriented default for burst traffic |
-
-### Key Metrics
-
-Each row is a moment around the burst and what to note there. Only the middle row comes from the SPIKE run itself: the baseline P99 comes from the LOAD run before it, and the recovery from your monitoring after it.
-
-| Phase | Watch For |
-|-------|-----------|
-| Pre-spike baseline | Record your normal P99 |
-| During spike | Does latency grow linearly or exponentially? |
-| Post-spike recovery | How long until P99 returns to baseline? |
-
----
+| Moment | What to note | Where it comes from |
+|--------|--------------|---------------------|
+| Before the burst | Your normal P99 | A LOAD run before it |
+| During the burst | How far P99 rises, and whether errors appear | The SPIKE run's row |
+| After the burst | How long until P99 returns to the baseline | Your monitoring, or a LOAD run after it |
 
 ## ENDURANCE Test
 
-**Question:** *"Does performance degrade over hours or days of sustained load?"*
+An ENDURANCE test answers whether performance drifts over hours of sustained load: slow leaks and gradual degradation that a short run ends before it can show.
 
-### Methodology
+### How an ENDURANCE Run Works
 
-An ENDURANCE (soak) test runs at a moderate, realistic load for an **extended period** — up to two hours on a default install, longer once you raise the Kates API's run limit — to detect slow resource leaks and gradual degradation.
+An ENDURANCE (soak) run starts one producer and one consumer at a moderate rate, 5,000 records per second by default, for an hour. It can run up to two hours on a default install, and longer once you raise the Kates API's run limit. A longer soak also needs more `records`, since the run stops when they're sent.
 
-```mermaid
-%%| label: fig-types-endurance-profile
-%%| fig-cap: "An ENDURANCE soak run sustains a moderate rate over hours to expose slow memory, disk, or thread leaks."
-%%| fig-alt: "Diagram showing Endurance Load Profile: sustained rate-limited load at 5,000 rec/s default with a 2-hour default run limit that can be raised for long-term leak hunting."
-graph LR
-    subgraph Endurance["Load Profile"]
-        direction LR
-        E1["Sustained rate-limited load<br/>5,000 rec/s default<br/>2 h run limit by default — raise it for leak hunting"]
-    end
-```
+### What an ENDURANCE Run Exposes
 
-### What It Detects
+Each row is a slow failure and the symptom it leaves over a long run:
 
-Each row is a slow failure and the symptom it leaves over a long run: drift that a short test ends before it can show.
+| Problem | How it shows |
+|---------|--------------|
+| Memory leak | P99 rises slowly over hours |
+| Log segment accumulation | Disk usage grows, then GC pauses lengthen |
+| Connection exhaustion | Errors appear late in the run |
+| JVM metaspace growth | Off-heap memory rises |
+| Thread leak | Thread count climbs, eventually out of memory |
 
-| Problem | How It Manifests |
-|---------|------------------|
-| Memory leak | P99 latency slowly rises over hours |
-| Log segment accumulation | Disk usage grows, then GC pauses spike |
-| Connection pool exhaustion | Error rate slowly increases |
-| JVM metaspace growth | Off-heap memory consumption rises |
-| Thread leak | Thread count climbs, eventually OOM |
+Most of these show on the brokers' dashboards rather than in the run's rows, so read an ENDURANCE run beside [Observability & Monitoring](09-observability.md).
 
-### Configuration
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `durationSeconds` | 3600 (1h) | Upper bound on the run; a longer soak also needs more `records`, and one past two hours a raised Kates API run limit (see the callout below) |
-| `parallelProducers` | 1 | Ignored: ENDURANCE runs one producer and one consumer |
-| `targetThroughput` | 5,000 msg/s | Rate limit that keeps the load sustainable; the 5,000 is the ENDURANCE default, and this key replaces it |
-| `records` | 10,000,000 | Enough for the full duration |
-
-::: {.callout-important}
-**No run lasts longer than two hours by default**
-
-The Kates API refuses, with `400`, a run set to last longer than two hours, and fails a run still `RUNNING` five minutes after its own `durationSeconds` is up, counted from the run's creation. A run still `PENDING`, meaning its tasks were never stored as started, fails after two minutes. The two hours are `kates.engine.max-duration-ms`, 7,200,000 ms by default; the five-minute execution grace is `kates.engine.reaper-grace-ms`; the pending-submission timeout is `kates.engine.submission-timeout-ms`. The `kates` chart exposes them as `engine.maxDurationMs`, `engine.reaperGraceMs` and `engine.submissionTimeoutMs`.
+::: {.callout-important title="No run lasts longer than two hours by default"}
+The Kates API refuses, with `400`, a run planned to last longer than two hours. It fails a run still `RUNNING` five minutes after its planned end. [CLI Reference](10-cli-reference.md) gives the settings that change both.
 :::
-
----
 
 ## VOLUME Test
 
-**Question:** *"How does my cluster handle large messages or large data volumes?"*
+A VOLUME test answers how the cluster handles large records: the storage and replication cost of data size rather than request rate.
 
-### Methodology
+### How a VOLUME Run Works
 
-A VOLUME test focuses on **data size** rather than request rate. It sends large messages or large total volumes to stress the storage and replication subsystems. The run is one producer sending large records, 2,000,000 of 10 KB each by default, as fast as the cluster accepts them unless `targetThroughput` sets a rate.
+The run is one producer sending large records, 2,000,000 of 10 KiB each by default, as fast as the cluster accepts them unless `targetThroughput` sets a rate. Its defaults batch more than LOAD's: 6 partitions, 256 KiB batches and a 50 ms linger. Run it for storage planning (how fast does disk fill at your data rate?) and to see how replication latency grows with record size.
 
-### When to Use
+### VOLUME Limits
 
-- **Validating large message support** — Kafka has a default 1MB message size limit
-- **Storage capacity planning** — how fast does disk fill at production data rates?
-- **Replication overhead** — larger messages amplify replication latency
+When a VOLUME run creates its topic, it sets `max.message.bytes` to 1,048,576 and `retention.ms` to 30 minutes. A record over about 1 MiB is then rejected, and the data is gone half an hour after it's written. A topic you create yourself before the run keeps its own settings, since the Kates API leaves an existing topic as it is.
 
-### Configuration
+### Running VOLUME
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `recordSizeBytes` | 10,240 | Large messages (10 KB) |
-| `records` | 2,000,000 | Enough to stress storage |
-| `acks` | `all` | Full replication to measure real cost |
-
-**Scenario file equivalent:**
+The same run as a scenario file, with records of 100 KiB:
 
 ```yaml
 scenarios:
-  - name: "Large Message Volume"
+  - name: large-records
     type: VOLUME
     spec:
       records: 10000
       recordSizeBytes: 102400
       acks: all
-    validate:
-      maxP99LatencyMs: 500
 ```
 
----
+Add gates once you have a baseline; [Scenario Files & SLA Gates](13-scenario-files.md) says how to pick them.
 
 ## CAPACITY Test
 
-**Question:** *"What is the absolute maximum throughput my cluster can sustain?"*
+A CAPACITY test answers what the most throughput is that the cluster can sustain, and which resource is the bottleneck at that ceiling.
 
-### Methodology
+### How a CAPACITY Run Works
 
-A CAPACITY test removes all artificial throttling and pushes the cluster to its maximum throughput. It finds the ceiling and measures what metric (CPU, disk, memory, network) is the bottleneck. The run starts `parallelProducers` producers at once, 5 by default, and every one is unthrottled: the Kates API refuses any rate but -1 for CAPACITY.
+The run starts `parallelProducers` producers at once, 5 by default, and every one is unthrottled: the Kates API refuses any rate but -1 for CAPACITY. Its topic defaults to 12 partitions, so the producers spread their writes across every broker.
 
-### Configuration
+### Reading a CAPACITY Series
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `parallelProducers` | 5 | Producers started at once, each unthrottled |
-| `recordSizeBytes` | 1024 | Standard message size |
-| `records` | 10,000,000 | Records for each producer; it stops once they are sent |
-| `durationSeconds` | 1200 | Upper bound on each producer's run |
-
-### Interpreting Results
-
-The output is a throughput curve, built by running a series of CAPACITY tests with increasing `--producers` counts. Max throughput is where adding more producers stops increasing total rec/s (illustrative numbers):
-
-| Producers | Throughput | Interpretation |
-|:-:|:-:|---|
-| 1 | 50K rec/s | Single-threaded baseline |
-| 2 | 95K rec/s | Near-linear scaling |
-| 4 | 170K rec/s | Still scaling |
-| 8 | 200K rec/s | Diminishing returns — approaching saturation |
-| 16 | 195K rec/s | Throughput actually drops — overloaded |
-
----
+The ceiling comes from a series, not a single run. Run CAPACITY with a rising `--producers` count; total records per second stops rising at the ceiling and falls past it, and `kates report compare` puts the runs side by side. While the series runs, watch the brokers' CPU, disk and network on the dashboards: the one that's full when total throughput stops rising is the bottleneck.
 
 ## ROUND_TRIP Test
 
-**Question:** *"What is the true end-to-end latency from produce to consume?"*
+A ROUND_TRIP test answers how long a record takes from the producer's send to the consumer's receipt.
 
-### Methodology
+### How a ROUND_TRIP Run Works
 
-A ROUND_TRIP test measures the complete record lifecycle: the time from when a producer sends a record to when a consumer receives it. That span includes the producer's batching, the replication the leader waits for before the record becomes readable, and the consumer's fetch.
-
-The sequence below marks where the clock starts and stops. Notice that the producer's acknowledgement comes midway, so a run that stopped there would miss the consumer's half of the trip:
+That span includes the producer's batching, the replication the leader waits for before the record becomes readable, and the consumer's fetch. The sequence below marks where the clock starts and stops. Notice that the producer's acknowledgment comes midway, so a run that stopped there would miss the consumer's half of the trip:
 
 ```mermaid
 %%| label: fig-types-round-trip
-%%| fig-cap: "A ROUND_TRIP sample runs from the producer's send to the consumer's receipt; the producer's acknowledgement falls in between and is not the end point."
+%%| fig-cap: "A ROUND_TRIP sample runs from the producer's send to the consumer's receipt; the producer's acknowledgment falls in between and is not the end point."
 %%| fig-alt: "Sequence diagram with four participants: producer, leader, follower and consumer. The producer sends at t1, the leader replicates to the follower, the follower acknowledges, and the leader acknowledges the producer. The consumer then fetches from the leader, which delivers the record at t2. A note across all four reads: round-trip latency equals t2 minus t1."
 sequenceDiagram
     participant P as Producer
@@ -368,68 +270,55 @@ sequenceDiagram
     Note over P,C: Round-trip latency = t₂ - t₁
 ```
 
-On the default native backend, the producer and the consumer both run inside the Kates API, so one clock times both ends of the trip. The consumer starts first and reads every partition of the topic from its current end, without a consumer group, so records that earlier runs left on the topic are never read ahead of this run's. Each record carries the moment it was sent, and the consumer subtracts that moment from the moment the record arrives. Both readings come from the same clock in the same process, so the difference needs no clock synchronization between hosts.
+On the native backend, the producer and the consumer both run inside the Kates API, so one clock times both ends of the trip. The consumer starts first and reads every partition of the topic from its current end, without a [consumer group](appendix-a-glossary.md#gl-consumer-group), so records that earlier runs left on the topic are never read ahead of this run's. Each record carries the moment it was sent, and the consumer subtracts that moment from the moment the record arrives. Both readings come from the same clock in the same process, so the difference needs no clock synchronization between hosts.
 
-### Reading the Results
+The defaults trade volume for clean samples: 500,000 records at 10,000 per second, with no compression and no linger. The consumer's settings are fixed, so the Kates API refuses `consumerGroup`, `fetchMinBytes` and `fetchMaxWaitMs` for ROUND_TRIP with a `400`.
+
+### Reading a ROUND_TRIP Report
 
 A ROUND_TRIP run has one task, and its row reports both sides of the trip. The table says what each field counts on that row:
 
 | Field | On a ROUND_TRIP row |
 |-------|---------------------|
-| Records and throughput | Records that came back to the consumer, the same records the latency describes; the API field is `recordsSent`, as on every row |
-| Latency, P50 to max | Send to receipt, one sample per record received; the producer's acknowledgement time is not part of it |
-| Error | Sends the broker rejected, and acknowledged records that never came back |
-| Status | FAILED when the broker rejected every send or no acknowledged record came back; otherwise DONE |
+| Records and throughput | Records that came back to the consumer; the API field is `recordsSent`, as on every row |
+| Latency, P50 to max | Send to receipt, one sample per record received |
+| Error | Sends the [broker](appendix-a-glossary.md#gl-broker) rejected, and acknowledged records that never came back |
+| Status | FAILED when every send was rejected or no acknowledged record came back; otherwise DONE |
 
 A shortfall on either side leaves the run DONE and names the count in the error, so a DONE row with an error is a partial result, not a clean one. Once the producer finishes, the consumer waits until every acknowledged record has arrived, or until 10 seconds pass with none of the rest arriving. With `enableTransactions: true`, the consumer reads with `read_committed`, so each record arrives only when its transaction commits, and its latency includes that wait.
 
-### Configuration
+### ROUND_TRIP Limits
 
-The ROUND_TRIP defaults trade volume for clean samples, and the consumer's settings are fixed:
+ROUND_TRIP's latency comes only from the native backend, as [Two Ways to Generate Load](#two-ways-to-generate-load) shows. On Trogdor every latency field reads 0, so a gate such as `maxP99LatencyMs` fails as not measured. A record the producer retried can arrive twice, and each arrival is timed: ROUND_TRIP doesn't check for duplicates, and INTEGRITY does.
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `parallelProducers` | 1 | Ignored: ROUND_TRIP runs one producer |
-| `numConsumers` | 1 | Ignored: ROUND_TRIP runs one consumer |
-| `records` | 500,000 | Records to measure |
-| `targetThroughput` | 10,000 rec/s | Rate-limited to keep latency measurements clean; the 10,000 is the ROUND_TRIP default, and this key replaces it |
-| `consumerGroup`, `fetchMinBytes`, `fetchMaxWaitMs` | — | Refused with a `400`: the consumer reads without a group, with the Kafka client's fetch defaults |
+::: {.callout-tip title="Try it: how much does the consumer's half add?"}
+Run ROUND_TRIP at the payments rate and compare its P99 with your LOAD run's `produce` row:
 
-**Scenario file equivalent:**
-
-```yaml
-scenarios:
-  - name: "End-to-End Latency"
-    type: ROUND_TRIP
-    spec:
-      records: 10000
-    validate:
-      maxP99LatencyMs: 25
-      maxAvgLatencyMs: 10
+```bash
+kates test create --type ROUND_TRIP --topic payments-load --throughput 2000 \
+  --record-size 1024 --acks all --wait
+kates test get <id>
 ```
 
-### Limits
-
-End-to-end latency comes only from the native backend. On the Trogdor backend (`--backend trogdor`), Trogdor's round-trip workload counts the records it sends and receives but reports no latency. The row's records are the ones received, as on the native backend, but every latency field reads 0, which means not measured. A latency gate such as `maxP99LatencyMs` then fails as not measured, so run ROUND_TRIP on the native backend whenever the latency matters. A record the producer retried can arrive twice, and each arrival is timed: ROUND_TRIP does not check for duplicates, and INTEGRITY does.
-
----
+The difference between the two P99s is roughly what replication to readability and the consumer's fetch add.
+:::
 
 ## INTEGRITY Test
 
-**Question:** *"Does my cluster lose, duplicate, or reorder messages under stress?"*
+An INTEGRITY test answers whether the cluster loses, duplicates, reorders or corrupts records it acknowledged, which is the payments loss target.
 
-### Methodology
+### How an INTEGRITY Run Works
 
-The INTEGRITY test is the most critical test type. It produces messages with **monotonic sequence numbers**, tracks acknowledgments, and then consumes all messages to verify completeness.
+The run produces records with sequence numbers, tracks which ones were acknowledged, then reads the topic back and checks that every acknowledged record came back. The flow below shows where the acknowledgments and the read-back sequences meet:
 
 ```mermaid
 %%| label: fig-types-integrity-flow
 %%| fig-cap: "An INTEGRITY run numbers every record it sends, reads the topic back, and compares what was acknowledged with what came back."
-%%| fig-alt: "Flowchart. The producer sends messages with sequence numbers 1 to N and tracks acknowledgments. The messages pass through Kafka replication and storage to a consumer that reads them all and verifies the sequences for gaps. The tracked acknowledgments and the verified sequences meet at a decision, all sequences accounted for: yes gives PASS with zero data loss, no gives DATA_LOSS with the lost ranges identified."
+%%| fig-alt: "Flowchart. The producer sends records with sequence numbers 1 to N and tracks acknowledgments. The records pass through Kafka replication and storage to a consumer that reads them all and verifies the sequences. The tracked acknowledgments and the verified sequences meet at a decision, every acknowledged record accounted for: yes gives PASS, no gives a failing verdict, DATA_LOSS, DUPLICATES_DETECTED, ORDERING_VIOLATION or CORRUPTION."
 graph TB
     subgraph Producer
-        P[Produce messages<br/>seq: 1, 2, 3, ..., N]
-        PA[Track ACKs<br/>Record gaps]
+        P[Produce records<br/>seq: 1, 2, 3, ..., N]
+        PA[Track ACKs]
     end
     
     subgraph Kafka
@@ -437,115 +326,84 @@ graph TB
     end
     
     subgraph Consumer
-        C[Consume all messages]
-        CV[Verify sequences<br/>Detect gaps]
+        C[Consume all records]
+        CV[Verify sequences]
     end
     
     subgraph Verdict
-        V{All sequences<br/>accounted for?}
-        PASS[PASS ✅<br/>Zero data loss]
-        FAIL[DATA_LOSS ❌<br/>Lost ranges identified]
+        V{Every acknowledged<br/>record accounted for?}
+        PASS[PASS: every acknowledged<br/>record came back]
+        FAIL[A failing verdict: DATA_LOSS,<br/>DUPLICATES_DETECTED,<br/>ORDERING_VIOLATION or CORRUPTION]
     end
     
-    P --> K --> C
+    P --> PA
+    P --> K --> C --> CV
     PA --> V
     CV --> V
     V -->|Yes| PASS
     V -->|No| FAIL
 ```
 
-An INTEGRITY run needs the native backend. The Trogdor backend has no workload that numbers and verifies records, so on `--backend trogdor` the run fails as it starts, with the error `INTEGRITY/CDC tests require the native backend`.
-
-### What It Verifies
+The run checks four properties, and the table says how each is checked:
 
 | Property | How |
 |----------|-----|
-| **No data loss** | Every produced sequence number is consumed |
-| **No duplication** | Each sequence number appears exactly once (with [idempotence](appendix-a-glossary.md#gl-idempotent-producer)) |
-| **No reordering** | Sequence numbers arrive in order per partition |
-| **ACK consistency** | Every ACKed message is actually persisted |
+| No data loss | Every acknowledged sequence number is consumed |
+| No duplication | Each sequence number appears once (with [idempotence](appendix-a-glossary.md#gl-idempotent-producer)) |
+| No reordering | Sequence numbers arrive in order per partition |
+| No corruption | Each record's [CRC](appendix-a-glossary.md#gl-crc32) matches its payload |
 
-### Configuration
+An INTEGRITY run is planned to last twice its `durationSeconds`, since it reads its records back for up to as long again. The two-hour limit therefore means a `durationSeconds` of at most 3,600, and the run's deadline is twice its duration plus five minutes.
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `records` | 1,000,000 | Messages to verify |
-| `acks` | `all` | Default for integrity guarantees; a request can override it, and `1` or `0` also turn producer idempotence off |
-| `enableIdempotence` | not set | Sets the producer's `enable.idempotence`; left out, the Kafka producer is idempotent by default with `acks=all` (see the callout below) |
-| `enableTransactions` | `false` | Transactional producer, committing every 100 records or every 10 seconds, whichever comes first; the verifying consumer then reads with `read_committed` |
-| `enableCrc` | `true` | Per-record [CRC](appendix-a-glossary.md#gl-crc32) payload verification; `false` turns it off |
-| `numConsumers` | 1 | Ignored: INTEGRITY runs one producer and one consumer |
-| `consumerGroup` | the run's own | Base of the [consumer group](appendix-a-glossary.md#gl-consumer-group) name: the verifying consumer joins it with `-integrity` appended; left out, each run gets `<run id>-integrity-0-group-integrity` |
+### INTEGRITY Options
 
-::: {.callout-important}
-`enableIdempotence` and `enableTransactions` need `acks` to be `all`, which the Kafka producer requires for both, and a transactional producer is always idempotent: the Kates API refuses a request that asks for either with other `acks`, or for transactions with `enableIdempotence: false`, with a `400` that names the field. A request that leaves `enableIdempotence` out gets the client's choice, idempotent whenever `acks` is `all`. [Data Integrity Verification](08-data-integrity.md) covers what each integrity mode checks.
-:::
+The options below change what the run's producer does and what its consumer is called:
 
-**Scenario file equivalent:**
+| Key | Default | What it does |
+|-----|---------|--------------|
+| `enableIdempotence` | not set | Sets the producer's `enable.idempotence`; left out, the Kafka producer is idempotent whenever `acks` is `all` |
+| `enableTransactions` | `false` | Transactional producer, committing every 100 records or every 10 seconds; the consumer reads with `read_committed` |
+| `enableCrc` | `true` | Per-record CRC check; `false` turns it off |
+| `consumerGroup` | the run's own | Base of the consumer's group name: the consumer joins it with `-integrity` appended |
+
+`enableIdempotence` and `enableTransactions` need `acks` to be `all`, which the Kafka producer requires for both. A transactional producer is always idempotent, so the Kates API refuses transactions with `enableIdempotence: false`, and either option with other `acks`, with a `400` that names the field. [Data Integrity Verification](08-data-integrity.md) covers what each integrity mode checks.
+
+The same run as a scenario file, on the payments integrity topic:
 
 ```yaml
 scenarios:
-  - name: "Zero-Loss Integrity"
+  - name: payments-integrity
     type: INTEGRITY
     spec:
-      records: 100000
-      acks: all              # also makes the producer idempotent
+      topic: payments-integrity
+      consumerGroup: payments-verify   # read as payments-verify-integrity
+      recordSizeBytes: 1024
+      acks: all                        # also makes the producer idempotent
     validate:
       maxDataLossPercent: 0
       maxOutOfOrder: 0
       maxCrcFailures: 0
 ```
 
-### Integrity + Chaos
-
-The real power of INTEGRITY tests emerges when combined with chaos engineering. An INTEGRITY run injects no [fault](appendix-a-glossary.md#gl-fault) by itself: `kates resilience run` pairs a test request with one fault, injected while the test runs. That pairing is a [resilience run](appendix-a-glossary.md#gl-resilience-run), one of the two ways Kates runs a [chaos experiment](appendix-a-glossary.md#gl-chaos-experiment), and it goes through only part of the [safety guard](appendix-a-glossary.md#gl-safety-guard) that checks a disruption plan: the namespace check, the broker count and the one-at-a-time rule before its test starts, with no Ready check before the fault and no rollback (see [Limits of the Guard](07-chaos-practice.md#limits-of-the-guard)):
-
-```yaml
-# resilience-integrity.yaml
-testRequest:
-  type: INTEGRITY
-  spec:
-    numRecords: 180000     # at 500 records/s: 360 s of producing
-    throughput: 500
-    durationMs: 600000
-
-chaosSpec:
-  experimentName: broker-pod-kill
-  targetNamespace: kafka
-  targetLabel: "strimzi.io/component-type=kafka,strimzi.io/broker-role=true"
-  disruptionType: POD_KILL
-  chaosDurationSec: 30
-
-steadyStateSec: 30
-```
+::: {.callout-tip title="Try it: does the integrity template pass on krafter?"}
+Export the built-in INTEGRITY template, run it, and read the run:
 
 ```bash
-# Run it — produces for 360 s and kills one broker from 30 s to 60 s
-kates resilience run -f resilience-integrity.yaml
+kates test scaffold export integrity-tx
+kates test apply -f integrity-tx.yaml --wait
+kates test get <id>
 ```
 
-This produces sequenced records at 500 per second and deletes one [broker](appendix-a-glossary.md#gl-broker)'s pod 30 s in and, on the default LitmusChaos provider, again until 60 s. The run keeps producing through the broker's restart and return to the [ISR](appendix-a-glossary.md#gl-isr), then consumes everything back and verifies that **every acknowledged record** was persisted. The rate limit is what makes the result mean something: an unthrottled run can finish before the fault is triggered, and its [verdict](appendix-a-glossary.md#gl-verdict) then says nothing about the failure. A resilience file's [`spec`](appendix-a-glossary.md#gl-test-spec) uses the API's field names, so the rate is `throughput`; the API also takes it as `targetThroughput`, the scenario file's name. [Data Integrity Verification](08-data-integrity.md) walks through the sizing and how to read the verdict, which the INTEGRITY run reports rather than `kates resilience run`. For a standalone integrity scenario, export the built-in template instead: `kates test scaffold export integrity-tx`.
+Read `Lost`, `Duplicates` and `Verdict` on the run; the gates don't check duplicates, so the verdict is where a duplicate shows.
+:::
 
-## Scenario Files
+### INTEGRITY Through a Fault
 
-All test types support YAML scenario files for reproducible, version-controlled test definitions. See [Scenario Files & SLA Gates](13-scenario-files.md) for the complete YAML schema reference, including the full spec field list and the SLA gates.
+An INTEGRITY run injects no [fault](appendix-a-glossary.md#gl-fault) by itself, so on a healthy cluster it answers the durability question only half. `kates resilience run` pairs it with one fault injected while it produces, a [resilience run](appendix-a-glossary.md#gl-resilience-run), one of the two ways Kates runs a [chaos experiment](appendix-a-glossary.md#gl-chaos-experiment); the other is a [disruption plan](appendix-a-glossary.md#gl-disruption-plan). The rate limit keeps the run alive through the fault: an unthrottled run can finish before the fault lands, and its [verdict](appendix-a-glossary.md#gl-verdict) then says nothing about the failure. [Data Integrity Verification](08-data-integrity.md#integrity-under-chaos) gives the payments file, its sizing and how to read the verdict.
 
-The CLI ships a curated library of built-in templates. Browse it with `list` (optionally filtered by `--type`), preview with `show`, and write a ready-to-edit file with `export`:
+## Flags and Spec Keys
 
-```bash
-# Browse the built-in template library
-kates test scaffold list
-kates test scaffold --type LOAD
-
-# Preview and export a template
-kates test scaffold show quick-load
-kates test scaffold export quick-load
-
-# Apply a scenario
-kates test apply -f quick-load.yaml --wait
-```
-
-CLI flags and scenario-file spec keys use different names for the same setting. The canonical mapping:
+A run's settings have two spellings: the flags of `kates test create` and the `spec` keys of a scenario file. The table maps one to the other:
 
 | CLI flag (`kates test create`) | Scenario YAML key (`spec:`) | Meaning |
 |---|---|---|
@@ -556,41 +414,21 @@ CLI flags and scenario-file spec keys use different names for the same setting. 
 | `--duration` | `durationSeconds` | Test duration in seconds |
 | `--acks` | `acks` | Producer acknowledgment mode |
 | `--topic` | `topic` | Topic name |
-| `--throughput` | `targetThroughput` | Producer rate in records/s, for each producer (see the callout below) |
-| `--consumer-group` | `consumerGroup` | Consumer group, for LOAD, ENDURANCE and INTEGRITY; a group of the test's own, since a LOAD or ENDURANCE consumer commits [offsets](appendix-a-glossary.md#gl-offset) in it |
+| `--throughput` | `targetThroughput` | Producer rate in rec/s, for each producer |
+| `--consumer-group` | `consumerGroup` | Consumer group, for LOAD, ENDURANCE and INTEGRITY; use a group of the test's own |
 | `--fetch-min-bytes`, `--fetch-max-wait-ms` | `fetchMinBytes`, `fetchMaxWaitMs` | Consumer fetch settings, for LOAD, ENDURANCE and INTEGRITY |
-| — | `enableIdempotence`, `enableTransactions`, `enableCrc` | Integrity options, `true` or `false` (scenario files only; see the callout under INTEGRITY Test) |
+| — | `enableIdempotence`, `enableTransactions`, `enableCrc` | Integrity options, `true` or `false`, in scenario files only |
 
-::: {.callout-important}
-`--throughput` and `targetThroughput` both send the API field `targetThroughput`, which sets the producer's rate in place of the type's default. The API also takes the same rate as `throughput`, the name a `kates resilience run` file uses; when a request sets both, `throughput` wins. SPIKE and CAPACITY run their producers unthrottled, so the Kates API refuses a rate other than -1 for them, and it refuses a consumer setting for a type that starts no consumer: the answer is a `400` naming the field.
-:::
-
-::: {.callout-tip}
-**Try it**
-
-Run a correctness test end to end from a built-in template:
-
-```bash
-# List every test type the API supports
-kates test types
-
-# Export the integrity-tx INTEGRITY template and inspect it
-kates test scaffold export integrity-tx
-cat integrity-tx.yaml
-
-# Run it and wait for the verdict
-kates test apply -f integrity-tx.yaml --wait
-```
-
-The apply blocks until the verification pass completes — on a healthy cluster, expect `✓ SLA Pass`. The SLA gates do not check duplicates, so confirm `Duplicates 0` and `Verdict ● PASS` with `kates test get <id>`.
+::: {.callout-important title="One rate, two names"}
+`--throughput` and `targetThroughput` both send the API field `targetThroughput`, which replaces the type's default rate; the API also takes it as `throughput`, the name a `kates resilience run` file uses, and `throughput` wins when a request sets both. SPIKE and CAPACITY run unthrottled, so the Kates API refuses a rate other than -1 for them. It also refuses a consumer setting for a type that starts no consumer, with a `400` naming the field.
 :::
 
 ## Summary
 
-- Every test type answers one specific question — choose by the question you need answered, not by the knobs you want to turn.
-- LOAD establishes the baseline every other result is judged against; STRESS and CAPACITY find the ceiling — STRESS characterizes how the cluster degrades, CAPACITY measures the absolute maximum.
-- The benchmark backend doesn't change a type's load: native and Trogdor start the same producers and consumers, though INTEGRITY runs only on native.
-- ENDURANCE and VOLUME stress the dimensions short tests miss: time (slow leaks, gradual degradation) and data size (storage and replication overhead).
-- INTEGRITY verifies zero loss, zero duplication, and correct ordering with sequence numbers and CRC checks — pair it with chaos through `kates resilience run` for the ultimate durability validation.
+- Every test type answers one question — choose by the question you need answered, not by the settings you want to change.
+- LOAD sets the baseline; STRESS shows how the cluster degrades toward the ceiling, and CAPACITY measures the ceiling itself.
+- A producer row times send to acknowledgment, a consumer row measures no latency, and ROUND_TRIP times send to receipt.
+- Both backends start the same tasks, but only the native backend measures the tail and runs INTEGRITY.
+- INTEGRITY numbers every record and checks loss, duplication and order; paired with one fault it answers the payments loss question.
 
-Every type here maps onto a version-controlled YAML definition — [Scenario Files & SLA Gates](13-scenario-files.md) covers the full schema and the SLA gates that turn test results into a pass or a fail.
+These runs produce numbers; a gate turns a number into a pass or a fail. [Scenario Files & SLA Gates](13-scenario-files.md) puts the payments targets into a file whose gates a pipeline can fail on.

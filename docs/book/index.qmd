@@ -10,14 +10,14 @@ Kates answers three questions about an Apache Kafka cluster: how much load it ta
 <div class="kates-hero-banner">
   <div class="kates-hero-badges">
     <span class="kates-hero-badge">Apache Kafka 4.x · KRaft</span>
-    <span class="kates-hero-badge">Performance &amp; Tail-Latency Engineering</span>
-    <span class="kates-hero-badge">Chaos Mesh Resilience</span>
-    <span class="kates-hero-badge">Zero-Loss Auditing</span>
+    <span class="kates-hero-badge">Load &amp; Tail Latency</span>
+    <span class="kates-hero-badge">Faults via LitmusChaos &amp; Kubernetes</span>
+    <span class="kates-hero-badge">Acknowledged-Record Checks</span>
   </div>
   <div>
-    A complete practitioner's guide from measurement theory and workload
-    design to chaos fault injection, interactive CLI tuning, and production
-    SLO gates on Kubernetes.
+    From reading a latency percentile to injecting a broker failure and
+    proving no acknowledged record was lost, on a lab you build on your own
+    machine and then on a cluster you run.
   </div>
   <div class="kates-hero-actions">
     <a class="kates-hero-btn is-primary" href="01-introduction.html">Start Reading →</a>

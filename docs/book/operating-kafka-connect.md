@@ -1,34 +1,32 @@
 # Operating Kafka Connect
 
-Building a Connect pipeline is half the job; keeping it healthy in production is the other half. This chapter collects the operational half: placement and scaling, tuning, network isolation, the REST API in anger, credential rotation, upgrades, disaster recovery, and troubleshooting.
-
-> **Scope**: day-2 operations for the `connect-cluster` chart. For concepts, the `KafkaConnect` resource, Debezium, and pipeline design, see [Kafka Connect & CDC Pipelines](21-kafka-connect.md).
+Building a Connect pipeline is half the job; keeping it healthy in production is the other half. The pipeline from the last chapter is running; now a zone goes dark, a password expires, a [Debezium](appendix-a-glossary.md#gl-debezium) release lands, and someone deletes a topic. Each of those is a section here, all for the `connect-cluster` chart. The resource itself, Debezium and pipeline design are in [Kafka Connect & CDC Pipelines](21-kafka-connect.md).
 
 After this chapter, you can:
 
-- Place and size Connect workers so an Availability Zone failure costs a rebalance, not an outage
+- Place and size Connect workers so a [zone](appendix-a-glossary.md#gl-zone) failure costs a rebalance delay, not an outage
 - Tune producer, consumer, and connector batching when throughput stalls
 - Rotate database credentials without restarting a worker, and roll out image upgrades one worker at a time
-- Trace a FAILED connector from alert to root cause with the CLI, the REST API, and worker logs
+- Trace a FAILED [connector](appendix-a-glossary.md#gl-connector) from alert to root cause with the CLI, the REST API, and worker logs
 
-## Multi-AZ Deployment Strategy
+## Spreading Workers Across Zones {#multi-az-deployment-strategy}
 
-The connect-cluster chart uses the **Stretched Cluster** strategy — a single `KafkaConnect` resource spanning all Availability Zones.
+The `connect-cluster` chart runs one stretched group: a single `KafkaConnect` resource whose [workers](appendix-a-glossary.md#gl-connect-worker) span all three zones. The figure shows the three workers, one per zone, and what they share:
 
 ```mermaid
 %%| label: fig-okc-stretched-cluster
 %%| fig-cap: "One Connect group spans all three zones and shares one set of internal topics."
-%%| fig-alt: "Three Connect workers, one in each of the zones alpha, sigma and gamma, all exchange group-protocol traffic with the shared connect-offsets topic, which sits beside the connect-configs and connect-status topics."
+%%| fig-alt: "Three Connect workers, one in each of the zones alpha, sigma and gamma, all read and write their state in the shared internal topics connect-offsets, connect-configs and connect-status."
 graph TB
-    subgraph AZ_Alpha["AZ: alpha"]
+    subgraph AZ_Alpha["zone alpha"]
         W0["Worker 0"]
     end
 
-    subgraph AZ_Sigma["AZ: sigma"]
+    subgraph AZ_Sigma["zone sigma"]
         W1["Worker 1"]
     end
 
-    subgraph AZ_Gamma["AZ: gamma"]
+    subgraph AZ_Gamma["zone gamma"]
         W2["Worker 2"]
     end
 
@@ -38,40 +36,36 @@ graph TB
         STA["connect-status"]
     end
 
-    W0 <-->|"group protocol"| OFF
-    W1 <-->|"group protocol"| OFF
-    W2 <-->|"group protocol"| OFF
+    W0 <-->|"state"| Kafka_Internal
+    W1 <-->|"state"| Kafka_Internal
+    W2 <-->|"state"| Kafka_Internal
 
     style AZ_Alpha fill:#16a34a24,stroke:#16a34a
     style AZ_Sigma fill:#0284c724,stroke:#0284c7
     style AZ_Gamma fill:#c026d324,stroke:#c026d3
 ```
 
-### How It Works
+All workers share the group id `kates-connect-cluster` and the three internal topics, so any worker can take any [task](appendix-a-glossary.md#gl-connect-task). Topology spread constraints place them one per zone and pod anti-affinity one per node.
 
-- **Single `groupId`:** All workers share `kates-connect-cluster` and one set of internal topics
-- **Topology Spread Constraints:** Workers are evenly distributed across zones via `topologySpreadConstraints`
-- **Pod Anti-Affinity:** No two workers on the same node
+### When a Zone Fails
 
-### AZ Failure Behavior
-
-When an entire Availability Zone goes offline:
+When an entire zone goes offline, its worker stops sending heartbeats, and the group waits before it moves the worker's tasks:
 
 ```mermaid
 %%| label: fig-okc-az-failure
 %%| fig-cap: "When zone sigma goes offline, the framework holds its tasks for the rebalance delay, then moves them to the workers that remain."
-%%| fig-alt: "Sequence diagram. The worker in zone sigma stops sending heartbeats; the Connect framework detects the missing worker, triggers a rebalance, holds sigma's tasks unassigned until scheduled.rebalance.max.delay.ms runs out, and then reassigns them to the workers in alpha and gamma, which resume from the last committed offset."
+%%| fig-alt: "Sequence diagram. The worker in zone sigma, marked offline, stops sending heartbeats; the Connect framework detects the missing worker, triggers a rebalance, holds sigma's tasks unassigned until scheduled.rebalance.max.delay.ms runs out, and then reassigns them to the workers in alpha and gamma, which resume from the last committed offset."
 sequenceDiagram
     participant AZ_A as Worker (alpha)
-    participant AZ_S as Worker (sigma) 💀
+    participant AZ_S as Worker (sigma, offline)
     participant AZ_G as Worker (gamma)
     participant KC as Connect Framework
 
-    Note over AZ_S: AZ sigma goes offline
+    Note over AZ_S: zone sigma goes offline
     AZ_S--xKC: Heartbeat timeout
     KC->>KC: Detect missing worker
     KC->>KC: Trigger rebalance
-    KC->>KC: Hold sigma's tasks for scheduled.rebalance.max.delay.ms
+    KC->>KC: Hold sigma's tasks for the rebalance delay
     KC->>AZ_A: Reassign connector tasks from sigma
     KC->>AZ_G: Reassign connector tasks from sigma
     Note over AZ_A,AZ_G: Connectors resume from last committed offset
@@ -82,107 +76,59 @@ Whatever the event, the framework moves the tasks, and the offsets survive becau
 | Event | Behavior |
 |-------|----------|
 | Worker pod dies | Its connectors and tasks stay unassigned for up to `scheduled.rebalance.max.delay.ms` (5 minutes by default), then move to the restarted or surviving workers |
-| Entire AZ offline | Framework reassigns all tasks from dead workers, after the same delay |
-| AZ recovers | Workers rejoin, framework rebalances to restore even distribution |
+| Entire zone offline | Framework reassigns all tasks from dead workers, after the same delay |
+| Zone recovers | Workers rejoin, framework rebalances to restore even distribution |
 | Offset continuity | Preserved — offsets stored in shared Kafka topic |
 
-A departed worker's connectors and tasks don't move at once. Under incremental cooperative rebalancing (KIP-415 [@kip415]), the group leader waits up to `scheduled.rebalance.max.delay.ms` for the worker to return before it hands its work to others, and a restarted pod gets that work back only when the wait ends. The Kafka default is 5 minutes, and the `connect-cluster` chart doesn't change it, so a crashed worker's CDC stream can pause for that long. Set it under `extraConfig` to trade faster failover for more task movement while pods restart.
+Cross-zone data transfer costs apply when a connector in zone alpha reads from a database in zone sigma. That's the price of a single group that fails over on its own, with no second cluster to promote.
 
-::: {.callout-note}
-Cross-AZ data transfer costs apply when a connector in zone alpha reads from a database in zone sigma. That's the price of a single group that fails over on its own, with no second cluster to promote.
+### What a Rebalance Costs
+
+A departed worker's connectors and tasks don't move at once. Under incremental cooperative rebalancing, KIP-415 [@kip415], the group leader waits up to `scheduled.rebalance.max.delay.ms` for the worker to return before it hands its work to others, and a restarted pod gets that work back only when the wait ends. The Kafka default is 5 minutes, and the `connect-cluster` chart doesn't change it, so a crashed worker's [CDC](appendix-a-glossary.md#gl-cdc) stream can pause for that long. Set it under `extraConfig` to trade faster failover for more task movement while pods restart.
+
+When a [rebalance](appendix-a-glossary.md#gl-rebalance) moves a task, the task resumes from its last committed offset, so records processed after that commit can be delivered twice. A source connector with exactly-once support commits records and offsets together and doesn't repeat them; [Exactly-Once Semantics](21-kafka-connect.md#exactly-once-semantics) explains it. Every other connector's consumers have to tolerate the duplicates.
+
+Three places hold a connector's state, and only one of them is yours to edit. The [`KafkaConnector`](appendix-a-glossary.md#gl-kafkaconnector) resource is the source of truth: Strimzi reconciles each connector from it. The internal topics `connect-configs`, `connect-offsets` and `connect-status` hold the group's own copy, its positions and its status. A change made through the REST API outside the resource is overwritten at the next reconciliation, so change the resource, or the chart values that render it.
+
+::: {.callout-tip title="Try it: How long does a killed worker's task stay unassigned?"}
+Run `kubectl delete pod -n connect connect-cluster-connect-1`, then `kates kafka connect tasks debezium-postgres-source` every thirty seconds. Note how long the task stays unassigned before it shows RUNNING again, and on which worker.
 :::
 
 ### Scheduling Configuration
 
-Three values place the workers and tell each one its zone: `topologySpreadConstraints` spreads them across zones, `podAntiAffinity` prefers a separate node for each, and `rack` reads each worker's zone from its node's label. The production overlay sets all three:
+Three values place the workers and tell each one its zone: `topologySpreadConstraints` spreads them across zones, `podAntiAffinity` prefers a separate node for each, and `rack` reads each worker's zone from its node's label. The chart enables all three by default. The base values spread with `whenUnsatisfiable: ScheduleAnyway`, so a one-node Kind cluster still schedules every worker; the dev overlay turns spreading and anti-affinity off, and the production overlay tightens spreading to `DoNotSchedule`:
 
 ```yaml
-# Production (values-prod.yaml)
+# values-prod.yaml
 topologySpreadConstraints:
-  enabled: true
-  maxSkew: 1
-  topologyKey: topology.kubernetes.io/zone
   whenUnsatisfiable: DoNotSchedule
-
-podAntiAffinity:
-  enabled: true
-  topologyKey: kubernetes.io/hostname
-
-rack:
-  enabled: true
-  topologyKey: topology.kubernetes.io/zone
 ```
-
-The base values use `whenUnsatisfiable: ScheduleAnyway`, so single-node clusters like Kind still schedule all workers; the dev overlay disables topology spread and anti-affinity entirely, while the prod overlay tightens spreading to `DoNotSchedule`.
 
 ## Capacity Planning
 
-Capacity comes down to how much memory each worker needs, how the connectors' tasks spread across the workers, and roughly what one worker can move.
+Capacity comes down to how much memory each worker needs, how the connectors' tasks spread across the workers, and what bounds each connector's rate.
 
 ### Worker Sizing
 
-Each Connect worker consumes memory proportional to the number of tasks it runs and the batch sizes configured:
-
-```text
-Worker Memory = JVM Heap + Off-Heap
-             = (-Xmx) + (Direct Buffers + Thread Stacks + JMX + GC Overhead)
-             ≈ -Xmx × 2
-```
-
-Each row pairs a workload with a worker count and a heap, and gives the container at least twice that heap, as the formula requires:
-
-| Workload | Workers | Heap (-Xmx) | Container Memory | CPU |
-|----------|:-------:|:-----------:|:----------------:|:---:|
-| 1–3 connectors, low throughput | 1 | 512m | 1Gi | 500m |
-| 5–10 connectors, moderate throughput | 2 | 1024m | 2Gi | 1000m |
-| 10–20 connectors, high throughput | 3 | 2048m | 4Gi | 2000m |
-| 20+ connectors, very high throughput | 5+ | 2048m | 6Gi | 4000m |
+Each Connect worker consumes memory in proportion to the number of tasks it runs and the batch sizes configured. The JVM heap is only part of it: direct buffers, thread stacks, JMX and the garbage collector live off-heap, so give the container at least twice the heap. The chart's `values.yaml` does that: each worker gets a 1 GiB heap (`jvmOptions.-Xmx: 1024m`) inside a 2 GiB memory request and a 4 GiB limit, and three workers.
 
 ### Task Distribution
 
-Connectors are divided into tasks, and tasks are distributed across workers:
+Connectors are divided into tasks, and the group spreads the tasks across the workers. How many tasks a connector should have depends on what it reads:
 
-```mermaid
-%%| label: fig-op-connect-task-distribution
-%%| fig-cap: "Distribution of single-task Debezium CDC sources and multi-task JDBC sink and Mirror connectors across three Connect workers."
-%%| fig-alt: "Diagram showing three Connect workers: Worker 0 runs CDC Orders (task 0) and JDBC Sink (task 0); Worker 1 runs CDC Customers (task 0) and JDBC Sink (task 1); Worker 2 runs JDBC Sink (task 2) and Mirror (task 0)."
-graph TB
-    subgraph W1["Worker 0"]
-        T1["CDC Orders (task 0)"]
-        T3["JDBC Sink (task 0)"]
-    end
+| Connector | `tasksMax` | Why | Lands on |
+|-----------|:----------:|-----|----------|
+| Debezium PostgreSQL source | 1 | One [replication slot](appendix-a-glossary.md#gl-replication-slot), one ordered stream | One worker |
+| JDBC sink | Partitions of its topics | Each task takes a share of the partitions | One task per worker, spread by the group |
+| MirrorMaker 2 source | Source partitions | Each task replicates a share of them | Wherever the group puts them |
 
-    subgraph W2["Worker 1"]
-        T2["CDC Customers (task 0)"]
-        T4["JDBC Sink (task 1)"]
-    end
+Two to five tasks per worker keeps a CPU busy without starving the tasks.
 
-    subgraph W3["Worker 2"]
-        T5["JDBC Sink (task 2)"]
-        T6["Mirror (task 0)"]
-    end
-```
+What bounds each connector's rate differs too: a Debezium source by the WAL volume its single task reads, a JDBC sink by its batch size and the partitions it has, and a MirrorMaker 2 source mostly by the network. Measure your own rate from the Throughput row of the Grafana board, described under [Grafana Dashboard](#grafana-dashboard).
 
-**Rules of thumb:**
+### Autoscaling
 
-- Debezium source connectors: always `tasksMax: 1` (limited by replication slot)
-- JDBC sink connectors: `tasksMax` = number of topic partitions (for parallelism)
-- Mirror connectors: `tasksMax` = number of source partitions
-- Target: 2–5 tasks per worker for optimal CPU utilization
-
-### Throughput Benchmarks
-
-Approximate throughput per worker (single connector, 1Gi heap, 1 CPU):
-
-| Connector Type | Records/second | MB/second | Notes |
-|---------------|:--------------:|:---------:|-------|
-| Debezium PostgreSQL (streaming) | 5,000–15,000 | 2–10 | Depends on WAL volume |
-| Debezium PostgreSQL (snapshot) | 20,000–50,000 | 10–30 | Bulk read, higher throughput |
-| JDBC Source (poll) | 1,000–5,000 | 1–5 | Limited by SQL query speed |
-| JDBC Sink | 5,000–20,000 | 2–15 | Batched inserts |
-| MirrorSource | 50,000–100,000 | 20–50 | Mostly network-bound |
-
----
+`autoscaling.enabled` renders a HorizontalPodAutoscaler for the `KafkaConnect` resource, off by default, with `minReplicas: 3`, `maxReplicas: 10` and `targetCPUUtilizationPercentage: 80`. Every scale event is a rebalance that pauses the moved tasks for the delay in [What a Rebalance Costs](#what-a-rebalance-costs), and a group runs at most the sum of its connectors' `tasksMax`, so workers beyond that idle. Set `minReplicas` to the zone count and keep the CPU target high.
 
 ## Performance Tuning
 
@@ -200,7 +146,7 @@ Connect's internal producer sends records to Kafka. These settings control batch
 | `producer.compression.type` | none | lz4 | Compress records — reduces network and storage |
 | `producer.max.request.size` | 1048576 | 10485760 | 10MB max request — needed for large CDC events |
 
-### Consumer Tuning (Sink Connectors)
+### Consumer Tuning for Sink Connectors
 
 Each sink task reads through a consumer built from the workers' `consumer.*` settings. The first two settings make each fetch and each poll larger; the third is already set by the chart's default `extraConfig`:
 
@@ -222,11 +168,9 @@ These settings belong to a connector rather than to the workers, so they go in t
 | `snapshot.fetch.size` | Debezium | 2048 | 10000 | Rows per SELECT during snapshot |
 | `batch.size` | JDBC Sink | 3000 | 5000–10000 | Rows per INSERT batch |
 
-::: {.callout-tip}
-Monitor `rate(kafka_connect_source_task_metrics_source_record_poll_total[5m])` and `rate(kafka_connect_source_task_metrics_source_record_write_total[5m])` in Grafana. If poll rate >> write rate, the producer is the bottleneck — increase `producer.batch.size` and enable compression.
+::: {.callout-tip title="Is the producer the bottleneck?"}
+Compare `rate(kafka_connect_source_task_metrics_source_record_poll_total[5m])` with `rate(kafka_connect_source_task_metrics_source_record_write_total[5m])` in Grafana. If the poll rate is far above the write rate, the producer is the bottleneck: increase `producer.batch.size` and enable compression.
 :::
-
----
 
 ## Observability
 
@@ -234,34 +178,30 @@ Two things tell you how the workers are doing: the Prometheus alerts the chart r
 
 ### Prometheus Alerts
 
-The chart's `alerts.yaml` renders a `PrometheusRule` where the `monitoring.coreos.com/v1` API exists. Every rule is scoped to the release's own workers and carries a `runbook_url` into [the Connect runbook](../connect-cluster-runbook.md), which says how to confirm and act on each alert. Thresholds are configurable under `alerts.thresholds`:
+The chart's `alerts.yaml` renders a `PrometheusRule` where the `monitoring.coreos.com/v1` API exists. Every rule is scoped to the release's own workers and carries a `runbook_url` into the [Kafka Connect Runbook](../connect-cluster-runbook.md), which says how to confirm and act on each alert. Thresholds are configurable under `alerts.thresholds`, and each row ends with the alert's severity:
 
-| Alert | Condition | Severity |
-|-------|-----------|----------|
-| `KafkaConnectWorkerDown` | Fewer workers scraped than the release runs, for 3min | critical |
-| `KafkaConnectConnectorFailed` | A connector is FAILED for 2min | critical |
-| `KafkaConnectTaskFailed` | A connector has FAILED tasks for 2min | critical |
-| `KafkaConnectDeadLetterFailures` | A dead letter queue refuses records for 2min | critical |
-| `KafkaConnectTaskAvailabilitySLOBurning` | Opt-in (`alerts.slo.enabled`): task availability burns its error budget (`alerts.slo.target`, `burnRate`) | critical |
-| `KafkaConnectTasksNotRunning` | Tasks neither running nor paused for 5min | warning |
-| `KafkaConnectErrorsLogged` | Record errors above `errorRatePerSecond` for 5min | warning |
-| `KafkaConnectDeadLetterWrites` | Records are dead-lettered for 5min | warning |
-| `KafkaConnectOffsetCommitFailures` | Offset commits fail for 10min | warning |
-| `KafkaConnectSinkLag` | A declared sink connector's group lags beyond `sinkLagRecords` for 10min (reads Kafka Exporter's `kafka_consumergroup_lag`) | warning |
-| `KafkaConnectSourceIdle` | Opt-in (`alerts.sourceIdle.enabled`): a running source polls 0 records for `sourceIdleMinutes` (default 15min) | warning |
-| `KafkaConnectRebalanceStorm` | Completed-rebalance rate above `rebalanceRatePerSecond` for 5min | warning |
-| `KafkaConnectRebalanceTooLong` | A rebalance has been in progress for 5min | warning |
-| `KafkaConnectWorkerHeapHigh` | JVM heap usage above `heapUsagePercent` (default 85%) for 5min | warning |
+| Alert | What fires it |
+|-------|---------------|
+| `KafkaConnectWorkerDown` | Fewer workers scraped than the release runs, for 3min; critical |
+| `KafkaConnectConnectorFailed` | A connector is FAILED for 2min; critical |
+| `KafkaConnectTaskFailed` | A connector has FAILED tasks for 2min; critical |
+| `KafkaConnectDeadLetterFailures` | A [dead letter queue](appendix-a-glossary.md#gl-dead-letter-queue) refuses records for 2min; critical |
+| `KafkaConnectTaskAvailabilitySLOBurning` | Opt-in (`alerts.slo.enabled`): task availability burns its error budget (`alerts.slo.target`, `burnRate`); critical |
+| `KafkaConnectTasksNotRunning` | Tasks neither running nor paused for 5min; warning |
+| `KafkaConnectErrorsLogged` | Record errors above `errorRatePerSecond` for 5min; warning |
+| `KafkaConnectDeadLetterWrites` | Records are dead-lettered for 5min; warning |
+| `KafkaConnectOffsetCommitFailures` | Offset commits fail for 10min; warning |
+| `KafkaConnectSinkLag` | A declared sink's group lags beyond `sinkLagRecords` for 10min (Kafka Exporter's `kafka_consumergroup_lag`); warning |
+| `KafkaConnectSourceIdle` | Opt-in (`alerts.sourceIdle.enabled`): a running source polls 0 records for `sourceIdleMinutes` (default 15min); warning |
+| `KafkaConnectRebalanceStorm` | Completed-rebalance rate above `rebalanceRatePerSecond` for 5min; warning |
+| `KafkaConnectRebalanceTooLong` | A rebalance has been in progress for 5min; warning |
+| `KafkaConnectWorkerHeapHigh` | JVM heap usage above `heapUsagePercent` (default 85%) for 5min; warning |
 
 The same rule also records `connect:tasks_running:ratio`, `connect:records_processed:rate5m` and `connect:errors:rate5m` (plus `connect:task_unavailability:ratio_avg*` with the SLO). The alerts read the JMX exporter's metric names, so the chart refuses `alerts.enabled` without metrics, and with `metrics.type: strimziMetricsReporter` unless `alerts.allowReporterMetrics` is set.
 
-::: {.callout-important}
-Chart 2.0 renamed three alerts, so Alertmanager routes and silences that match on names need updating: `KafkaConnectTaskCountMismatch` is now `KafkaConnectTasksNotRunning`, `KafkaConnectHighErrorRate` is `KafkaConnectErrorsLogged`, and `KafkaConnectSourceLag` is `KafkaConnectSourceIdle`, which is off by default.
-:::
-
 ### Grafana Dashboard
 
-The board is [`dashboards/kafka-connect/`](https://github.com/bmscomp/kates/tree/main/dashboards/kafka-connect), built from `board.py` by `scripts/gen-dashboards.py`. Since connect-cluster 2.1.0 it is delivered by `charts/monitoring` with every other board (`dashboards.enabled` there), as one file for every install — nothing is injected per release, and this chart's old `dashboards.*` values are refused with that location named.
+The board ships with `charts/monitoring`, with every other board (`dashboards.enabled` there), as one file for every install. It is scoped by two template variables, `$namespace` and `$cluster`, where `$cluster` is the `KafkaConnect` resource's name, the release fullname, so one copy serves every Connect group in a Grafana and the dropdown picks one.
 
 Thirty-five panels: a stat row on top, then one row per concern, in the order an incident asks them.
 
@@ -275,44 +215,9 @@ Thirty-five panels: a stat row on top, then one row per concern, in the order an
 | Workers | Rebalances, rebalance time, rebalance in progress, time since last rebalance, startup failures, heap used, heap used / max | `rate(kafka_connect_worker_rebalance_metrics_completed_rebalances_total[5m])` |
 | Client path (collapsed) | The embedded producer and consumer: records sent, errors and retries, request latency, consumer lag | `kafka_producer_*`, `kafka_consumer_*` |
 
-Four of those panels are new, and each closes a gap the rest of the board leaves open. **Task running and paused ratio** says how much of the window each task actually spent running — a task that keeps restarting reports RUNNING on every status panel. **Sink partitions assigned** should equal the partition count of the subscribed topics; less than that is a task holding nothing, which looks from every throughput panel like a quiet day. **Rebalance in progress** pinned at 1 is a group that cannot converge, and **time since last rebalance** resets to zero at each one, so its drops are the storm the rate panel only averages.
+Four panels close gaps the rest of the board leaves open. The task running and paused ratio says how much of the window each task spent running, since a task that keeps restarting reports RUNNING on every status panel. Sink partitions assigned should equal the partition count of the subscribed topics; less is a task holding nothing, which every throughput panel shows as a quiet day. Rebalance in progress pinned at 1 is a group that cannot converge, and time since last rebalance resets at each one, so its drops are the storm the rate panel only averages.
 
-Every panel now carries a description saying what it shows, what it means when it moves, and where the number comes from. They had none before, and the layout gate in `ci-kafka-charts.yml` will not accept a panel without one.
-
-The board is scoped by two template variables, `$namespace` and `$cluster`, rather than by a per-release pod regex. `strimzi_io_cluster` reaches the series through `kafka-common.strimziRelabelings` on the chart's PodMonitor and Strimzi sets it to the `KafkaConnect` CR name, which this chart sets to the release fullname — so one copy of the file serves every Connect group in a Grafana and the dropdown separates them.
-
-The metrics come from the chart's exporter rules (`files/metrics/connect-metrics.yaml`, in the `<release>-metrics` ConfigMap under `metrics-config.yml`); `metrics.existingConfigMap` points the workers at rules of your own instead. `monitoring.podMonitor` renders the PodMonitor that scrapes them. `scripts/check-metric-contract.sh connect-cluster` runs those rules over a catalogue of MBeans and fails the build if any panel reads a series they cannot produce.
-
-`dashboards/kafka-connect/README.md` documents the board section by section, including the three traps that make Connect metrics easy to misread: worker, connector and task are three different scopes and aggregate differently; sink record lag is the gap inside a task, not the backlog; and the `total-*` error series are typed GAUGE while being cumulative. `dashboards/METRICS.md` has a row for every series the board reads.
-
-Upstream's `strimzi-kafka-connect.json` is not an alternative to this board. It reads 21 `kafka_*` names and exactly one of them is producible by this chart's exporter rules, because the chart's rules and Strimzi's example use different name templates.
-
-### Helm Test
-
-The chart includes Helm tests, run in order: a connectivity pod, then example `KafkaTopic` and `KafkaConnector` resources (defined under `testTopics` / `testConnectors` in values), then a pod that waits for those connectors. The example resources are created during `helm test` and deleted when the test succeeds:
-
-```bash
-# Run the CDC integration test via Kates CLI
-kates kafka connect test
-
-# Or run the Helm chart test directly
-helm test connect-cluster --namespace connect --timeout 180s --logs
-```
-
-The `kates kafka connect test` command starts an INTEGRATION_CDC run on the Kates API, a full end-to-end CDC integration test. A Bubble Tea progress UI follows the run through each phase (DB setup → topic creation → source deploy → sink deploy → verification → cleanup).
-
-The run reads the demo database's password from its Secret, `postgresql` in `database`. The Kates API may read that Secret only in the namespaces the `kates` chart's `rbac.cdcSecretNamespaces` lists, which `kates deploy --with-kafka-connect` sets to the database's namespace. Without that grant, the run fails at DB setup with a `Forbidden` error.
-
-The connectivity test pod (`test-01-connect.yaml`) checks the credentials Secret, the `KafkaConnect` `Ready` condition, and the running workers. It then calls the REST API on port 8083 from inside a worker, which the NetworkPolicy admits — the root endpoint, and `/connector-plugins` against `tests.expectedPlugins` plus each `plugins[].expect` — and finally checks each declared connector's state and tasks. The last pod (`test-03-test-connectors.yaml`) waits for every test connector to reach RUNNING with all its tasks running. The test topics are created in the Kafka namespace, and `values-prod.yaml` turns the test connectors off because they need the platform's demo PostgreSQL.
-
-Because the hook resources are removed the moment the suite succeeds, nothing persists after `helm test` returns. To keep the example topic and connectors running — as the working-examples tutorial does — render the same templates and apply them directly (they keep their hook annotations, so a later `helm test` removes them again):
-
-```bash
-helm template connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster -n connect \
-  --set kafka.namespace=kafka \
-  -s templates/tests/test-02-topics.yaml \
-  -s templates/tests/test-02-connectors.yaml | kubectl apply -f -
-```
+The metrics come from the chart's exporter rules, and `metrics.existingConfigMap` points the workers at rules of your own instead; those rules must still produce the series the board reads.
 
 ## Network Policies
 
@@ -323,17 +228,17 @@ The chart's `networkpolicy.yaml` ships a default-deny posture: a deny-all Ingres
 | Ingress: metrics scrape (9404) | `networkPolicy.monitoring` (namespace `monitoring`) |
 | Ingress: REST API (8083) | `networkPolicy.restApi.clients` (default: the Kates API pods in `kates`), the Cluster Operator in `networkPolicy.strimziOperatorNamespace` (default `strimzi-operator`), and the other workers; `networkPolicy.restApi.allowAll` opens it to any source |
 | Egress: DNS, Kubernetes API | `networkPolicy.dns`, `networkPolicy.apiServer` (the secrets config provider reads Secrets through the API) |
-| Egress: Kafka | The Kafka namespace's `strimzi.io/cluster` pods, on the ports the bootstrap dials (9092, or 9093 with TLS); `networkPolicy.kafka.ports` fixes the list and refuses a bootstrap port outside it |
+| Egress: Kafka | The Kafka namespace's `strimzi.io/cluster` pods, on the ports the bootstrap dials (9092, or 9093 with TLS) |
 | Egress: Schema Registry, OTLP | `schemaRegistry.enabled` (the registry pods' `schemaRegistry.targetPort`, 8080, and the Service `port`), `tracing.endpoint` |
 | Egress: databases | `networkPolicy.egress.databases` |
 | Anything else | `networkPolicy.extraIngress`, `networkPolicy.extraEgress` |
 
-For the default `kates deploy` layout — workers in `connect`, brokers in `kafka` — the flows look like this:
+`networkPolicy.kafka.ports` pins the Kafka port list and refuses a bootstrap port outside it. For the default `kates deploy` layout — workers in `connect`, brokers in `kafka` — the [NetworkPolicy](appendix-a-glossary.md#gl-networkpolicy) flows look like this; DNS, the API server and the registry are left out:
 
 ```mermaid
 %%| label: fig-okc-network-flows
-%%| fig-cap: "The flows the chart's policy admits when the workers run in connect and the brokers in kafka."
-%%| fig-alt: "The Connect workers in the connect namespace reach the Kafka brokers in the kafka namespace on 9092, or 9093 with TLS, and PostgreSQL in the database namespace on 5432. Prometheus in the monitoring namespace scrapes the workers on 9404, and the Cluster Operator in the strimzi-operator namespace calls their REST API on 8083."
+%%| fig-cap: "Who may reach the workers and what the workers may reach, under the default kates deploy layout."
+%%| fig-alt: "The Connect workers in the connect namespace reach the Kafka brokers in the kafka namespace on 9092, or 9093 with TLS, and PostgreSQL in the database namespace on 5432. Prometheus in the monitoring namespace scrapes the workers on 9404, and the Cluster Operator in the strimzi-operator namespace and the Kates API in the kates namespace call their REST API on 8083."
 graph LR
     subgraph connect_ns["connect namespace"]
         CW["Connect Workers<br/>REST API :8083"]
@@ -355,13 +260,18 @@ graph LR
         PROM["Prometheus"]
     end
 
+    subgraph kates_ns["kates namespace"]
+        KA["Kates API"]
+    end
+
     CW -->|"9092 (9093 with TLS)"| KB
     CW -->|"5432"| PG
     PROM -->|"scrape :9404"| CW
     CO -->|"8083"| CW
+    KA -->|"8083"| CW
 ```
 
-Database egress rules are dynamically generated from `values.yaml`:
+The chart renders one egress rule per entry under `networkPolicy.egress.databases`:
 
 ```yaml
 networkPolicy:
@@ -373,15 +283,15 @@ networkPolicy:
           app.kubernetes.io/name: postgresql
 ```
 
-Each entry generates a `NetworkPolicy` egress rule allowing Connect workers to reach the specified pods in the specified namespace, and a matching ingress policy in the database namespace (`allow-<release>-ingress-<port>`) unless the entry sets `createIngressPolicy: false`. The 1.x `databaseEgress` key still works in 2.x and is listed as deprecated.
+Each entry generates a `NetworkPolicy` egress rule allowing Connect workers to reach the specified pods in the specified namespace, and a matching ingress policy in the database namespace (`allow-<release>-ingress-<port>`) unless the entry sets `createIngressPolicy: false`.
 
-::: {.callout-warning}
-Chart 1.x allowed Kafka egress on 9092 and 9093 whatever the bootstrap dialed, and looked for the Cluster Operator in the Kafka namespace. After an upgrade to 2.0, a bootstrap that reaches Kafka on another port needs `networkPolicy.kafka.ports`, and an operator outside `strimzi-operator` needs `networkPolicy.strimziOperatorNamespace` — otherwise the workers cannot reach the brokers, or the operator cannot manage the connectors. The `krafter` Kafka cluster admits Connect through its own `networkPolicy.clients`.
+::: {.callout-warning title="The Kafka egress ports and the operator namespace are explicit"}
+A bootstrap that reaches Kafka on a port other than 9092 or 9093 needs `networkPolicy.kafka.ports`, and an operator outside `strimzi-operator` needs `networkPolicy.strimziOperatorNamespace`; otherwise the workers cannot reach the brokers, or the operator cannot manage the connectors. [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test, admits Connect through its own `networkPolicy.clients`.
 :::
 
 ## REST API & Connector Operations
 
-The Kates CLI wraps the Connect REST API with ergonomic commands:
+The Kates CLI wraps the common REST calls:
 
 ```bash
 # List all connectors
@@ -411,7 +321,7 @@ kates kafka connect scale 5
 kates kafka connect logs -f
 
 # JSON output for scripting
-kates kafka connect connectors -o json | jq '.[].metadata.name'
+kates kafka connect connectors -o json | jq -r '.items[].metadata.name'
 ```
 
 ### Direct REST API Access
@@ -446,17 +356,66 @@ restApi:
             pathType: Prefix
 ```
 
+::: {.callout-tip title="Try it: Does the CLI agree with the REST API?"}
+Run the block below and compare the two views. A connector that the CLI shows Ready but the REST API shows FAILED has a stale `KafkaConnector` status; the REST view is the worker's own.
+:::
+
+The CLI reads the `KafkaConnector` resources, whose status Strimzi reconciles from the REST API:
+
+```bash
+kubectl port-forward -n connect svc/connect-cluster-rest-api 8083:8083 &
+
+# Worker version and the Kafka cluster it belongs to
+curl -s http://localhost:8083/ | jq .
+
+# Connector- and task-level state in one call
+curl -s "http://localhost:8083/connectors?expand=status" | jq .
+
+# The same connectors as the CLI sees them
+kates kafka connect connectors
+
+# Stop the port-forward
+kill %1
+```
+
+### Verifying a Release with `helm test`
+
+The chart includes Helm tests, run in order: a connectivity pod, then example `KafkaTopic` and `KafkaConnector` resources (defined under `testTopics` / `testConnectors` in values), then a pod that waits for those connectors. The example resources are created during `helm test` and deleted when the test succeeds:
+
+```bash
+# Run the CDC integration test via Kates CLI
+kates kafka connect test
+
+# Or run the Helm chart test directly
+helm test connect-cluster --namespace connect --timeout 180s --logs
+```
+
+The `kates kafka connect test` command starts an INTEGRATION_CDC run on the Kates API, a full end-to-end CDC integration test. The CLI shows the run's eight phases as they complete: database setup, topic creation, source and sink deployment, connector readiness, Kafka verification, sink verification and cleanup.
+
+The run reads the demo database's password from its Secret, `postgresql` in `database`. The Kates API may read that Secret only in the namespaces the `kates` chart's `rbac.cdcSecretNamespaces` lists, which `kates deploy --with-kafka-connect` sets to the database's namespace. Without that grant, the run fails at DB setup with a `Forbidden` error.
+
+The connectivity test pod (`test-01-connect.yaml`) checks the credentials Secret, the `KafkaConnect` `Ready` condition, and the running workers. It then calls the REST API on port 8083 from inside a worker, which the NetworkPolicy admits — the root endpoint, and `/connector-plugins` against `tests.expectedPlugins` plus each `plugins[].expect` — and finally checks each declared connector's state and tasks. The last pod (`test-03-test-connectors.yaml`) waits for every test connector to reach RUNNING with all its tasks running. The test topics are created in the Kafka namespace, and `values-prod.yaml` turns the test connectors off because they need the platform's demo PostgreSQL.
+
+Because the hook resources are removed the moment the suite succeeds, nothing persists after `helm test` returns. To keep the example topic and connectors running — as the working-examples tutorial does — render the same templates and apply them directly (they keep their hook annotations, so a later `helm test` removes them again):
+
+```bash
+helm template connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster -n connect \
+  --set kafka.namespace=kafka \
+  -s templates/tests/test-02-topics.yaml \
+  -s templates/tests/test-02-connectors.yaml | kubectl apply -f -
+```
+
 ## Security & Credential Rotation
 
 A worker holds three credentials: the cluster CA it trusts, its own Kafka user's password or certificate, and the database password its connectors log in with. This section shows where each one comes from and how to rotate it.
 
 ### Credential Architecture
 
-Strimzi mounts the CA and the Kafka user's Secret into the worker pods. The database Secret is never mounted: the secrets config provider reads it through the Kubernetes API.
+[Strimzi](appendix-a-glossary.md#gl-strimzi) mounts the CA and the Kafka user's [Secret](appendix-a-glossary.md#gl-secret) into the worker pods. The database Secret is never mounted: the secrets config provider reads it through the Kubernetes API.
 
 ```mermaid
 %%| label: fig-okc-credentials
-%%| fig-cap: "Where a worker's three credentials come from."
+%%| fig-cap: "Two credentials are mounted by Strimzi and the third is read through the Kubernetes API, which is why only the third needs RBAC."
 %%| fig-alt: "Three Kubernetes Secrets feed a Connect worker pod. Strimzi mounts krafter-cluster-ca-cert into the TLS truststore and kates-connect, a SCRAM password or client certificate, into the SASL configuration. The secrets config provider reads connect-pg-credentials, the database password, through the Kubernetes API."
 graph TB
     subgraph K8s Secrets
@@ -476,7 +435,7 @@ graph TB
     S3 -->|"read via Kubernetes API"| PROV
 ```
 
-The workers read `connect-pg-credentials` through the API only because the chart grants them `get` on it — it is referenced by the test connectors, and the kind and generic overlays list it in `rbac.secretNames`. When Kafka lives in another namespace, the chart's secret-sync Job copies `kates-connect` (for a chart-managed `KafkaUser`) and, with TLS, the cluster CA into the Connect namespace on every install and upgrade.
+The workers may read `connect-pg-credentials` only because the chart grants `get` on the Secrets its connectors reference ([External Configuration (Secrets)](21-kafka-connect.md#external-configuration-secrets)). When Kafka lives in another namespace, the chart's secret-sync Job copies `kates-connect` (for a chart-managed `KafkaUser`) and, with TLS, the cluster CA into the Connect namespace on every install and upgrade.
 
 ### Rotation Procedures
 
@@ -487,7 +446,7 @@ Of the credentials a worker holds, only the database password lives outside Kube
 | Kafka TLS CA | Strimzi auto-rotates 180 days before expiry; across namespaces, `secretSync.watch` re-copies it (otherwise the next `helm upgrade` does) | Zero — rolling restart |
 | SCRAM password | Update `KafkaUser` CR → Strimzi updates Secret; across namespaces, `secretSync.watch` or the next `helm upgrade` re-copies it | Zero — rolling restart |
 | Client certificate (`values-prod.yaml`) | The User Operator renews it; `secretSync.watch` (on in the prod overlay) re-copies it | Zero — rolling restart |
-| Database password | Change it in PostgreSQL → update K8s Secret → restart the tasks of the connectors that read it | Seconds — task restart only |
+| Database password | Change it in PostgreSQL, update the Kubernetes Secret, then restart the tasks of the connectors that read it | Seconds — task restart only |
 | Connect REST API (if exposed) | Ingress-level auth (OAuth2 proxy, mTLS) | N/A |
 
 For the database password, what matters is when the tasks restart. A connector's tasks hold its database connections, and each task reads the Secret, through the secrets config provider, when it starts. Restarting only the connector, as `kates kafka connect restart` does, leaves its running tasks on the old password. So change the password in PostgreSQL first, then the Secret, and only then restart the tasks of every connector that reads it. The commands below rotate the demo database that `kates deploy` installs in the `database` namespace; for your own database, run the same `ALTER ROLE` your usual way:
@@ -517,7 +476,9 @@ A connector with more tasks needs each of them restarted; `kates kafka connect t
 
 Every `kates deploy --with-kafka-connect` run writes `connect-pg-credentials` again with the demo password, `debezium`. Once you have rotated the demo database, repeat steps 2 and 3 after each such run.
 
----
+::: {.callout-tip title="Try it: Does a running task notice a changed Secret?"}
+Set `connect-pg-credentials` to a wrong password with step 2 alone, leaving PostgreSQL as it is, then insert a row as [Replicate a Row End to End](21-kafka-connect.md#replicate-a-row-end-to-end) does and check whether it replicates. Then run step 3 and watch `kates kafka connect tasks jdbc-sink-connector`. Put the right password back and restart the task again when you're done.
+:::
 
 ## Upgrade Procedures
 
@@ -543,7 +504,7 @@ helm upgrade connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster \
 
 `make connect-push` publishes the Debezium-only tag (`connect:3.7.0`). The chart's own pin is the fully qualified `<debezium>-kafka-<kafka>` tag, and it lives in two places: `image` in `values.yaml` and the `kates.io/connect-image` annotation in `Chart.yaml`. `kates deploy` runs whatever `values.yaml` pins. A `v*` release tag runs `.github/workflows/publish-connect.yml`, which publishes the qualified tag and moves both pins together, and `scripts/check-versions.sh` fails when the pins disagree with each other, with `Dockerfile.connect`, or with the Kafka pin. `Chart.yaml` `appVersion` is the Kafka version the workers run (the `version` value), not the Debezium version. The chart refuses `:latest` and untagged images.
 
-Strimzi performs a **rolling restart** — one worker at a time. Each restarted worker's connectors and tasks can wait up to the rebalance delay described under [AZ Failure Behavior](#az-failure-behavior) before they run again. Workers that leave while one delay runs get their work back when that same delay ends, so a rollout quicker than the delay can leave most of the group's tasks paused at once.
+Strimzi performs a rolling restart, one worker at a time. Each restarted worker's connectors and tasks can wait up to the rebalance delay described under [What a Rebalance Costs](#what-a-rebalance-costs) before they run again. Workers that leave while one delay runs get their work back when that same delay ends, so a rollout quicker than the delay can leave most of the group's tasks paused at once.
 
 ### Upgrading the Chart from 1.x
 
@@ -559,7 +520,20 @@ helm upgrade connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster -n con
   -f connect-current.yaml
 ```
 
-The upgrade rolls the workers once (the metrics ConfigMap key is now `metrics-config.yml`). Afterwards, check that every connector still runs: one that fails with `Forbidden` reading a Secret needs that Secret in `rbac.secretNames`. The Kafka egress ports, the operator namespace and three alert names changed too — see [Network Policies](#network-policies), [Prometheus Alerts](#prometheus-alerts), and [the 2.0 upgrade guide](../connect-cluster-2.0-upgrade.md) for the key-by-key table.
+The upgrade rolls the workers once. Afterwards, check that every connector still runs. The table lists what 2.0 changes from 1.x and what to check for each:
+
+| 1.x | 2.x | What to check |
+|-----|-----|---------------|
+| Workers read every Secret in the Connect and Kafka namespaces | `get` only on referenced Secrets and `rbac.secretNames` | A connector failing with `Forbidden` needs its Secret listed |
+| Kafka egress on 9092 and 9093 | The ports the bootstrap dials, or `networkPolicy.kafka.ports` | A bootstrap on another port |
+| Cluster Operator looked for in the Kafka namespace | `networkPolicy.strimziOperatorNamespace`, default `strimzi-operator` | An operator elsewhere |
+| `databaseEgress` | `networkPolicy.egress.databases` | The `DEPRECATED` line in the release notes |
+| Metrics ConfigMap key `kafka-metrics-config.yml` | `metrics-config.yml` | Nothing; the workers roll once |
+| `KafkaConnectTaskCountMismatch` | `KafkaConnectTasksNotRunning` | Alertmanager routes and silences |
+| `KafkaConnectHighErrorRate` | `KafkaConnectErrorsLogged` | Alertmanager routes and silences |
+| `KafkaConnectSourceLag` | `KafkaConnectSourceIdle`, off by default | Alertmanager routes and silences |
+
+The key-by-key table is in [Upgrading connect-cluster 1.3 → 2.0](../connect-cluster-2.0-upgrade.md).
 
 ### Upgrade Checklist
 
@@ -570,7 +544,7 @@ The checklist takes an image upgrade through dev or staging before production, a
 | 1 | Read Debezium migration guide | Breaking changes documented |
 | 2 | Build new image on CI | `make connect-build` passes |
 | 3 | Deploy to dev/staging | The `helm upgrade` above, from the release's current values; every worker rolls onto the new image |
-| 4 | Run integration test | `kates kafka connect test` passes |
+| 4 | Run integration test | `kates kafka connect test` passes ([Verifying a Release with `helm test`](#verifying-a-release-with-helm-test)) |
 | 5 | Verify connector status | `kates kafka connect connectors` — all RUNNING, no DLQ growth |
 | 6 | Deploy to production | The same `helm upgrade` on the production cluster, from its own current values |
 | 7 | Monitor for 24h | No alerts, no lag increase |
@@ -592,26 +566,19 @@ helm upgrade connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster \
 
 Rolling a 2.0 release back to a 1.3 revision restores the 1.x manifests: the workers roll back onto the `kafka-metrics-config.yml` key, and the 1.x namespace-wide Secret access returns.
 
-::: {.callout-warning}
+::: {.callout-warning title="Roll back before the offset format changes"}
 If the new Debezium version changed the internal offset format, rolling back may cause connectors to fail with deserialization errors. Always test in staging first.
 :::
-
----
 
 ## Disaster Recovery
 
 Connect keeps its state in Kafka, so what you can recover depends on what survives there. The scenarios below cover losing the internal topics and losing the whole Connect deployment.
 
-### Scenario: Internal Topics Deleted
+### Recovering After the Offsets Topic Is Deleted
 
-If the `connect-offsets` topic is accidentally deleted:
+If the `connect-offsets` topic is accidentally deleted, every source connector loses its position. On restart each falls back to its `snapshot.mode`: `initial` takes a full snapshot (hours on a large database); `schema_only` skips to new changes and leaves a gap.
 
-1. All source connectors lose their position
-2. On restart, they fall back to `snapshot.mode` behavior:
-   - `initial` → full database snapshot (hours for large databases)
-   - `schema_only` → only new changes (data gap)
-
-**Recovery procedure:**
+Recover in three steps:
 
 ```bash
 # 1. Scale down Connect workers
@@ -624,45 +591,40 @@ kates kafka connect scale 3
 kates kafka connect logs -f
 ```
 
-### Scenario: Connect Cluster Completely Lost
+### Rebuilding a Lost Connect Cluster
 
-If the entire Connect deployment is destroyed:
+If the entire Connect deployment is destroyed, redeploy it:
 
 ```bash
-# 1. Redeploy via Kates CLI
-kates deploy --with-kafka-connect --ha
-
-# 2. Connectors defined in values.yaml are automatically recreated
-# 3. If offsets topic still exists in Kafka, connectors resume from last position
-# 4. If offsets topic is also lost, connectors re-snapshot
+kates deploy --with-kafka-connect
 ```
 
-::: {.callout-tip}
-The internal topics (`*-offsets`, `*-configs`, `*-status`) are the only persistent state for the Connect cluster. As long as these topics survive in Kafka (with RF=3), the Connect cluster is fully rebuildable from the Helm chart alone.
-:::
+Then:
+
+1. The connectors defined in the values are recreated.
+2. If the offsets topic still exists in Kafka, the connectors resume from their last position.
+3. If the offsets topic is also lost, they re-snapshot.
 
 ### Backup Strategy
 
-The Connect cluster itself is stateless — all state lives in Kafka topics. Backup strategy:
+Each component of a Connect deployment has its own backup method:
 
 | Component | Backup Method | RPO |
 |-----------|-------------|:---:|
 | Connector configs | Version-controlled in `values.yaml` | 0 |
-| Connector offsets | Kafka topic with RF=3 | 0 (unless all brokers fail) |
+| Connector offsets | Kafka topic with replication factor 3 | 0 (unless all brokers fail) |
 | Database credentials | Kubernetes Secret backup (Velero) | Daily |
 | Connect image | OCI registry + Dockerfile in Git | 0 |
 
----
-
 ## Troubleshooting
 
-Each entry starts from what you see — a connector's state, an alert, a pod's exit reason, a PostgreSQL disk that keeps growing, or a failed `helm upgrade` — and gives the cause and the fix.
+Each entry starts from what you see — a connector's state, an alert, a pod's exit reason, a PostgreSQL disk that keeps growing, or a failed `helm upgrade` — and gives the cause and the fix. Most FAILED connectors trace back to credentials, an occupied replication slot or `wal_level`, so start with `kates kafka connect connectors` and the worker logs.
 
 ### Connector Stuck in FAILED State
 
 **Symptom:** `KafkaConnector` status shows `FAILED` with `io.debezium.DebeziumException`
 
-**Diagnosis:**
+**Cause:** Find it in the connector's status and the worker logs:
 
 ```bash
 # Check connector status
@@ -673,11 +635,11 @@ kates kafka connect connector debezium-postgres-source
 kates kafka connect logs
 ```
 
-**Common causes:**
+**Fix:** Match the error to its cause and fix:
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `PSQLException: FATAL: password authentication failed` | Wrong credentials in secret | Update `connect-pg-credentials` secret |
+| `PSQLException: FATAL: password authentication failed` | Wrong credentials in the Secret | Update the `connect-pg-credentials` Secret |
 | `replication slot "debezium_kates" is active` | Previous connector instance still holding the slot | Restart the connector or drop the slot manually |
 | `could not access file "pgoutput"` | PostgreSQL `wal_level` is not `logical` | Set `wal_level = logical` in PostgreSQL config |
 | `No matching table(s) in schema "public"` | `schema.include.list` doesn't match any tables | Verify the schema and table names exist |
@@ -718,29 +680,30 @@ resources:
 
 **Fix:**
 
-1. Resume or restart the connector to drain the slot
+1. Resume or restart the connector to drain the slot.
 2. If the connector is permanently removed, drop the slot:
 
-```sql
-SELECT pg_drop_replication_slot('debezium_kates');
-```
+    ```sql
+    SELECT pg_drop_replication_slot('debezium_kates');
+    ```
 
-3. Enable heartbeat to prevent WAL retention on idle tables:
+3. Enable the heartbeat to prevent WAL retention on idle tables:
 
-```yaml
-heartbeat.interval.ms: "10000"
-```
+    ```yaml
+    heartbeat.interval.ms: "10000"
+    ```
 
 ### Connector Validation Blocks Deployment
 
 **Symptom:** `helm upgrade` (or `helm template`) fails at once with `Error: execution error at (connect-cluster/templates/…): connect-cluster: …`
 
-**Cause:** The chart checks connector configs and the rest of the values while it renders — a missing required key, a sink without `topics`, a `${secrets:…}` reference without a namespace, a plaintext password under `productionMode`, and so on. Nothing is applied. There is no validation hook Pod any more.
+**Cause:** The chart checks connector configs and the rest of the values while it renders — a missing required key, a sink without `topics`, a `${secrets:…}` reference without a namespace, a plaintext password under `productionMode`, and so on. Nothing is applied.
 
-**Fix:** The message names the connector and the setting, for example:
+**Fix:** The message names the connector and the setting. Output:
 
 ```text
-connect-cluster: connectors.orders-cdc (io.debezium.connector.postgresql.PostgresConnector) needs config.topic.prefix
+connect-cluster: connectors.orders-cdc (…PostgresConnector)
+needs config.topic.prefix
 ```
 
 Fix the connector configs in `values.yaml`, render them again (`helm template connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster -n connect -f values.yaml > /dev/null`), and re-run `helm upgrade`. [Pre-Deploy Validation](21-kafka-connect.md#pre-deploy-validation) lists the checks.
@@ -762,34 +725,12 @@ For the symptom-by-symptom index across the whole book, see the [Troubleshooting
 
 Component versions for the Connect stack are tracked centrally in the [Version & Compatibility Matrix](appendix-d-versions.md).
 
-::: {.callout-tip}
-**Try it**
-
-Port-forward the Connect REST API and compare its view of connector state with the CLI's:
-
-```bash
-kubectl port-forward -n connect svc/connect-cluster-rest-api 8083:8083 &
-
-# Worker version and the Kafka cluster it belongs to
-curl -s http://localhost:8083/ | jq .
-
-# Connector- and task-level state in one call
-curl -s "http://localhost:8083/connectors?expand=status" | jq .
-
-# The same connectors as the CLI sees them
-kates kafka connect connectors
-```
-
-Every connector and task reports `RUNNING` in both views — the CLI reads the `KafkaConnector` CRs, whose status Strimzi reconciles from the same REST API you just curled.
-:::
-
 ## Summary
 
-- One stretched `KafkaConnect` cluster spans all Availability Zones; topology spread constraints and pod anti-affinity keep workers apart, and the group protocol reassigns tasks off a dead zone in seconds with offsets intact
-- Give containers roughly 2× the JVM heap — off-heap memory is what gets workers OOMKilled — and target 2–5 tasks per worker
-- The internal topics (`*-offsets`, `*-configs`, `*-status`) hold the only persistent state; as long as they survive in Kafka, the cluster is rebuildable from the Helm chart alone
-- Rotate the database password in PostgreSQL, then in the Kubernetes Secret, then restart the connectors' tasks — a task reads the Secret only when it starts, so restarting the connector alone leaves its tasks on the old password
-- Upgrades roll one worker at a time and can pause each worker's tasks for the rebalance delay, and a Debezium release that changes the offset format makes rollback unsafe — validate in staging with `kates kafka connect test`
-- Most FAILED connectors trace back to credentials, an occupied replication slot, or `wal_level` — start with `kates kafka connect connectors` and the worker logs
+- One stretched group spans the three zones; when a zone dies its tasks wait out the rebalance delay, then resume elsewhere from their committed offsets.
+- Give each worker's container twice its JVM heap, and aim for two to five tasks per worker.
+- The three internal topics are the only state, so a lost Connect deployment is a reinstall.
+- Rotate a database password in PostgreSQL, then in the Secret, then restart the tasks that read it.
+- Upgrades roll one worker at a time, and an offset-format change makes rollback unsafe.
 
 MirrorMaker 2 runs on the same machinery you have just learned to operate — workers, tasks, rebalances and internal topics — with one difference: it talks to two Kafka clusters instead of one. [Cross-Cluster Replication and Migration](22-mirror-maker2-migration.md) starts from there.
