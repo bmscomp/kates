@@ -483,10 +483,9 @@ mapfile -t cluster_node_versions < <(
   grep -Eo 'kindest/node:v[0-9]+\.[0-9]+\.[0-9]+' "$CLUSTER_YAML" | sed 's|kindest/node:||' | sort -u
 )
 
-# "| **Kind** *(optional)* | 0.22+ |" — an optional floor for readers, not a pin.
+# "Use Kind 0.33 or newer" in the prerequisites — an optional floor for readers, not a pin.
 docs_kind_floor=$(
-  grep -E '^\|[[:space:]]*\*\*Kind\*\*' "$INSTALL_GUIDE" \
-    | sed -E 's/.*\|[[:space:]]*([0-9]+\.[0-9]+)\+[[:space:]]*\|.*/\1/' | head -1 || true
+  grep -oE 'Kind [0-9]+\.[0-9]+ or newer' "$INSTALL_GUIDE" | head -1 | grep -oE '[0-9]+\.[0-9]+' || true
 )
 
 echo

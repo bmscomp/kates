@@ -1,6 +1,6 @@
 # CI/CD Pipeline
 
-This appendix documents the GitHub Actions workflows that automate building, testing, and releasing the Kates platform — from pull-request validation to production image publishing and CLI binary releases. The repository carries further workflows for the Apicurio Registry chart (`ci-apicurio.yml`), the Connect and tester image build checks (`ci-connect.yml`, `ci-tester.yml`), native-image builds (`native.yml`), the linters (`lint.yml`), dependency review and the weekly rescan of released images (`security.yml`), CodeQL (`codeql.yml`), chart publishing (`publish-charts.yml`), registry descriptions (`sync-registry-descriptions.yml`), and documentation builds (`docs.yml`, `book.yml`); they follow the same patterns and are not covered here.
+This appendix documents the GitHub Actions workflows that automate building, testing, and releasing the Kates platform — from pull-request validation to production image publishing and CLI binary releases. The repository carries further workflows for the Apicurio Registry chart (`ci-apicurio.yml`), the Connect and tester image build checks (`ci-connect.yml`, `ci-tester.yml`), the release pin PR's image scan (`ci-release.yml`, below), native-image builds (`native.yml`), the linters (`lint.yml`), dependency review and the weekly rescan of released images (`security.yml`), CodeQL (`codeql.yml`), chart publishing (`publish-charts.yml`), registry descriptions (`sync-registry-descriptions.yml`), and documentation builds (`docs.yml`, `book.yml`); they follow the same patterns and are not covered here.
 
 Two things to keep in mind while reading. First, **any job that renders a chart runs `helm dependency build` first** — `strimzi-operator` pulls the operator subchart from `quay.io`, and `kafka-cluster`, `connect-cluster` and `mirror-maker2` all resolve the `kafka-common` library through a `file://` dependency. `helm lint` only warns about a missing dependency and still exits 0, so a job that skips the build can be green while the chart cannot be deployed. Second, the expensive jobs — the ones that stand up a Kind cluster and scrape a real broker — are gated behind a schedule, a manual dispatch, or a pull-request label, and never run on an ordinary push.
 
@@ -418,6 +418,10 @@ The `update-charts` job is what keeps `charts/connect-cluster` honest: it rewrit
 
 The image workflows are *called* (`workflow_call`) rather than triggered by the tag themselves, so a release is one run page with every job on it in dependency order. Before this, four workflows fired on the same tag with nothing between them, and a failed image build left the tap pointing at a version whose image did not exist — with nothing red to show for it.
 
+### Before the Tag
+
+A release pin PR, on a `chore/release-*` branch, changes only pins, so the path-filtered image builds skip it. `ci-release.yml` runs on those PRs alone: it builds the kates JVM and native images, the Connect image and the tester image for `linux/amd64` from the PR's tree, without pushing, and scans each with the release's own Trivy settings (CRITICAL, fixable, `.trivyignore.yaml`). `ci.yml`'s dependency CVE scan, Trivy over the Maven tree and `govulncheck` over the CLI, runs on those PRs too. A CVE that would fail Verify Published Images after the push fails the pin PR instead, before anything is tagged.
+
 ### Build Matrix
 
 | OS | Architecture | Binary Name |
@@ -437,7 +441,8 @@ The image workflows are *called* (`workflow_call`) rather than triggered by the 
 6. Then the release deploys the published charts: on a three-zone Kind cluster, its own Linux CLI, run outside any checkout, deploys the stack from the charts just published. It runs `--dry-run` first, then a real deploy of the Strimzi operator, Kafka and the Kates API with its PostgreSQL. `KATES_REQUIRE_SIGNED_CHARTS=1` makes every pulled chart's signature a requirement. A chart, an overlay or an image pin that can't install stops the run here, before anything points users at it. The charts are already pushed by then, so the fix ships as new chart versions
 7. **Create GitHub Release** — once the binaries, all three images and the chart deploy are done: uses the tag as the release, with auto-generated release notes; all tarballs and checksums are attached
 8. **Update Homebrew tap** — regenerates `Formula/kates.rb` in the `bmscomp/homebrew-tap` repository so `brew install bmscomp/tap/kates` resolves to the new release
-9. **Smoke test** — a macOS runner installs from the tap and checks `kates version` reports the tag
+9. Then the Krew manifest moves to the tag: the release rewrites `plugins/kates.yaml` on `main` to the tag and the hashes of the tarballs just built, so `kubectl krew upgrade kates` from the repo's custom index (`kubectl krew index add kates https://github.com/bmscomp/kates.git`) resolves to the new release. Pre-release tags leave it alone
+10. **Smoke test** — a macOS runner installs from the tap and checks `kates version` reports the tag
 
 ### Installation
 
