@@ -90,7 +90,7 @@ jobs:
               -X ${MODULE}.MigratePins=${MIGRATE_PINS}" \
             -o kates .
 
-      # scripts/install-kates.sh unpacks this layout, krew/kates.yaml extracts
+      # scripts/install-kates.sh unpacks this layout, plugins/kates.yaml extracts
       # kates and LICENSE from it, and scripts/check-install-kates.sh packs its
       # stand-in the same way: change them together.
       - name: Package tarball
