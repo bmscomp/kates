@@ -441,7 +441,8 @@ A release pin PR, on a `chore/release-*` branch, changes only pins, so the path-
 6. Then the release deploys the published charts: on a three-zone Kind cluster, its own Linux CLI, run outside any checkout, deploys the stack from the charts just published. It runs `--dry-run` first, then a real deploy of the Strimzi operator, Kafka and the Kates API with its PostgreSQL. `KATES_REQUIRE_SIGNED_CHARTS=1` makes every pulled chart's signature a requirement. A chart, an overlay or an image pin that can't install stops the run here, before anything points users at it. The charts are already pushed by then, so the fix ships as new chart versions
 7. **Create GitHub Release** — once the binaries, all three images and the chart deploy are done: uses the tag as the release, with auto-generated release notes; all tarballs and checksums are attached
 8. **Update Homebrew tap** — regenerates `Formula/kates.rb` in the `bmscomp/homebrew-tap` repository so `brew install bmscomp/tap/kates` resolves to the new release
-9. **Smoke test** — a macOS runner installs from the tap and checks `kates version` reports the tag
+9. **Update Krew manifest** — rewrites `plugins/kates.yaml` on `main` to the tag and the hashes of the tarballs just built, so `kubectl krew upgrade kates` from the repo's custom index (`kubectl krew index add kates https://github.com/bmscomp/kates.git`) resolves to the new release. Pre-release tags leave it alone
+10. **Smoke test** — a macOS runner installs from the tap and checks `kates version` reports the tag
 
 ### Installation
 

@@ -57,7 +57,7 @@ Before you begin, make sure you have the following tools and infrastructure read
 
 ### Tools
 
-You need `kubectl` to talk to your Kubernetes cluster; every command in this chapter uses it to inspect or change cluster state, and it should stay within one minor version of the cluster. You need Helm, which renders the chart's templates from `values.yaml` and applies them. Docker is needed only for a local Kind or k3d cluster, where it runs the Kubernetes nodes as containers, and Kind only for a local cluster such as `panda`, the book's three-node Kind cluster. Use a current Kind release: older ones don't publish the node image `config/cluster.yaml` asks for.
+You need `kubectl` to talk to your Kubernetes cluster; every command in this chapter uses it to inspect or change cluster state, and it should stay within one minor version of the cluster. You need Helm, which renders the chart's templates from `values.yaml` and applies them. Docker is needed only for a local Kind or k3d cluster, where it runs the Kubernetes nodes as containers, and Kind only for a local cluster such as `panda`, the book's three-node Kind cluster. Use Kind 0.33 or newer: older releases don't publish the node image `config/cluster.yaml` asks for.
 
 Check each tool answers:
 
