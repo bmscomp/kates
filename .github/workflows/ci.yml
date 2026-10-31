@@ -136,7 +136,9 @@ jobs:
   dependency-scan:
     name: Dependency CVE scan
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    # A release pin PR touches no code, but it is the last check before the tag
+    # ships the tree, so it runs the scan against today's advisories anyway.
+    if: needs.changes.outputs.code == 'true' || startsWith(github.head_ref, 'chore/release-')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
