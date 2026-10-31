@@ -10,7 +10,7 @@ local ESC = {
   ["\\"] = "\\textbackslash{}", ["{"] = "\\{", ["}"] = "\\}", ["$"] = "\\$", ["&"] = "\\&",
   ["#"] = "\\#", ["^"] = "\\^{}", ["_"] = "\\_", ["%"] = "\\%", ["~"] = "\\~{}",
 }
-local BREAK_AFTER = { ["/"] = true, ["."] = true, ["-"] = true, ["_"] = true, [":"] = true, ["="] = true }
+local BREAK_AFTER = { ["/"] = true, ["."] = true, ["-"] = true, ["_"] = true, [":"] = true, ["="] = true, ["|"] = true }
 
 function Code(el)
   if #el.text < 18 then
@@ -26,7 +26,9 @@ function Code(el)
     else
       out[#out + 1] = ESC[c] or c
     end
-    if i < #el.text and BREAK_AFTER[c] then
+    local nxt = el.text:sub(i + 1, i + 1)
+    -- after a separator, or inside camelCase (kubernetesServiceDnsDomain)
+    if i < #el.text and (BREAK_AFTER[c] or (c:match("%l") and nxt:match("%u"))) then
       out[#out + 1] = "\\allowbreak{}"
     end
   end

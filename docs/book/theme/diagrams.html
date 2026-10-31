@@ -80,9 +80,10 @@
       themeCSS: (mermaidOpts.themeCSS || "") + LABEL_CSS,
       flowchart: {
         ...mermaidOpts.flowchart,
-        nodeSpacing: 36,
-        rankSpacing: 44,
-        padding: 14,
+        // Compact: a large diagram takes less of the page
+        nodeSpacing: 28,
+        rankSpacing: 34,
+        padding: 12,
         subGraphTitleMargin: { top: 10, bottom: 8 },
       },
       sequence: {
@@ -191,13 +192,15 @@
 
   // ── Inline sizing ──────────────────────────────────────────────────────────
 
-  // How far the plate may reach past the text column into the right margin:
-  // up to the margin column's far edge, and only on wide screens.
-  function marginRoom(figure) {
-    if (!wideScreen.matches || !margin) return 0;
-    const column = figure.parentElement.getBoundingClientRect().right;
-    return Math.max(0, Math.floor(margin.getBoundingClientRect().right - column));
+  // A diagram keeps to the text column, like everything else in the chapter
+  // (kates.scss, "Prose"): it never reaches into the margin.
+  function marginRoom() {
+    return 0;
   }
+
+  // A tall diagram is drawn no taller than this, so it never takes more than
+  // most of a screen; Expand shows it at full size.
+  const maxHeight = () => Math.max(420, Math.round(window.innerHeight * 0.72));
 
   function layout(figure) {
     const frame = figure.querySelector(".kates-diagram-frame");
@@ -224,6 +227,13 @@
     } else {
       width = Math.min(size.w, column);
     }
+    // Held to the height cap only while its labels stay readable (75% of the
+    // width it would otherwise get); a taller one keeps its size
+    const tallest = maxHeight();
+    const capped = (size.w * tallest) / size.h;
+    if ((size.h * width) / size.w > tallest && capped >= width * 0.75) {
+      width = capped;
+    }
     const bleed = Math.max(0, Math.ceil(width - column));
     figure.style.setProperty("--kates-diagram-bleed", `${bleed}px`);
     figure.classList.toggle("is-wide", bleed > 0);
@@ -231,7 +241,7 @@
     svg.style.maxWidth = "none";
     svg.style.width = `${Math.floor(width)}px`;
     figure.querySelector(".kates-diagram-hint").textContent = oversized
-      ? "Too wide to read here: expand it full screen."
+      ? "Too large to read here: expand it full screen."
       : "";
     yieldMargin();
   }

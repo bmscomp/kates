@@ -16,14 +16,22 @@ local function measure(blocks)
   pandoc.Div(blocks):walk({
     Code = function(c)
       total = total + #c.text * CODE_CW
-      -- theme/pdf-inline-code.lua lets code break after / . - _ : =
-      for seg in c.text:gmatch("[^%s/%.%-_:=]+[/%.%-_:=]?") do
-        longest = math.max(longest, #seg * CODE_CW)
+      if #c.text < 18 then
+        -- theme/pdf-inline-code.lua leaves short code whole
+        longest = math.max(longest, #c.text * CODE_CW)
+      else
+        -- …and lets longer code break after / . - _ : = |
+        for seg in c.text:gmatch("[^%s/%.%-_:=|]+[/%.%-_:=|]?") do
+          longest = math.max(longest, #seg * CODE_CW)
+        end
       end
     end,
     Str = function(s)
-      total = total + #s.text * TEXT_CW
-      longest = math.max(longest, #s.text * TEXT_CW)
+      -- capitals and underscores (ROUND_TRIP) are wider than average text
+      local wide = select(2, s.text:gsub("[%u_]", ""))
+      local w = (#s.text - wide) * TEXT_CW + wide * 7.2
+      total = total + w
+      longest = math.max(longest, w)
     end,
     Space = function()
       total = total + TEXT_CW * 0.5
