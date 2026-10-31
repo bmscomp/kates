@@ -44,6 +44,8 @@ book:
         text: "Star Kates on GitHub"
   page-footer:
     left: "Kates — The Definitive Guide"
+    # The book's license, as on the PDF's copyright page
+    center: "Licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) · [Report an error](https://github.com/bmscomp/kates/issues)"
     right:
       - icon: github
         href: https://github.com/bmscomp/kates
@@ -119,6 +121,9 @@ book:
     - appendix-compliance-language.md
     # Unnumbered, after the appendices: the list of works cited.
     - references.md
+    # Unnumbered, last: the index, generated from index-terms.txt by
+    # scripts/gen-book-index.py (the PDF prints LaTeX's own index there).
+    - appendix-index.md
 
 # Citations. `[@key]` in a page cites the entry `key` in references.bib, and
 # renders as its number, linked to the References page. Quarto runs citeproc
@@ -183,6 +188,12 @@ format:
     include-in-header: theme/pdf-header.tex
     filters:
       - theme/pdf-output.lua
+      # Column widths first: it measures the Code inlines that
+      # pdf-inline-code.lua turns into LaTeX.
+      - theme/pdf-tables.lua
+      - theme/pdf-inline-code.lua
+      # The back-of-book index, from index-terms.txt (see appendix-index.md)
+      - theme/index-entries.lua
       - theme/pdf-cover.lua
       - path: theme/citations.lua
         at: post-render

@@ -7,6 +7,7 @@ on:
       - "docs/book/**"
       - "scripts/prepare-book-render.sh"
       - "scripts/check-book-fragments.py"
+      - "scripts/check-book-pdf-log.py"
       - ".github/workflows/book.yml"
   push:
     branches: [main]
@@ -14,6 +15,7 @@ on:
       - "docs/book/**"
       - "scripts/prepare-book-render.sh"
       - "scripts/check-book-fragments.py"
+      - "scripts/check-book-pdf-log.py"
       - ".github/workflows/book.yml"
   # The PDF half of the build job runs on everything except a pull request
   # (a pull request gets the pdf job instead), so a manual run is how the
@@ -85,7 +87,7 @@ jobs:
           # current, the update does nothing. Quarto installs the LaTeX packages
           # a render lacks with this tlmgr too.
           scripts/retry.sh 3 "${tlmgr[0]}" update --self
-          scripts/retry.sh 3 "${tlmgr[0]}" install ebgaramond
+          scripts/retry.sh 3 "${tlmgr[0]}" install ebgaramond fvextra makeindex
           scripts/retry.sh 3 quarto install chromium --no-prompt
 
       - name: Note a degraded PDF build
@@ -186,7 +188,7 @@ jobs:
           # why tlmgr is found this way, and why it updates itself first.
           tlmgr=("$HOME"/.TinyTeX/bin/*/tlmgr)
           scripts/retry.sh 3 "${tlmgr[0]}" update --self
-          scripts/retry.sh 3 "${tlmgr[0]}" install ebgaramond
+          scripts/retry.sh 3 "${tlmgr[0]}" install ebgaramond fvextra makeindex
           scripts/retry.sh 3 quarto install chromium --no-prompt
 
       - name: Prepare sources for Quarto
@@ -203,43 +205,15 @@ jobs:
         timeout-minutes: 30
         run: scripts/retry.sh 2 timeout -k 1m 12m quarto render docs/book --to pdf -M keep-tex:true -M latex-clean:false
 
-      - name: Check for dropped characters and overfull diagrams
-        run: |
-          python3 - <<'PY'
-          import pathlib, re, sys
-
-          book = pathlib.Path("docs/book")
-          log = (book / "index.log").read_text(encoding="utf-8", errors="replace").splitlines()
-          tex = (book / "kates-definitive-guide.tex").read_text(encoding="utf-8").splitlines()
-          bad = False
-
-          # LaTeX leaves out a character none of the fonts has, and says so
-          # only in the log.
-          missing = {}
-          for line in log:
-              m = re.search(r"Missing character: There is no (.+?) \((U\+[0-9A-F]+)\)", line)
-              if m:
-                  missing[m.group(2)] = m.group(1)
-          for code, char in sorted(missing.items()):
-              print(f"::error::The PDF leaves out {char} ({code}): none of its fonts has it")
-              bad = True
-
-          # A diagram wider than the text overflows its line. The log gives the
-          # paragraph's line numbers in the .tex, which show whether it was an
-          # image; a point or less over is rounding, not a cut-off diagram.
-          for line in log:
-              m = re.match(r"Overfull \\hbox \(([\d.]+)pt too wide\) in paragraph at lines (\d+)--(\d+)", line)
-              if not m or float(m.group(1)) <= 1:
-                  continue
-              for src in tex[int(m.group(2)) - 1:int(m.group(3))]:
-                  g = re.search(r"\\includegraphics(?:\[[^]]*\])?\{([^}]+)\}", src)
-                  if g:
-                      print(f"::error::{g.group(1)} runs {m.group(1)}pt past the right margin")
-                      bad = True
-
-          print("PDF check: " + ("failed" if bad else "no missing characters, no overfull diagrams"))
-          sys.exit(1 if bad else 0)
-          PY
+      # LaTeX leaves out a character none of the fonts has and sets a line it
+      # cannot break past the margin, and says so only in its log. The check
+      # reads the log with the kept .tex, so each overfull line is named by
+      # what it is (code, table, prose, image) and the page it is on.
+      - name: Check for dropped characters and lines past the margin
+        run: >-
+          python3 scripts/check-book-pdf-log.py docs/book/index.log
+          docs/book/kates-definitive-guide.tex
+          --max-code 3 --max-table 3 --max-prose 3 --max-image 1 --list
 
       - name: Upload the PDF and its LaTeX log
         if: always()

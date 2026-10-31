@@ -57,6 +57,14 @@ for (const f of process.argv.slice(2)) {
     total++;
     // The line the block starts on, so a failure is navigable.
     const line = text.slice(0, m.index).split('\n').length;
+    // A label's "\n" parses, but Mermaid prints it as the two characters;
+    // <br/> is the line break.
+    const escaped = m[1].split('\n').findIndex((l) => !l.trim().startsWith('%%') && l.includes('\\n'));
+    if (escaped >= 0) {
+      bad++;
+      console.log(`  FAIL  ${f}:${line + 1 + escaped}  a label holds a literal \\n, which Mermaid prints as text: use <br/>`);
+      continue;
+    }
     try {
       await mermaid.parse(m[1]);
       if (!quiet) console.log(`  ok    ${f}:${line}`);
