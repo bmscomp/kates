@@ -83,4 +83,19 @@ These are yours to make before Pass 1 starts:
 
 ## Tooling
 
-`humanize-writing` is installed and loads with the Skill tool; Pass 3 runs it one section at a time, with this plan's rules overriding its em-dash and heading rules. `doc-coauthoring` suits Pass 1, where the author drafts with an assistant. `scripts/book_voice.py` stays a prompt for rereading, not a CI gate: a count can't tell a needed contrast from a reflex.
+Three installed skills load with the Skill tool, each for its own pass:
+
+- **`humanize-writing`** runs in Pass 3, one section at a time. This plan's rules override its em-dash and heading rules.
+- **`doc-coauthoring`** suits Pass 1, where the author drafts the Preface and Part pages with an assistant.
+- **`engineering:documentation`** covers the chapters a reader uses rather than reads, where plain structure matters more than voice. It checks each against its document type:
+
+| Chapter | Its type | What the skill checks |
+|---|---|---|
+| CLI Reference, REST API Reference, gRPC API Reference | API documentation | Every endpoint or command has a request and a response example; authentication, error codes, rate limits and pagination each have one home |
+| Upgrade Playbook, Recipes & Patterns, Installing Kafka, Deploying the Strimzi Operator, Troubleshooting Index | Runbook | When to use it, prerequisites and access, numbered steps, verify, roll back, and where to escalate |
+| Architecture & Design, Kafka Deployment Engineering | Architecture doc | Context and goals, the design with one diagram, the decisions and their trade-offs, the data flow |
+| Introduction's Quick Start | Onboarding | First success in under five minutes on a lab that `make all` built |
+
+  Its principles back this plan's: show, don't tell (Pass 2), lead with the most useful fact, and link rather than repeat (the Concept Registry already enforces that). It runs as its own pass on those chapters, before Pass 3, so a structural change and a voice change never share a diff.
+
+`scripts/book_voice.py` stays a prompt for rereading, not a CI gate: a count can't tell a needed contrast from a reflex.
