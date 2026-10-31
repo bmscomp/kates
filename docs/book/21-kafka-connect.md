@@ -6,7 +6,7 @@ A row changes in PostgreSQL. A search index, a cache and a warehouse have to kno
 Kafka Connect concepts and building CDC pipelines: architecture, the `KafkaConnect` resource, connectors, Debezium, transforms, schema management and delivery semantics. Day-2 concerns (scaling, tuning, security rotation, upgrades, disaster recovery, troubleshooting) live in [Operating Kafka Connect](operating-kafka-connect.md).
 :::
 
-Whether you're wiring a database into Kafka for the first time or reviewing an existing pipeline, after this chapter you can:
+By the end of this chapter you can:
 
 - Deploy Connect as its own Helm release with `kates deploy --topology isolated --with-kafka-connect` and explain why it lives apart from the broker chart
 - Build a PostgreSQL CDC pipeline with Debezium — [replication slot](appendix-a-glossary.md#gl-replication-slot), snapshot mode, and the internal topics that hold Connect's state
@@ -15,7 +15,7 @@ Whether you're wiring a database into Kafka for the first time or reviewing an e
 
 ## Architecture Overview
 
-Kafka Connect runs as a distributed cluster of [worker](appendix-a-glossary.md#gl-connect-worker) processes that execute [connectors](appendix-a-glossary.md#gl-connector). Each connector is a plugin that moves data between Kafka and an external system (database, object store, search index). Kates deploys Connect as a separate Helm chart, decoupled from the Kafka broker chart, so you scale, upgrade and manage it on its own.
+Kafka Connect runs as a distributed cluster of [worker](appendix-a-glossary.md#gl-connect-worker) processes that execute [connectors](appendix-a-glossary.md#gl-connector). Each connector is a plugin that moves data between Kafka and an external system (database, object store, search index). Kates deploys Connect as a separate Helm chart, decoupled from the Kafka broker chart, so you scale and upgrade it on its own.
 
 The figure shows the one fact the rest of the chapter builds on: the workers hold no state of their own. Look at where the arrows from each worker go:
 
@@ -48,7 +48,7 @@ graph LR
 
 ### Why a Separate Chart?
 
-The chart is its own release rather than part of the broker chart, and the table compares the two choices:
+The table compares running Connect inside the broker chart with running it as its own release:
 
 | Aspect | Embedded in kafka-cluster | Standalone connect-cluster |
 |--------|:---:|:---:|
@@ -104,7 +104,7 @@ The `connect-cluster` chart produces the Strimzi `KafkaConnect` and [`KafkaConne
 
 ### Deploying with the Kates CLI
 
-The recommended way to deploy Kafka Connect is through the Kates CLI, which handles environment detection, overlay selection, and credential provisioning automatically:
+Deploy Kafka Connect with the Kates CLI. It detects the environment, picks the overlay and provisions the credentials:
 
 ```bash
 # Deploy the full stack including Kafka Connect
@@ -115,11 +115,11 @@ kates deploy --topology isolated --with-kafka-connect
 kates deploy --topology isolated --with-kafka-connect --ha=false
 ```
 
-The CLI deploys the `connect-cluster` chart as a separate Helm release (into the `connect` namespace by default under the isolated topology), automatically applying the Kind overlay on Kind clusters and provisioning the PostgreSQL credentials secret.
+The CLI deploys the `connect-cluster` chart as a separate Helm release (into the `connect` namespace by default under the isolated topology). On Kind clusters it applies the Kind overlay, and it provisions the PostgreSQL credentials secret.
 
 #### Installing with Helm Directly
 
-For CI pipelines or when fine-grained control is needed:
+Use Helm directly in a CI pipeline, or when you want to set the values yourself:
 
 ```bash
 # Basic deployment (same namespace as Kafka)
@@ -219,7 +219,7 @@ The `kates-connect` KafkaUser can be managed by the chart itself: setting `kafka
 
 `kafkaUser.authorization.mode: custom` takes `kafkaUser.acls` verbatim. When Connect runs in a different namespace than Kafka, `secretSync` copies the user's Secret — and, with TLS, the cluster CA — into the Connect namespace with a post-install/upgrade Job. `secretSync.watch` adds a CronJob that follows certificate and password rotation, and `secretSync.method: reflector` annotates the user's Secret for kubernetes-reflector instead. This requires the Strimzi User Operator; the ACLs take effect when the Kafka cluster has authorization enabled.
 
-The `krafter` cluster's platform profile also provisions `kates-connect`, so to let this chart own that user, adopt the existing object rather than recreate it: a new `KafkaUser` gets new credentials. The release notes print the `kubectl annotate` and `kubectl label` commands when the user belongs to another release.
+The `krafter` cluster's platform profile also provisions `kates-connect`, so to let this chart own that user, adopt the existing object. Recreating it would give the user new credentials. The release notes print the `kubectl annotate` and `kubectl label` commands when the user belongs to another release.
 
 ## Connector Lifecycle
 
@@ -272,7 +272,7 @@ The table adds what each state does to the connector's offsets and tasks, and wh
 | `failed` | Preserved | No | Error — awaiting auto-restart or manual fix |
 
 ::: {.callout-tip title="Try it: What happens to a connector's offsets when you pause and resume it?"}
-On the CDC pipeline from [Replicate a Row End to End](#replicate-a-row-end-to-end), run `kates kafka connect pause debezium-postgres-source-working-example`, insert a row, and check `kates kafka connect tasks` for the connector. Then `resume` it and look for the row in the replica table. If it arrives, the pause preserved the offsets rather than skipping past the insert.
+On the CDC pipeline from [Replicate a Row End to End](#replicate-a-row-end-to-end), run `kates kafka connect pause debezium-postgres-source-working-example`, insert a row, and check `kates kafka connect tasks` for the connector. Then `resume` it and look for the row in the replica table. If it arrives, the pause kept the offsets and the connector picked up the insert on resume.
 :::
 
 ### Auto-Restart
@@ -315,7 +315,7 @@ The pre-built Connect image bundles the plugins below. Its tag names the Debeziu
 
 ### Extending the Image with Additional Plugins
 
-While the pre-built image contains the most common CDC connectors, you may need additional plugins (Elasticsearch Sink or Snowflake Sink, for example). The chart offers three ways to get them onto the workers:
+The pre-built image covers the connectors in the table above. For any other plugin (Elasticsearch Sink or Snowflake Sink, for example), the chart offers three ways to get it onto the workers:
 
 | Way | How | When |
 |-----|-----|------|
@@ -497,7 +497,7 @@ config.providers: file,dir,secrets
 config.providers.secrets.class: io.strimzi.kafka.KubernetesSecretConfigProvider
 ```
 
-Connectors reference Kubernetes Secrets directly with the `${secrets:<namespace>/<secret-name>:<key>}` syntax — no volume mounts required. The workers resolve those references as the `<release>-connect` ServiceAccount that Strimzi creates. The chart's `rbac-secrets.yaml` reads every connector and test connector config in the values and grants that account `get` on exactly the Secrets they reference, with one Role per namespace. A reference without a namespace fails the render.
+Connectors reference Kubernetes Secrets directly with the `${secrets:<namespace>/<secret-name>:<key>}` syntax, and no volume mount is needed. The workers resolve those references as the `<release>-connect` ServiceAccount that Strimzi creates. The chart's `rbac-secrets.yaml` reads every connector and test connector config in the values and grants that account `get` on exactly the Secrets they reference, with one Role per namespace. A reference without a namespace fails the render.
 
 Connectors applied outside the chart — by hand, or the CDC connectors `kates deploy` applies next to the release — need their Secrets listed in `rbac.secretNames`, as a bare name (this namespace) or `namespace/name`. The kind and generic overlays list `connect-pg-credentials` and `kates-connect`, which `kates deploy`'s connectors read. For example:
 
@@ -510,7 +510,7 @@ rbac:
 
 ## Single Message Transforms (SMTs)
 
-SMTs are transformations applied to each record inside the connector task, so no separate stream-processing layer is needed.
+An SMT changes one record at a time inside the connector task, so you need no separate stream-processing layer.
 
 ### Transform Pipeline
 
@@ -526,7 +526,7 @@ graph LR
     RT -->|"flat row"| T["events.orders"]
 ```
 
-Transforms are chained in order — each receives the output of the previous one.
+Each transform receives the output of the previous one.
 
 ### Common Transforms
 
@@ -572,7 +572,7 @@ This chain:
 
 ## Schema Registry Integration
 
-When Apicurio Registry is deployed alongside Kafka, Connect can serialize records using Avro, JSON Schema, or Protobuf instead of plain JSON — enabling schema evolution and type safety.
+When Apicurio Registry is deployed alongside Kafka, Connect can serialize records using Avro, JSON Schema, or Protobuf instead of plain JSON, and the registry can check each schema change against a compatibility rule.
 
 ### Data Flow with Schema Registry
 
@@ -658,7 +658,7 @@ Changing the converter from `JsonConverter` to `AvroConverter` on an existing co
 
 ## Exactly-Once Semantics
 
-Kafka Connect supports exactly-once source (EOS) delivery — guaranteeing that each source record is written to Kafka exactly once, even if a worker crashes mid-batch [@kip618].
+With exactly-once source (EOS) delivery, Kafka Connect writes each source record to Kafka exactly once, even if a worker crashes mid-batch [@kip618].
 
 ### How EOS Works
 
@@ -681,11 +681,11 @@ sequenceDiagram
     Note over W,K: Atomic: both data + offsets committed together
 ```
 
-Without EOS, Connect commits offsets and data separately — a crash between the two steps causes duplicates on restart. With EOS enabled, the worker wraps both into a single Kafka transaction.
+Without EOS, Connect commits offsets and data separately, so a crash between the two steps causes duplicates on restart. With EOS enabled, the worker wraps both into a single Kafka transaction.
 
 ### Turning EOS On for the Group
 
-The chart enables EOS by default. It is a group-wide switch rather than an `extraConfig` line, because every worker in the group must agree and a chart-managed `KafkaUser` needs the matching transactional-ID grants:
+The chart enables EOS by default. It is a group-wide switch, set under `exactlyOnce`, because every worker in the group must agree and a chart-managed `KafkaUser` needs the matching transactional-ID grants:
 
 ```yaml
 exactlyOnce:
@@ -720,7 +720,7 @@ EOS requires a `min.insync.replicas` of at least 2 on the data topics and `acks=
 | A source connector near the brokers' write capacity | Transactions add a commit per batch; measure the connector's rate with EOS on and off before you decide |
 | Non-critical data (metrics, logs) | Disable (`exactlyOnce.enabled: false`) for better throughput; at-least-once is acceptable |
 
-Turning EOS off for one of these cases turns it off for every source connector in the group, so decide for the group, not for one connector.
+Turning EOS off for one of these cases turns it off for every source connector in the group, so make the decision for the whole group.
 
 ## Dead Letter Queue (DLQ)
 
@@ -822,7 +822,7 @@ Delete the outbox row in the same transaction, or right after it: the table stay
 
 ### Pattern 2: One Topic, Several Views
 
-One CDC topic holds every change to a table, and several sink connectors can each read it into a different store:
+One CDC topic holds every change to a table, and each sink connector can read it into a different store:
 
 ```mermaid
 %%| label: fig-kc-event-sourcing
@@ -863,7 +863,7 @@ The copy is eventually consistent: the sink always lags the source by the time a
 
 ## Pre-Deploy Validation
 
-The chart validates connector configurations while Helm renders it (`_resolve.tpl` and `_validate.tpl`), before anything reaches the Kubernetes API or the Strimzi operator. A mistake fails `helm template`, `helm install` or `helm upgrade` itself, naming the connector and the setting — there is no hook Pod to wait for or read logs from.
+The chart validates connector configurations while Helm renders it (`_resolve.tpl` and `_validate.tpl`), before anything reaches the Kubernetes API or the Strimzi operator. A mistake fails `helm template`, `helm install` or `helm upgrade` itself, naming the connector and the setting. There is no hook Pod to wait for or read logs from.
 
 ### The Checks, by Connector Class
 
@@ -907,11 +907,9 @@ needs config.topic.prefix
 
 The output is one line, wrapped here at the spaces.
 
-This catches misconfigurations at `helm upgrade` time rather than at runtime, preventing connector failures that could take minutes to surface.
-
 ## Environment Overlays
 
-The Kates CLI applies `values-kind.yaml` on Kind clusters and `values-generic.yaml` on other clusters. Both turn tracing off and list the Secrets the CLI's own connectors read in `rbac.secretNames`. On every cluster `kates deploy` also sets `replicas` from `--ha`, `kafka.namespace`, `kafka.bootstrapServers` and `schemaRegistry.enabled`, and it sets the database egress rule itself, to its `--db-ns` namespace (`database` by default). With the JSON converters both overlays keep, `schemaRegistry.enabled` opens egress to the registry and renders no converter URL — only an Apicurio converter gets one (see [Schema Registry Integration](#schema-registry-integration)). A `kates deploy` install also leaves a worker-level `schema.registry.url` in `extraConfig`; no converter in the chart's defaults reads it. On both overlays, the PodMonitor and alerts render only where the `monitoring.coreos.com/v1` API exists (the CLI also turns them off when the Prometheus CRDs are missing). `values-dev.yaml` and `values-prod.yaml` are for direct Helm use. Cells marked *(base)* are inherited from `values.yaml` rather than set by the overlay:
+The Kates CLI applies `values-kind.yaml` on Kind clusters and `values-generic.yaml` on other clusters. Both turn tracing off and list the Secrets the CLI's own connectors read in `rbac.secretNames`. On every cluster `kates deploy` also sets `replicas` from `--ha`, `kafka.namespace`, `kafka.bootstrapServers` and `schemaRegistry.enabled`, and it sets the database egress rule itself, to its `--db-ns` namespace (`database` by default). With the JSON converters both overlays keep, `schemaRegistry.enabled` opens egress to the registry and renders no converter URL — only an Apicurio converter gets one (see [Schema Registry Integration](#schema-registry-integration)). A `kates deploy` install also leaves a worker-level `schema.registry.url` in `extraConfig`; no converter in the chart's defaults reads it. On both overlays, the PodMonitor and alerts render only where the `monitoring.coreos.com/v1` API exists (the CLI also turns them off when the Prometheus CRDs are missing). `values-dev.yaml` and `values-prod.yaml` are for direct Helm use. Cells marked *(base)* are inherited from `values.yaml`; the overlay does not set them:
 
 | Setting | Kind | Generic | Dev | Prod |
 |---------|:----:|:----:|:---:|:----:|
@@ -939,4 +937,4 @@ Every overlay keeps the base PodMonitor and takes its dashboard from `charts/mon
 - Single Message Transforms reshape records inside the task; unwrapping the Debezium envelope is the first one to add.
 - Exactly-once source support commits records and offsets together; a tolerant sink needs a dead letter queue or it drops bad records silently.
 
-That pipeline now has to survive production — [Operating Kafka Connect](operating-kafka-connect.md) covers the day-2 half: scaling, tuning, credential rotation, upgrades, disaster recovery, and troubleshooting.
+That pipeline now has to survive production. [Operating Kafka Connect](operating-kafka-connect.md) covers the day-2 half: scaling, tuning, credential rotation, upgrades, disaster recovery, and troubleshooting.

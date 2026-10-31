@@ -27,7 +27,7 @@ Two facts follow from this model and shape the rest of the chapter. The operator
 
 `charts/strimzi-operator` is a thin wrapper. It declares the upstream `strimzi-kafka-operator` chart as a subchart dependency and vendors none of its templates. It adds what the upstream chart does not provide: a CRD-upgrade hook, a strict values schema, [Helm tests](appendix-a-glossary.md#gl-helm-test), the operator's NetworkPolicy, its PodMonitor and alerts (operator down, failing reconciliations, certificate expiry), and the Strimzi Drain Cleaner. It also turns on the operator's own Grafana dashboards, and pins the platform's operator defaults as values.
 
-The release is small, and its shape is the single most important thing to understand about it:
+The release is small, and most of it is cluster-scoped:
 
 | Scope | Resources |
 |-------|-----------|
@@ -35,7 +35,7 @@ The release is small, and its shape is the single most important thing to unders
 | Namespaced | `ServiceAccount`, `ConfigMap`, and `Deployment` named `strimzi-cluster-operator`, plus the `RoleBinding` `strimzi-cluster-operator-leader-election` |
 | Namespaced, added by this chart | `NetworkPolicy` `strimzi-operator`, the nine dashboard `ConfigMap`s (`strimzi-kafka`, `strimzi-kraft`, `strimzi-cruise-control`, `strimzi-kafka-exporter`, `strimzi-kafka-connect`, `strimzi-kafka-mirror-maker-2`, `strimzi-kafka-bridge`, `strimzi-kafka-oauth`, `strimzi-operators`), and, where the `monitoring.coreos.com/v1` API exists, the `PodMonitor` and `PrometheusRule`. The drain cleaner adds its own set when enabled. |
 
-Thirteen of the operator's own seventeen resources are cluster-scoped, and every name in the first two rows is hardcoded upstream: none of them derive from the Helm release name. The dashboard ConfigMap names are fixed too. That makes this chart a cluster singleton: two releases cannot coexist, cannot be distinguished, and cannot arbitrate between themselves. There is no parallel install-then-cutover, and no blue-green. Every procedure in this chapter follows from that constraint. The one exception is the deliberately reduced shape in `values-namespace-scope.yaml`, which claims none of the fixed names; [A Namespace-Scoped Operator](#a-namespace-scoped-operator) installs it.
+Thirteen of the operator's own seventeen resources are cluster-scoped, and every name in the first two rows is hardcoded upstream: none of them derive from the Helm release name. The dashboard ConfigMap names are fixed too. That makes this chart a cluster singleton: two releases cannot coexist, because their resources would share the same names. There is no parallel install-then-cutover, and no blue-green. Every procedure in this chapter follows from that constraint. The one exception is the deliberately reduced shape in `values-namespace-scope.yaml`, which claims none of the fixed names; [A Namespace-Scoped Operator](#a-namespace-scoped-operator) installs it.
 
 ## Why a Separate Release
 
@@ -82,17 +82,17 @@ Read that carefully: *installed if not already present*. There is no update path
 | `helm uninstall` | Never deleted: Helm does not track them |
 | `helm get manifest` | They do not appear: Helm does not know they exist |
 
-Left alone, the CRDs freeze at whatever version was first installed while the operator moves on. That failure is silent in the worst way: the API server accepts a `Kafka` resource carrying fields the frozen schema does not know about, then prunes them. No error, no event, no rejection: the field simply vanishes between `kubectl apply` and etcd.
+Left alone, the CRDs freeze at whatever version was first installed while the operator moves on. That failure is silent in the worst way: the API server accepts a `Kafka` resource carrying fields the frozen schema does not know about, then prunes them. No error, no event, no rejection: the field vanishes between `kubectl apply` and etcd.
 
-The chart closes the gap with a `pre-install`/`pre-upgrade` hook Job in `charts/strimzi-operator/templates/crd-upgrade.yaml`. It runs before the operator Deployment is patched, so the schema is current before the controller that depends on it starts. The Job fetches the pinned CRD bundle and validates it three ways before mutating anything. The download must succeed (`curl -f`, so an HTTP error is an error rather than a 404 body written to disk). The bundle must define each of the ten CRDs the charts render resources for; an upstream bundle may ship more. And a `kubectl apply --server-side --dry-run=server` must pass. Only then does it apply for real, with `--force-conflicts`: Helm 4 applies server-side by default, so its field manager co-owns these CRDs and would otherwise conflict.
+The chart closes the gap with a `pre-install`/`pre-upgrade` hook Job in `charts/strimzi-operator/templates/crd-upgrade.yaml`. It runs before the operator Deployment is patched, so the schema is current before the controller that depends on it starts. The Job fetches the pinned CRD bundle and validates it three ways before mutating anything. The download must succeed (`curl -f`, so an HTTP error stops the Job before a 404 body reaches the disk). The bundle must define each of the ten CRDs the charts render resources for; an upstream bundle may ship more. And a `kubectl apply --server-side --dry-run=server` must pass. Only then does it apply for real, with `--force-conflicts`: Helm 4 applies server-side by default, so its field manager co-owns these CRDs and would otherwise conflict.
 
-The hook needs egress to the CRD bundle URL on every install and upgrade, not just the first. Because it is a `pre-upgrade` gate, an unreachable URL aborts the upgrade and leaves the release in `pending-upgrade`. On restricted-egress clusters, mirror the bundle and point `crdUpgrade.url` at it; `charts/strimzi-operator/values-prod.yaml` documents the pattern. `kates deploy` doesn't use this hook: it applies the CRDs from the chart it downloaded, as [Upgrading the Operator](#upgrading-the-operator) explains.
+The hook needs egress to the CRD bundle URL on every install and every upgrade. Because it is a `pre-upgrade` gate, an unreachable URL aborts the upgrade and leaves the release in `pending-upgrade`. On restricted-egress clusters, mirror the bundle and point `crdUpgrade.url` at it; `charts/strimzi-operator/values-prod.yaml` documents the pattern. `kates deploy` doesn't use this hook: it applies the CRDs from the chart it downloaded, as [Upgrading the Operator](#upgrading-the-operator) explains.
 
 ### Why the CRDs Stay in `crds/`
 
 Moving them into `templates/` would look tidier and would be a serious mistake, for two independent reasons.
 
-The first is adoption: the CRDs on a running cluster carry no Helm ownership metadata, so templating them makes the very first upgrade fail with an ownership error.
+The first is adoption: the CRDs on a running cluster carry no Helm ownership metadata, so templating them makes the first upgrade fail with an ownership error.
 
 The second is the one that matters:
 
@@ -155,7 +155,7 @@ The watch scope should print `*`, all ten CRDs should report `True`, and the ima
 
 ### Environment Overlays
 
-Five overlays ship with the chart. All of them are overrides only: they layer on top of the defaults rather than restating them, and one of them overrides nothing at all.
+Five overlays ship with the chart. All of them are overrides only. They layer on top of the defaults and restate none of them, and one of them overrides nothing at all.
 
 | Overlay | What it changes | When to use it |
 |---------|-----------------|----------------|
@@ -213,7 +213,7 @@ strimzi-operator:
 - at '': additional properties 'watchAnyNamespace' not allowed
 ```
 
-That is Helm 4's wording. Helm 3 uses a different JSON Schema library and reports the same rejection as `(root): Additional property watchAnyNamespace is not allowed`, so match on the property name rather than the sentence.
+That is Helm 4's wording. Helm 3 uses a different JSON Schema library and reports the same rejection as `(root): Additional property watchAnyNamespace is not allowed`, so match on the property name, which both versions print.
 
 The keys you are most likely to set:
 
@@ -233,7 +233,7 @@ The drain cleaner takes its certificate from cert-manager (`drainCleaner.tls.cer
 
 ## Adopting an Operator Installed from the Upstream Chart {#migrating-from-the-ad-hoc-install}
 
-If Strimzi already runs from `oci://quay.io/strimzi-helm/strimzi-kafka-operator`, installed under the release name `strimzi-operator` in the `strimzi-operator` namespace, this chart adopts that release in place. The release name, the namespace and every resource name are the same in both charts, so Helm patches fields rather than recreating objects. Nothing is deleted.
+If Strimzi already runs from `oci://quay.io/strimzi-helm/strimzi-kafka-operator`, installed under the release name `strimzi-operator` in the `strimzi-operator` namespace, this chart adopts that release in place. The release name, the namespace and every resource name are the same in both charts, so Helm patches fields in place. Nothing is recreated, and nothing is deleted.
 
 ### Step 0 — Pre-Flight
 
@@ -311,9 +311,9 @@ kubectl exec -n kafka "${BROKER}" -- /opt/kafka/bin/kafka-topics.sh \
 
 The first check must print `OK`; only then does silence from the other three mean something. Any topic with a replication factor of 1 goes offline the moment its broker restarts, and an under-replicated partition has already lost a replica. A partition at `min.insync.replicas` rejects `acks=all` writes as soon as one more replica leaves, so the roller refuses to restart its broker. Confirm too that every broker pool has more than one replica or a replication factor that spans pools. `kates cluster check` counts under-replicated and offline partitions, but it reports no replication factors and exits 0 whatever it finds, so it does not replace this gate.
 
-Run the gate against every Kafka cluster the operator watches, not only [`krafter`](appendix-a-glossary.md#gl-krafter), the book's Kafka cluster under test: all of them roll, and `kubectl get kafka -A` lists them. For each other cluster, substitute its namespace and its name in the `strimzi.io/cluster` label. Use a KafkaUser of that cluster allowed `Describe` and `DescribeConfigs` on every topic, with the security settings its listener expects, since `kates-backend` exists only where the platform profile created it.
+Run the gate against every Kafka cluster the operator watches, because all of them roll. [`krafter`](appendix-a-glossary.md#gl-krafter), the book's Kafka cluster under test, is one; `kubectl get kafka -A` lists the rest. For each other cluster, substitute its namespace and its name in the `strimzi.io/cluster` label. Use a KafkaUser of that cluster allowed `Describe` and `DescribeConfigs` on every topic, with the security settings its listener expects, since `kates-backend` exists only where the platform profile created it.
 
-The third gate is the condition gate. Check conditions by name rather than eyeballing for green, on every Kafka cluster:
+The third gate is the condition gate. Read each condition by name, on every Kafka cluster:
 
 ```bash
 COND='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}'
@@ -374,7 +374,7 @@ helm template strimzi-operator oci://ghcr.io/bmscomp/charts/strimzi-operator \
   | grep -A1 'name: STRIMZI_NAMESPACE'
 ```
 
-The operand image map is expected to change. This is the version bump itself, and the reason Step 3 is a three-part procedure rather than one command:
+The operand image map is expected to change. This is the version bump itself, and the reason Step 3 has three parts:
 
 ```bash
 # Live
@@ -548,7 +548,7 @@ Point every pipeline that installed the operator from the upstream chart at this
 It then installs the wrapper chart with the hook turned off (`crdUpgrade.enabled=false`) and `--skip-crds`. The CLI applies the CRDs itself, read out of the same operator chart it installs, and waits for them to be Established. The CRDs and the operator therefore come from one chart, and the hook Job needs no egress on this path. `--operator-scope namespace` installs the operator watching only the primary's namespaces instead of every namespace.
 
 ::: {.callout-warning title="kates deploy re-applies the operator with its own overlay"}
-Every `kates deploy` run re-applies the operator release with `--reset-values` and the Kind or generic overlay, not only a run with `--strimzi-version`, so an operator installed with `values-prod.yaml` loses that overlay's drain cleaner, operator NetworkPolicy and PodDisruptionBudgets. The CLI checks the version window but runs none of the other gates and pauses nothing, so everything the upgrade changes rolls as soon as you confirm. Upgrade a production operator by hand with the procedure above, and run `kates deploy --with-strimzi=false` on that cluster, which leaves the operator release alone.
+Every `kates deploy` run, with or without `--strimzi-version`, re-applies the operator release with `--reset-values` and the Kind or generic overlay. An operator installed with `values-prod.yaml` therefore loses that overlay's drain cleaner, operator NetworkPolicy and PodDisruptionBudgets. The CLI checks the version window but runs none of the other gates and pauses nothing, so everything the upgrade changes rolls as soon as you confirm. Upgrade a production operator by hand with the procedure above, and run `kates deploy --with-strimzi=false` on that cluster, which leaves the operator release alone.
 :::
 
 The repository's deploy scripts re-apply the operator the same way, with no overlay at all.
@@ -639,7 +639,7 @@ Each heading below names the error text Helm prints, or the state you find the r
 
 **Symptom:** a `--set strimzi-kafka-operator.leaderElection.enabled=false` is rejected with `at '/strimzi-kafka-operator/leaderElection': additional properties 'enabled' not allowed`.
 
-**Cause:** the upstream key is `enable`, not `enabled`. Helm silently ignores a misspelt key, so the schema refuses it rather than leave leader election on behind your back.
+**Cause:** the upstream key is `enable`, not `enabled`. Helm silently ignores a misspelt key, which would leave leader election on behind your back, so the schema refuses it.
 
 **Fix:** use `leaderElection.enable`.
 

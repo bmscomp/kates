@@ -1,6 +1,6 @@
 # Scenario Files & SLA Gates
 
-The payments platform moves onto `krafter`, the Kafka cluster under test, only if its P99 target of 100 ms holds on every build, not just on the afternoon you measured it. A [scenario file](appendix-a-glossary.md#gl-scenario-file) turns that target into a gate a pipeline can fail. You describe one or more [test runs](appendix-a-glossary.md#gl-test-run) in YAML or JSON, and `kates test apply` runs them and checks each against its [SLA](appendix-a-glossary.md#gl-sla) thresholds. Kates calls those thresholds SLAs, though they work like [SLOs](appendix-a-glossary.md#gl-slo): targets you set, not agreements with anyone [@beyer2016site].
+The payments platform moves onto `krafter`, the Kafka cluster under test, only if its P99 target of 100 ms keeps holding on every build after the afternoon you measured it. A [scenario file](appendix-a-glossary.md#gl-scenario-file) turns that target into a gate a pipeline can fail. You describe one or more [test runs](appendix-a-glossary.md#gl-test-run) in YAML or JSON, and `kates test apply` runs them and checks each against its [SLA](appendix-a-glossary.md#gl-sla) thresholds. Kates calls those thresholds SLAs, though they work like [SLOs](appendix-a-glossary.md#gl-slo): targets you set, not agreements with anyone [@beyer2016site].
 
 After this chapter, you can:
 
@@ -71,7 +71,7 @@ Each entry in `scenarios`, or the top level of a file of one scenario, takes the
 
 ## Scaffolding Scenario Files
 
-Rather than writing a scenario file from scratch, start from one of the templates built into the CLI:
+Start a scenario file from one of the templates built into the CLI:
 
 ```bash
 # List the built-in templates (bare `kates test scaffold` does the same)
@@ -248,7 +248,7 @@ These gates cap the loss, disorder and corruption an INTEGRITY run may report, a
 
 ### Choosing a Threshold
 
-A gate is useful only when a real regression breaks it and noise doesn't. Set it from a baseline of several runs plus a margin, not from the number you hope to see:
+A gate is useful only when a real regression breaks it and noise doesn't. Set it from a baseline of three runs plus a margin, not from the number you hope to see:
 
 1. Run the scenario three times, one after another, with `--wait --no-sla`, so nothing is gated yet.
 2. Take the worst P99 and the lowest throughput of the three, and the spread between the runs.
@@ -388,7 +388,7 @@ kates test apply -f regression-suite.yaml --wait
 
 A CI job has no terminal, so `--wait` shows no spinner there: it prints a plain line to stderr each time a run's status changes, and the summary table to stdout. With `-o json`, stdout carries only the summary as JSON. Its top-level `sla` object says whether the gates were `checked` and at which `scope`. Then each scenario has its `runId`, `status` and, for a scenario with gates, its own `sla` object with its `scope`, `violations` and the gates that were `notEvaluable`. A scenario that failed to submit has no `runId`, so a script reads the run IDs with `jq -r '.scenarios[] | select(.runId) | .runId'`. The exit code is the same either way.
 
-A failed run fails the pipeline whether or not its scenario has gates. A scenario that fails to submit or finishes `FAILED` shows as `FAILED` in the summary. One the CLI loses track of while waiting shows as `ERROR`, and any of them makes the command exit 1, just as a violated gate does. A run that finishes `FAILED` meets none of its gates: its first violation is `run FAILED`, with the first task error or `before any task ran`. Interrupting the command, with Ctrl-C or by cancelling the job, which sends SIGTERM, cancels the run it is waiting for, starts no further scenario, and exits 130. A scenario that finishes `DONE` passes unless one of its gates is violated, so a regression fails the pipeline only in a scenario that carries a `validate` block.
+A failed run fails the pipeline whether or not its scenario has gates. A scenario that fails to submit or finishes `FAILED` shows as `FAILED` in the summary. One the CLI loses track of while waiting shows as `ERROR`, and any of them makes the command exit 1, as a violated gate does. A run that finishes `FAILED` meets none of its gates: its first violation is `run FAILED`, with the first task error or `before any task ran`. Interrupting the command, with Ctrl-C or by cancelling the job, which sends SIGTERM, cancels the run it is waiting for, starts no further scenario, and exits 130. A scenario that finishes `DONE` passes unless one of its gates is violated, so a regression fails the pipeline only in a scenario that carries a `validate` block.
 
 For a CI test report, add `--output-junit <file>` to a `--wait` run. The file holds one test suite for the scenario file and one test case per scenario, timed in seconds, and the suite takes the apply's wall-clock time. Violated gates are a failure of type `sla_violation`, and a run that ends `FAILED` is a failure of type `run_failed`. A scenario that could not be created, or whose run the CLI lost track of, is an error. The scenario that Ctrl-C stopped, and those never started after it, are skipped. With `--no-sla` no gate fails a test case, so only runs that ended `FAILED` do.
 
@@ -487,7 +487,7 @@ scenarios:
 
 ### Too Few Records for a Percentile
 
-Kates doesn't warn you about this: a LOAD scenario with `records: 100` runs and reports a "P99" that is really its single slowest record. P99 of N records rests on the slowest N/100 of them, so give a latency gate enough records behind it. The shipped templates are a reference point: `ci-gate` uses 10,000 records, `quick-load` 50,000 and `production-load` 1,000,000.
+Kates doesn't warn you about this: a LOAD scenario with `records: 100` runs and reports a "P99" that is its single slowest record. P99 of N records rests on the slowest N/100 of them, so give a latency gate enough records behind it. The shipped templates are a reference point: `ci-gate` uses 10,000 records, `quick-load` 50,000 and `production-load` 1,000,000.
 
 ```yaml
 scenarios:
@@ -516,6 +516,6 @@ A gate on a figure the run's type doesn't measure checks nothing. The integrity 
 - Gates are checked only when the command waits for each run, and they judge the run as a whole unless you ask for task by task.
 - The exit code is the pipeline's verdict: a failed submission, a failed run or a violated gate fails it; a file error starts nothing.
 - Lint catches the silent mistakes, a misspelled key or a unit in a number, before any run starts.
-- Set a gate from a baseline of several runs plus a margin, and start from a shipped template, not a blank page.
+- Set a gate from a baseline of repeated runs plus a margin, and start from a shipped template, not a blank page.
 
 The gates in a payments scenario file assume you already know which batch size and linger the platform should run with. The Lab is where you find that out, one setting at a time, before you freeze it into the file: [Lab — Interactive Performance Tuning](10b-lab.md).

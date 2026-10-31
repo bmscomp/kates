@@ -110,7 +110,7 @@ sequenceDiagram
 
 #### CreateTest
 
-`CreateTestRequest` exposes only a subset of `TestSpec` — `type`, `num_records`, `record_size`, `partitions`, `replication_factor`, and `compression_type`; every other spec field (acks, batching, producer/consumer counts, ...) falls back to the per-test-type defaults described under [TestSpec](#testspec). The request message also declares a `labels` map, which the server ignores: set labels through the REST API.
+`CreateTestRequest` exposes only a subset of `TestSpec`: `type`, `num_records`, `record_size`, `partitions`, `replication_factor`, and `compression_type`. Every other spec field (acks, batching, producer/consumer counts, ...) falls back to the per-test-type defaults described under [TestSpec](#testspec). The request message also declares a `labels` map, which the server ignores: set labels through the REST API.
 
 ```bash
 grpcurl "${GRPC[@]}" -d '{
@@ -627,6 +627,6 @@ python -m grpc_tools.protoc -I kates/src/main/proto \
 
 Without the `M` mapping, `protoc-gen-go` and `protoc-gen-go-grpc` stop with `unable to determine Go import path for "kates.proto"`: the file sets only `java_package`, `java_multiple_files`, and `java_outer_classname`. Replace `example.com/yourmodule/katespb` with a package path inside your own Go module; the last element becomes the Go package name. `protoc` resolves the `google/protobuf/empty.proto` import from the include directory that ships with it.
 
-Generated clients carry no credentials of their own: attach the API key as `x-api-key` metadata on every call, the way `grpcurl -H` does above — in Go, for example, with `metadata.AppendToOutgoingContext(ctx, "x-api-key", key)`.
+Generated clients carry no credentials of their own: attach the API key as `x-api-key` metadata on every call, the way `grpcurl -H` does above. In Go, for example, that is `metadata.AppendToOutgoingContext(ctx, "x-api-key", key)`.
 
 That ends the reference part. The appendices come next, starting with the [Glossary](appendix-a-glossary.md): look up ISR, KRaft or consumer lag there when one of these references uses a term without explaining it.

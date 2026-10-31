@@ -210,7 +210,7 @@ Before the plan touches the cluster, the safety guard counts the brokers its ste
 
 The CLI is a standalone Go binary built with Cobra. It calls the Kates API over REST for test, report and disruption operations. For cluster provisioning and lifecycle tasks such as `kates deploy`, `kates clean` and `kates ports`, it runs `kubectl`, `helm` and `kind` instead. It keeps your contexts, [profiles](appendix-a-glossary.md#gl-profile) and [snapshots](appendix-a-glossary.md#gl-snapshot) in files in your home directory; the [Commands](10-cli-reference.md#commands) table in CLI Reference says which command uses which.
 
-Like `kubectl`, the CLI has named contexts, so one CLI can target several Kates APIs. It prints tables, badges, metric bars and [sparklines](appendix-a-glossary.md#gl-sparkline) on a terminal, and JSON with `-o json` for scripts. `kates test scaffold export <name>` writes a ready-to-use YAML [scenario file](appendix-a-glossary.md#gl-scenario-file) to the current directory, and `kates test scaffold list` browses the library, filtered with `--type LOAD` if you like. `kates test watch` follows a run as it progresses.
+Like `kubectl`, the CLI has named contexts, so one CLI can switch between Kates APIs. It prints tables, badges, metric bars and [sparklines](appendix-a-glossary.md#gl-sparkline) on a terminal, and JSON with `-o json` for scripts. `kates test scaffold export <name>` writes a ready-to-use YAML [scenario file](appendix-a-glossary.md#gl-scenario-file) to the current directory, and `kates test scaffold list` browses the library, filtered with `--type LOAD` if you like. `kates test watch` follows a run as it progresses.
 
 ## Where Results Live
 
@@ -264,6 +264,6 @@ When you cancel a run, the Kates API stops its tasks and stores it as `FAILED`, 
 - A LOAD run is one request to the Kates API, which creates the topic, runs producers and consumers and stores the result; reports are built on request.
 - Latencies are recorded to the microsecond up to 60 s; the heatmap is a coarser copy kept in memory.
 - A disruption plan is refused before anything runs if it would hit too many brokers; rollback runs only when a step fails.
-- Results live in PostgreSQL, not Kafka; heatmaps, security grades and built reports live only in the Kates API's memory.
+- Results live in PostgreSQL; heatmaps, security grades and built reports live only in the Kates API's memory.
 
-Every number the Kates API records is a number about `krafter`. [The Cluster Under Test](03-cluster.md) describes that cluster — its brokers and controllers, its zones, its replication settings — so that you can tell a Kafka limit from a Kates one.
+Every number the Kates API records is a number about `krafter`. [The Cluster Under Test](03-cluster.md) describes that cluster, from its brokers and controllers to its zones and replication settings, so that you can tell a Kafka limit from a Kates one.

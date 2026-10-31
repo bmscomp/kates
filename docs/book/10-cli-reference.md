@@ -265,7 +265,7 @@ Output:
 
 #### status
 
-Quick one-line system status — useful for scripting and prompts.
+Quick one-line system status, for scripts and shell prompts.
 
 ```bash
 kates status
@@ -300,7 +300,7 @@ kates version
 
 Aliases: `preflight`, `check`
 
-Pre-flight cluster readiness checklist. The doctor command verifies that the Kates API is reachable, Kafka is connected, the broker count meets the 3-broker minimum, [ISR](appendix-a-glossary.md#gl-isr) health is clean, topics are listable, and benchmark backends are available. It also checks whether Kyverno is installed with active policies and no workload violations (Kyverno checks warn rather than fail — it's optional but recommended). Failing checks come with remediation hints. It's the first command to run when something "feels wrong" but `kates health` reports healthy.
+Pre-flight cluster readiness checklist. The doctor command verifies that the Kates API is reachable, Kafka is connected, the broker count meets the 3-broker minimum, [ISR](appendix-a-glossary.md#gl-isr) health is clean, topics are listable, and benchmark backends are available. It also checks whether Kyverno is installed with active policies and no workload violations (Kyverno is optional but recommended, so its checks only warn). Failing checks come with remediation hints. It's the first command to run when something "feels wrong" but `kates health` reports healthy.
 
 ```bash
 kates doctor
@@ -1044,7 +1044,7 @@ See also [Observability & Monitoring](09-observability.md) for heatmap interpret
 
 ### Trend Analysis
 
-Trend analysis moves you from "this test looks fine" to "performance has been stable for weeks." The trend command reads the `DONE` runs of one test type and draws a [sparkline](appendix-a-glossary.md#gl-sparkline) of how a metric has changed; `FAILED` runs and runs still in flight are left out. It catches slow regressions that no single run shows: a [P99](appendix-a-glossary.md#gl-percentile) that creeps from 15 ms to 25 ms over a month is invisible in each report and plain in a trend.
+The trend command reads the `DONE` runs of one test type and draws a [sparkline](appendix-a-glossary.md#gl-sparkline) of how a metric has changed; `FAILED` runs and runs still in flight are left out. It catches slow regressions that no single run shows: a [P99](appendix-a-glossary.md#gl-percentile) that creeps from 15 ms to 25 ms over a month is invisible in each report and plain in a trend.
 
 #### trend
 
@@ -1494,12 +1494,12 @@ A dry run skips the Kind StorageClass bootstrap and the probes that create a nam
 
 The cluster it settles on becomes `kubectl`'s current context, so the commands you type next go there too, and so do the port-forwards `make all` starts after the deploy. When that is a change, `deploy` says so and prints the `kubectl config use-context` command that switches back. The deploy's own commands don't depend on the switch: every `kubectl` and `helm` call it makes names the cluster with `--context` or `--kube-context`. If the current context changes while it runs, for example because `kind create cluster` ran in another terminal, the rest of the deploy stays on its cluster. When the one reachable cluster is not your current context, `deploy` asks before switching, since the only cluster that answers is not necessarily one you meant. `--dry-run` never switches: it stops and asks you to switch first.
 
-When nothing is reachable, any contexts you do have configured are listed by name rather than treated as absent. A kubeconfig that has gone stale looks nothing like a machine with no cluster, and the difference decides what you do about it.
+When nothing is reachable, any contexts you do have configured are listed by name. A kubeconfig that has gone stale looks nothing like a machine with no cluster, and the difference decides what you do about it.
 
 The kind offer has three further conditions. It is skipped under `--dry-run`. It stops when a kind cluster of that name already exists but doesn't answer, since recreating it would destroy it, and when the topology config can't be read from the current directory. Each case prints the command that resolves it.
 
 ::: {.callout-note title="--yes never guesses"}
-When several clusters are reachable, or the only reachable one is not your current context, and nothing can be asked, `deploy` fails and tells you to choose with `kubectl config use-context` rather than picking one for you. Selecting a cluster silently is how a deployment lands somewhere it was never meant to go.
+When more than one cluster is reachable, or the only reachable one is not your current context, and nothing can be asked, `deploy` picks none. It fails and tells you to choose with `kubectl config use-context`. Selecting a cluster silently is how a deployment lands somewhere it was never meant to go.
 :::
 
 The same applies without a terminal. Piped or scripted runs take the flag defaults instead of opening the wizard, and any state that needs an answer becomes an error carrying the command that resolves it.
@@ -1586,7 +1586,7 @@ kates clean --yes
 
 On a cluster shared with other software, `kates clean` leaves what that software uses, and lists each thing it keeps with the reason:
 
-- the cert-manager, Kyverno and Strimzi operators, with their namespaces and CRDs, and the Litmus and Prometheus Operator CRDs, while objects of their kinds exist outside the namespaces it deletes: a Certificate, Kafka, ServiceMonitor or policy elsewhere, or a cluster-scoped one that no release of the stack installed. Deleting a CRD deletes every object of its kind on the cluster;
+- the cert-manager, Kyverno and Strimzi operators, with their namespaces and CRDs, and the Litmus and Prometheus Operator CRDs, while objects of their kinds exist outside the namespaces it deletes. Such an object is a Certificate, Kafka, ServiceMonitor or policy elsewhere, or a cluster-scoped one that no release of the stack installed. Deleting a CRD deletes every object of its kind on the cluster;
 - a namespace that also holds a Helm release the stack does not include;
 - the `kates` and `litmus` ClusterRoles and ClusterRoleBindings when a Helm release outside the stack installed them.
 
@@ -1709,7 +1709,7 @@ kates migrate status | verify | cutover | rollback | down [--name m282-431]
 kates migrate run  --from 2.8.2 [--keep] [--skip-build] [-o json]
 ```
 
-`--from` is resolved to a provider. A version the primary's operator supports becomes a Strimzi cluster. 2.x and 3.x become a `legacy-kafka` cluster: ZooKeeper below 3.3.0, the built KRaft image up to 3.6, the official image from 3.7.0. A version below 2.1.0 is refused (KIP-896). `--to` defaults to the primary as it runs, so the migration ends where the Kates API, Kafka UI and `kates test` already point. The lab is named `m<from>-<to>` with the dots dropped — `m282-431` for 2.8.2 onto a 4.3.1 primary — every release it creates carries `kates.io/lab` labels, and `status`, `cutover` and `down` find it from the cluster — there is no state file. The report keeps the script's eighteen rows (`cluster reachable` … `cutover froze the target`) and exits `1` on any failed one; `-o json` carries them per row.
+`--from` is resolved to a provider. A version the primary's operator supports becomes a Strimzi cluster. 2.x and 3.x become a `legacy-kafka` cluster: ZooKeeper below 3.3.0, the built KRaft image up to 3.6, the official image from 3.7.0. A version below 2.1.0 is refused (KIP-896). `--to` defaults to the primary as it runs, so the migration ends where the Kates API, Kafka UI and `kates test` already point. The lab is named `m<from>-<to>` with the dots dropped, so 2.8.2 onto a 4.3.1 primary is `m282-431`. Every release it creates carries `kates.io/lab` labels, and `status`, `cutover` and `down` find it from the cluster; there is no state file. The report keeps the script's eighteen rows (`cluster reachable` … `cutover froze the target`) and exits `1` on any failed one; `-o json` carries them per row.
 
 Like `kates deploy`, a release build of `kates migrate` needs no checkout. It pulls `legacy-kafka` and `mirror-maker2` from the published charts, fresh and signature-checked, with the same mirror and bundle options ([Deploying Without GHCR](12-deployment.md#deploying-without-ghcr)); `kates charts pull` puts both in a bundle. It carries the version pins of its tag, builds the legacy images below 3.7.0 itself, and writes its generated values to `kates/migrate` under the user state directory. From a checkout, or with `KATES_CHECKOUT`, it reads the checkout's charts and pins, and keeps its files in `.build/migrate`.
 
@@ -1774,7 +1774,7 @@ See also [Migrating Kafka 2.x to 4.x](../tutorials/11-migrating-kafka-2x-to-4x.m
 
 ### Security Commands
 
-Security commands audit, test, and enforce security posture across your Kafka cluster. They cover TLS inspection, ACL verification, penetration testing, compliance mapping, and drift detection. The security suite gives the cluster a [security grade](appendix-a-glossary.md#gl-security-grade), A to F, so that you can track improvements and fail a pipeline below the grade you require.
+Security commands audit, test and enforce the security of your Kafka cluster: TLS inspection, ACL verification, penetration testing, compliance mapping and drift detection. The security suite gives the cluster a [security grade](appendix-a-glossary.md#gl-security-grade), A to F, so that you can track improvements and fail a pipeline below the grade you require.
 
 Aliases: `sec`
 
@@ -1944,7 +1944,7 @@ See also [Security & Compliance](17-security.md) for in-depth security auditing 
 
 ### Kyverno Policy Commands
 
-Kyverno commands let you manage Kubernetes admission policies for your Kafka cluster. They provide visibility into which policies are active, which workloads are violating them, and tools to switch between Audit and Enforce modes. The `kyverno detect` command can even scan your cluster and recommend policies based on what it finds.
+Kyverno commands manage the Kubernetes admission policies for your Kafka cluster. They show which policies are active and which workloads violate them, and they switch policies between Audit and Enforce modes. `kyverno detect` scans your cluster and recommends policies for what it finds.
 
 Aliases: `kyv`, `policy`
 
@@ -2253,7 +2253,7 @@ See also [Kafka Connect & CDC Pipelines](21-kafka-connect.md) for Connect cluste
 
 ### Analysis & Optimization Commands {#analysis--optimization-commands}
 
-Analysis commands turn test results into recommendations. The `benchmark` command runs a battery of tests and gives each a [performance grade](appendix-a-glossary.md#gl-performance-grade), then an overall one. The `advisor` analyzes a specific run and suggests configuration improvements. The `explain` command produces a plain-English summary — useful when you need to share results with people who don't want to read latency tables.
+Analysis commands turn test results into recommendations. The `benchmark` command runs a battery of tests and gives each a [performance grade](appendix-a-glossary.md#gl-performance-grade), then an overall one. The `advisor` analyzes a specific run and suggests configuration improvements. The `explain` command produces a plain-English summary, for sharing results with people who don't read latency tables.
 
 #### benchmark
 
@@ -2960,12 +2960,12 @@ These commands exit `2`:
 
 Consequences worth knowing in scripts:
 
-- `kates test create --wait` and `kates test watch` exit `1` when the test itself fails — not just when the request fails.
+- `kates test create --wait` and `kates test watch` exit `1` when the test itself fails, as well as when the request fails.
 - `test apply --wait`, `test create --wait`, `replay --wait`, `gate`, `benchmark` and `flow run` cancel the run they are waiting for when interrupted, and exit `130`. `kates detect` stops its probes and exits `130` too. `disruption run` and `disruption playbook run` exit `130` too, but their plan keeps running, since the Kates API cannot cancel one. `kates status --watch` ends with exit `0` on Ctrl-C, since it starts nothing and stopping it is what you asked for. Every other command ends on the first Ctrl-C and leaves anything it started running.
 - A plugin's exit code is passed through as Kates' own; see [plugin](#plugin).
 - `kates cluster alerts` exits `1` whenever a critical rule is defined; see [cluster alerts](#cluster-alerts).
 - A declined confirmation exits `1` in `deploy`, `clean`, `kafka delete-topic`, `kyverno apply` and `migrate`. A script that forgot `--yes` fails loudly instead of reporting success for work it did not do.
-- Those confirmations are never answered implicitly. With no terminal attached, the command fails and tells you to pass `--yes`, rather than assuming either answer.
+- Those confirmations are never answered implicitly. With no terminal attached, the command assumes neither answer: it fails and tells you to pass `--yes`.
 
 ::: {.callout-warning title="Commands that exit 0 on failure"}
 Some commands report a failure on screen and still exit `0`, so a script cannot rely on their status. Among them:

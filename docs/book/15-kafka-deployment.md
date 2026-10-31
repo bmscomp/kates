@@ -25,7 +25,7 @@ helm upgrade --install strimzi-operator charts/strimzi-operator \
   --timeout 10m --wait
 ```
 
-The wrapper declares the upstream `strimzi-kafka-operator` chart as a subchart, which is why `helm dependency build` comes first. It adds what makes the operator a managed part of the platform. A CRD-upgrade hook owns the Strimzi CRDs across upgrades, and pinned defaults cover `watchAnyNamespace`, replicas, resources and reconciliation timeouts. A strict values schema nests every operator setting under `strimzi-kafka-operator:`. It also ships the optional Drain Cleaner and the operator's PodMonitor, alerts and dashboards. The install is unconditional on purpose: the hook keeps the CRDs current, and skipping the upgrade would freeze them at the version that first installed them. The full lifecycle — adoption, upgrade, rollback, namespace scope — is [Deploying the Strimzi Operator](deploying-strimzi-operator.md).
+The wrapper declares the upstream `strimzi-kafka-operator` chart as a subchart, which is why `helm dependency build` comes first. Its CRD-upgrade hook owns the Strimzi CRDs across upgrades, and pinned defaults cover `watchAnyNamespace`, replicas, resources and reconciliation timeouts. A strict values schema nests every operator setting under `strimzi-kafka-operator:`. It also ships the optional Drain Cleaner and the operator's PodMonitor, alerts and dashboards. The install is unconditional on purpose: the hook keeps the CRDs current, and skipping the upgrade would freeze them at the version that first installed them. The full lifecycle — adoption, upgrade, rollback, namespace scope — is [Deploying the Strimzi Operator](deploying-strimzi-operator.md).
 
 Strimzi watches for `Kafka`, `KafkaNodePool`, [`KafkaTopic`](appendix-a-glossary.md#gl-kafkatopic) and `KafkaUser` custom resources. It reconciles the desired state into [StrimziPodSets](appendix-a-glossary.md#gl-strimzipodset), which manage each Kafka node's pod on its own so the operator can roll one broker at a time, and into ConfigMaps, Secrets and Services.
 
@@ -227,7 +227,7 @@ default.replication.factor: 3
 min.insync.replicas: 2
 ```
 
-With RF=3 and `min.insync.replicas=2`, every `acks=all` write requires at least one follower acknowledgment [@wang2015building]. This is the primary contributor to producer latency but guarantees zero data loss under single-broker failure.
+With RF=3 and `min.insync.replicas=2`, every `acks=all` write requires at least one follower acknowledgment [@wang2015building]. That wait is the largest share of producer latency, and it means no acknowledged write is lost when one broker fails.
 
 ### Retention, Threads and Quotas
 
@@ -391,7 +391,7 @@ Two keys under `strimzi-kafka-operator:` sound alike and do different things:
 | `operatorNetworkPolicy.enabled` | `false` | `strimzi-cluster-operator-network-policy`, a policy for the operator pod built from the `ingress` and `egress` lists beside it | Enabled as shipped, its `egress: [{}]` allows every destination and undoes the scoped policy |
 | `generateNetworkPolicy` | `true` | Whether the operator generates policies for its operands, such as `krafter-network-policy-kafka` | Never creates a policy for the operator pod, so turning it off doesn't fix a deny-all operator policy |
 
-`charts/strimzi-operator/values-prod.yaml` enables the first, so an operator installed with that overlay has unrestricted egress. Add `--set strimzi-kafka-operator.operatorNetworkPolicy.enabled=false` after the overlay to leave the scoped policy in charge. The wrapper's schema rejects both keys at the top level rather than ignoring them.
+`charts/strimzi-operator/values-prod.yaml` enables the first, so an operator installed with that overlay has unrestricted egress. Add `--set strimzi-kafka-operator.operatorNetworkPolicy.enabled=false` after the overlay to leave the scoped policy in charge. The wrapper's schema rejects both keys at the top level, so a misplaced key fails the install instead of being dropped.
 
 ::: {.callout-caution title="An empty egress list isolates the operator"}
 Replace upstream's `egress: [{}]` with an empty list while `operatorPolicy` is off, and nothing grants the operator any egress. It can't reach the controllers' admin API on 9090, and the `Kafka` resource stays `NotReady`.
@@ -413,7 +413,7 @@ cruiseControl:
     outboundNetwork: 50MiB/s
 ```
 
-The `brokerCapacity` config tells Cruise Control the physical limits of each broker, enabling accurate rebalance proposals. Without it, Cruise Control can't distinguish between "broker is 80% utilized" and "broker has headroom." Disk capacity it reads from the brokers' volumes, so only CPU and network need declaring.
+`brokerCapacity` tells Cruise Control the physical limits of each broker, and its rebalance proposals are only as accurate as those limits. Without it, Cruise Control can't tell a broker at 80% of its capacity from one with headroom. Disk capacity it reads from the brokers' volumes, so only CPU and network need declaring.
 
 ### Kafka Exporter
 
@@ -432,7 +432,7 @@ These metrics feed the `KafkaConsumerGroupLag` and `KafkaConsumerGroupLagCritica
 
 When a node is drained, the Drain Cleaner's admission webhook sees the eviction request for a Kafka pod, denies it, and annotates the pod `strimzi.io/manual-rolling-update=true`. The Cluster Operator then restarts that pod in its own rolling update, one broker at a time and only while every partition keeps `min.insync.replicas`. The pod comes back where its volume allows: on `panda` a local-path volume binds a broker to its node, so it waits until that node is uncordoned.
 
-Without the Drain Cleaner, `kubectl drain` can evict broker pods simultaneously, violating ISR constraints and potentially causing data loss.
+Without the Drain Cleaner, `kubectl drain` can evict more than one broker pod at once, which takes partitions below `min.insync.replicas` and can lose data.
 
 ### Entity Operator
 
@@ -529,9 +529,9 @@ If `helm get values` shows a `strimziVersion`, `kates deploy` installed the oper
 
 **Symptom:** Broker exits immediately after startup with `remote.log.storage.system.enable=true`
 
-**Cause:** Tiered storage requires a remote storage manager plugin JAR that isn't bundled in the default Strimzi image
+**Cause:** Tiered storage requires a remote storage manager plugin JAR that isn't bundled in the default Strimzi image.
 
-**Fix:** Either disable tiered storage or build a custom image with the S3 plugin
+**Fix:** Either disable tiered storage or build a custom image with the S3 plugin.
 
 ### Kafka UI CreateContainerConfigError
 
@@ -541,8 +541,8 @@ If `helm get values` shows a `strimziVersion`, `kates deploy` installed the oper
 
 **Fix:**
 
-1. Ensure the Kafka CR reaches `Ready` before deploying Kafka UI
-2. The `deploy-kafka-ui.sh` script includes a wait loop for the `kafka-ui` Secret (up to 180s) to handle this race condition
+1. Wait for the Kafka CR to reach `Ready` before deploying Kafka UI
+2. `deploy-kafka-ui.sh` already waits up to 180s for the `kafka-ui` Secret
 3. If the secret never appears, check Kafka CR status and operator logs:
 
 ```bash
@@ -554,7 +554,7 @@ kubectl get pods -n kafka -l strimzi.io/name=krafter-entity-operator
 
 **Symptom:** Kafka CR stuck on `NotReady` with `UnforceableProblem: An error while trying to determine the active controller`
 
-**Cause:** The Strimzi operator's `describeMetadataQuorum` admin API call to port 9090 times out. Most commonly caused by:
+**Cause:** The Strimzi operator's `describeMetadataQuorum` admin API call to port 9090 times out. The usual causes:
 
 - An operator NetworkPolicy with empty egress — `strimzi-kafka-operator.operatorNetworkPolicy.enabled: true` with upstream's unrestricted `egress: [{}]` replaced by an empty list
 - A watch scope that does not cover the Kafka namespace, which leaves the wrapper's own `strimzi-operator` policy with no egress rule for those pods (its `kates.io/watch-scope` annotation is the fastest way to see what it admits)

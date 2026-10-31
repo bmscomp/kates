@@ -1,6 +1,6 @@
 # Operating Kafka Connect
 
-Building a Connect pipeline is half the job; keeping it healthy in production is the other half. The pipeline from the last chapter is running; now a zone goes dark, a password expires, a [Debezium](appendix-a-glossary.md#gl-debezium) release lands, and someone deletes a topic. Each of those is a section here, all for the `connect-cluster` chart. The resource itself, Debezium and pipeline design are in [Kafka Connect & CDC Pipelines](21-kafka-connect.md).
+The pipeline from the last chapter is running. Now a zone goes dark, a password expires, a [Debezium](appendix-a-glossary.md#gl-debezium) release lands, and someone deletes a topic. Each of those is a section here, all for the `connect-cluster` chart. The resource itself, Debezium and pipeline design are in [Kafka Connect & CDC Pipelines](21-kafka-connect.md).
 
 After this chapter, you can:
 
@@ -158,7 +158,7 @@ Each sink task reads through a consumer built from the workers' `consumer.*` set
 
 ### Connector-Level Tuning
 
-These settings belong to a connector rather than to the workers, so they go in that connector's own `config`. The Type column says which connector reads each one:
+These settings belong to one connector, so they go in that connector's own `config`. The Type column says which connector reads each one:
 
 | Setting | Type | Default | Recommended | Notes |
 |---------|------|---------|-------------|-------|
@@ -201,7 +201,7 @@ The same rule also records `connect:tasks_running:ratio`, `connect:records_proce
 
 ### Grafana Dashboard
 
-The board ships with `charts/monitoring`, with every other board (`dashboards.enabled` there), as one file for every install. It is scoped by two template variables, `$namespace` and `$cluster`, where `$cluster` is the `KafkaConnect` resource's name, the release fullname, so one copy serves every Connect group in a Grafana and the dropdown picks one.
+The board ships with `charts/monitoring`, with every other board (`dashboards.enabled` there), as one file for every install. It is scoped by two template variables, `$namespace` and `$cluster`. `$cluster` is the `KafkaConnect` resource's name, the release fullname, so one copy serves every Connect group in a Grafana and the dropdown picks one.
 
 Thirty-five panels: a stat row on top, then one row per concern, in the order an incident asks them.
 
@@ -394,7 +394,7 @@ The `kates kafka connect test` command starts an INTEGRATION_CDC run on the Kate
 
 The run reads the demo database's password from its Secret, `postgresql` in `database`. The Kates API may read that Secret only in the namespaces the `kates` chart's `rbac.cdcSecretNamespaces` lists, which `kates deploy --with-kafka-connect` sets to the database's namespace. Without that grant, the run fails at DB setup with a `Forbidden` error.
 
-The connectivity test pod (`test-01-connect.yaml`) checks the credentials Secret, the `KafkaConnect` `Ready` condition, and the running workers. It then calls the REST API on port 8083 from inside a worker, which the NetworkPolicy admits — the root endpoint, and `/connector-plugins` against `tests.expectedPlugins` plus each `plugins[].expect` — and finally checks each declared connector's state and tasks. The last pod (`test-03-test-connectors.yaml`) waits for every test connector to reach RUNNING with all its tasks running. The test topics are created in the Kafka namespace, and `values-prod.yaml` turns the test connectors off because they need the platform's demo PostgreSQL.
+The connectivity test pod (`test-01-connect.yaml`) checks the credentials Secret, the `KafkaConnect` `Ready` condition, and the running workers. It then calls the REST API on port 8083 from inside a worker, which the NetworkPolicy admits. It calls the root endpoint, then checks `/connector-plugins` against `tests.expectedPlugins` plus each `plugins[].expect`. Finally it checks each declared connector's state and tasks. The last pod (`test-03-test-connectors.yaml`) waits for every test connector to reach RUNNING with all its tasks running. The test topics are created in the Kafka namespace, and `values-prod.yaml` turns the test connectors off because they need the platform's demo PostgreSQL.
 
 Because the hook resources are removed the moment the suite succeeds, nothing persists after `helm test` returns. To keep the example topic and connectors running — as the working-examples tutorial does — render the same templates and apply them directly (they keep their hook annotations, so a later `helm test` removes them again):
 
@@ -472,7 +472,7 @@ kates kafka connect restart-task debezium-postgres-source 0
 kates kafka connect restart-task jdbc-sink-connector 0
 ```
 
-A connector with more tasks needs each of them restarted; `kates kafka connect tasks <connector>` lists their ids. Between steps 1 and 2 the database and the Secret disagree, so a task that restarts in that window for another reason, such as a rebalance that moves it to another worker, fails authentication; step 3 brings it back. Nothing restarts the workers along the way: `kates kafka connect restart-task` restarts a task through its connector's `KafkaConnector` resource, and a change to this Secret rolls no pods.
+A connector with more tasks needs each of them restarted; `kates kafka connect tasks <connector>` lists their ids. Between steps 1 and 2 the database and the Secret disagree, so a task that restarts in that window for another reason, such as a rebalance that moves it to another worker, fails authentication. Step 3 brings it back. Nothing restarts the workers along the way: `kates kafka connect restart-task` restarts a task through its connector's `KafkaConnector` resource, and a change to this Secret rolls no pods.
 
 Every `kates deploy --with-kafka-connect` run writes `connect-pg-credentials` again with the demo password, `debezium`. Once you have rotated the demo database, repeat steps 2 and 3 after each such run.
 
@@ -500,9 +500,9 @@ helm upgrade connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster \
   --set image=ghcr.io/bmscomp/connect:3.7.0
 ```
 
-`connect-current.yaml` holds everything the release was installed with — for a `kates deploy` install, the bootstrap address, the Kafka namespace, the schema registry URL, the database egress and the replica count all arrive as `--set` flags that no file records. `--reuse-values` keeps them too, but over the *old* chart's defaults, so a default the new chart changes never applies. `kates deploy --with-kafka-connect` is not an upgrade path: it skips a Connect release that is already deployed and has worker pods.
+`connect-current.yaml` holds everything the release was installed with. For a `kates deploy` install, the bootstrap address, the Kafka namespace, the schema registry URL, the database egress and the replica count all arrive as `--set` flags that no file records. `--reuse-values` keeps them too, but over the *old* chart's defaults, so a default the new chart changes never applies. `kates deploy --with-kafka-connect` is not an upgrade path: it skips a Connect release that is already deployed and has worker pods.
 
-`make connect-push` publishes the Debezium-only tag (`connect:3.7.0`). The chart's own pin is the fully qualified `<debezium>-kafka-<kafka>` tag, and it lives in two places: `image` in `values.yaml` and the `kates.io/connect-image` annotation in `Chart.yaml`. `kates deploy` runs whatever `values.yaml` pins. A `v*` release tag runs `.github/workflows/publish-connect.yml`, which publishes the qualified tag and moves both pins together, and `scripts/check-versions.sh` fails when the pins disagree with each other, with `Dockerfile.connect`, or with the Kafka pin. `Chart.yaml` `appVersion` is the Kafka version the workers run (the `version` value), not the Debezium version. The chart refuses `:latest` and untagged images.
+`make connect-push` publishes the Debezium-only tag (`connect:3.7.0`). The chart's own pin is the fully qualified `<debezium>-kafka-<kafka>` tag, and it lives in two places: `image` in `values.yaml` and the `kates.io/connect-image` annotation in `Chart.yaml`. `kates deploy` runs whatever `values.yaml` pins. A `v*` release tag runs `.github/workflows/publish-connect.yml`, which publishes the qualified tag and moves both pins together. `scripts/check-versions.sh` fails when the pins disagree with each other, with `Dockerfile.connect`, or with the Kafka pin. `Chart.yaml` `appVersion` is the Kafka version the workers run (the `version` value), not the Debezium version. The chart refuses `:latest` and untagged images.
 
 Strimzi performs a rolling restart, one worker at a time. Each restarted worker's connectors and tasks can wait up to the rebalance delay described under [What a Rebalance Costs](#what-a-rebalance-costs) before they run again. Workers that leave while one delay runs get their work back when that same delay ends, so a rollout quicker than the delay can leave most of the group's tasks paused at once.
 
@@ -648,7 +648,7 @@ kates kafka connect logs
 
 **Symptom:** Connect cluster stuck in `REBALANCING` state for minutes (the `KafkaConnectRebalanceTooLong` alert fires after 5 minutes)
 
-**Cause:** A large number of connectors/tasks being reassigned, or workers repeatedly leaving and rejoining the group. (The chart also sets `group.initial.rebalance.delay.ms: 3000`, which adds a fixed 3-second wait before the *first* assignment when the group forms — that delay is intentional and not the problem here.)
+**Cause:** A large number of connectors/tasks being reassigned, or workers repeatedly leaving and rejoining the group. (The chart also sets `group.initial.rebalance.delay.ms: 3000`, which adds a fixed 3-second wait before the *first* assignment when the group forms. That delay is intentional and not the problem here.)
 
 **Fix:** If rebalancing takes more than 5 minutes, check for:
 
@@ -697,7 +697,7 @@ resources:
 
 **Symptom:** `helm upgrade` (or `helm template`) fails at once with `Error: execution error at (connect-cluster/templates/…): connect-cluster: …`
 
-**Cause:** The chart checks connector configs and the rest of the values while it renders — a missing required key, a sink without `topics`, a `${secrets:…}` reference without a namespace, a plaintext password under `productionMode`, and so on. Nothing is applied.
+**Cause:** The chart checks connector configs and the rest of the values while it renders: a missing required key, a sink without `topics`, a `${secrets:…}` reference without a namespace, a plaintext password under `productionMode`, and so on. Nothing is applied.
 
 **Fix:** The message names the connector and the setting. Output:
 
@@ -723,7 +723,7 @@ kubectl auth can-i get secret/connect-pg-credentials -n connect \
 
 For the symptom-by-symptom index across the whole book, see the [Troubleshooting Index](appendix-b-troubleshooting.md).
 
-Component versions for the Connect stack are tracked centrally in the [Version & Compatibility Matrix](appendix-d-versions.md).
+Component versions for the Connect stack are in the [Version & Compatibility Matrix](appendix-d-versions.md).
 
 ## Summary
 
@@ -733,4 +733,4 @@ Component versions for the Connect stack are tracked centrally in the [Version &
 - Rotate a database password in PostgreSQL, then in the Secret, then restart the tasks that read it.
 - Upgrades roll one worker at a time, and an offset-format change makes rollback unsafe.
 
-MirrorMaker 2 runs on the same machinery you have just learned to operate — workers, tasks, rebalances and internal topics — with one difference: it talks to two Kafka clusters instead of one. [Cross-Cluster Replication and Migration](22-mirror-maker2-migration.md) starts from there.
+MirrorMaker 2 runs on the same workers, tasks, rebalances and internal topics, with one difference: it talks to two Kafka clusters instead of one. [Cross-Cluster Replication and Migration](22-mirror-maker2-migration.md) starts from there.

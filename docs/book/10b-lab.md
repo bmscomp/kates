@@ -52,7 +52,7 @@ The Lab needs a terminal of at least 80 columns by 24 rows; below that it shows 
 
 ## Presets
 
-A preset sets several parameters at once for a common goal. Press `p` to cycle through them; each row gives the goal and the settings it applies:
+A preset sets five or six parameters at once for a common goal. Press `p` to cycle through them; each row gives the goal and the settings it applies:
 
 | Preset | Goal | Settings it applies |
 |--------|------|---------------------|
@@ -60,7 +60,7 @@ A preset sets several parameters at once for a common goal. Press `p` to cycle t
 | Max Throughput | Most rec/s | `type=STRESS`, `acks=all`, `compression=lz4`, `batchSize=262144`, `lingerMs=50`, `producers=8` |
 | Durability | No data loss | `type=LOAD`, `acks=all`, `replication=3`, `compression=lz4`, `batchSize=65536`, `lingerMs=5` |
 
-Each preset also switches the [test type](appendix-a-glossary.md#gl-test-type), so the top field changes when you cycle `p`. Low Latency's [`acks`](appendix-a-glossary.md#gl-acks) setting of `1` doesn't wait for followers, so it measures a path the payments target, which needs `acks=all`, doesn't use. Treat a preset as a starting point and adjust single parameters before you run.
+Each preset also switches the [test type](appendix-a-glossary.md#gl-test-type), so the top field changes when you cycle `p`. Low Latency's [`acks`](appendix-a-glossary.md#gl-acks) setting of `1` doesn't wait for followers, so it measures a path the payments target doesn't use: the target needs `acks=all`. Treat a preset as a starting point and adjust single parameters before you run.
 
 ### What the Parameters Reach
 
@@ -104,7 +104,7 @@ stateDiagram-v2
 
 Each completed test creates an iteration: a snapshot of its parameters and results in the right pane. Each iteration is a full [test run](appendix-a-glossary.md#gl-test-run), created through the Kates API like one from `kates test create`, with an ID of its own. A sweep runs one test per value, and each warm-up run and each of median mode's three runs is a test run too, so every one of them costs a test's time.
 
-The ID makes an iteration a run you can open outside the Lab. `kates test get <id>` prints its per-task rows, and `kates report diff <id-a> <id-b>` compares two iterations with every metric the report holds, not only the three the Lab shows. The CSV export carries each iteration's ID as `test_id`.
+The ID makes an iteration a run you can open outside the Lab. `kates test get <id>` prints its per-task rows, and `kates report diff <id-a> <id-b>` compares two iterations with every metric the report holds; the Lab shows three of them. The CSV export carries each iteration's ID as `test_id`.
 
 ### How Long an Iteration Takes
 
