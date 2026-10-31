@@ -1,24 +1,20 @@
 # Part III — Chaos & Integrity
 
-What happens to the `krafter` Kafka cluster when a broker dies, the network splits or a whole zone goes dark, and did any acknowledged record go missing? This Part answers both questions. It turns "the cluster is resilient" into a hypothesis you can test, runs the experiment, and then checks every record.
+You run the payments platform, and Part II asks whether `krafter` can take 2,000 records per second of 1 KiB with `acks=all`. One target is left: `krafter` must lose no acknowledged record when one broker or one zone fails. This Part kills a broker, then a zone, while records flow, and then counts every acknowledged record.
 
-Every experiment here breaks something on purpose, so two rules come first: write the hypothesis before you inject anything, and keep the blast radius small with the guardrails that Chaos Engineering in Practice describes. Have a LOAD baseline from [Part II — Performance Testing](part-performance-testing.md) at hand, so that you can tell the fault's effect from the cluster's normal behavior. Some disruption types run only on LitmusChaos, which `make all` deploys with the rest of the stack; Chaos Engineering in Practice says which.
+Every experiment here breaks something on purpose. Write the hypothesis before you inject anything, keep the blast radius inside the guardrails that [Chaos Engineering in Practice](07-chaos-practice.md) describes, and have a LOAD baseline from [Part II — Performance Testing](part-performance-testing.md) at hand, so you can tell the fault's effect from the cluster's normal behavior. `make all` installs LitmusChaos with the rest of the lab, and five disruption types, `NODE_DRAIN` among them, run only through its experiments. The lab installs no experiment for `DISK_FILL` or `NETWORK_LATENCY`, so those two fail until you add them.
 
-## What You'll Have at the End
+Read the chapters in order:
 
-You'll have a steady-state hypothesis written down with pass and fail criteria, and a disruption run whose report shows how the cluster recovered. You'll also have an integrity verdict for a run that lost a broker partway through, which tells you whether every acknowledged record arrived.
+- [Chaos Engineering Theory](06-chaos-theory.md): what does healthy mean in numbers before you break anything, and what does Kafka do during a leader election, an ISR shrink and a consumer group rebalance? About 5 minutes.
+- [Chaos Engineering in Practice](07-chaos-practice.md): should a fault run as a disruption plan or a resilience run, how far can it reach before the safety guard refuses it, and what SLA grade does it earn? About 20 minutes.
+- [Data Integrity Verification](08-data-integrity.md): did every acknowledged record arrive, and when the verdict is DATA_LOSS, which records went missing? About 15 minutes.
 
-## The Chapters
-
-The chapters go from the idea, to the tooling, to the proof that nothing was lost:
-
-- [Chaos Engineering Theory](06-chaos-theory.md): how do you say what healthy means before you break anything, and how does Kafka behave when it breaks? About 5 minutes.
-- [Chaos Engineering in Practice](07-chaos-practice.md): how does Kates inject a fault, keep it inside a safe blast radius, and grade the result? About 20 minutes.
-- [Data Integrity Verification](08-data-integrity.md): did every acknowledged record arrive, and if not, which ones were lost? About 15 minutes.
+Two tutorials run the same steps on the lab. [Tutorial 3: Chaos Engineering with Kates](../tutorials/03-chaos-engineering.md) runs a disruption plan, a playbook and a resilience run. [Tutorial 4: Data Integrity Under Fire](../tutorials/04-integrity-under-fire.md) kills a broker while an INTEGRITY run is producing, and reads the verdict.
 
 ## Choosing How to Inject a Fault
 
-The chapters inject faults with three `kates` commands, and the one you reach for depends on what you want to learn:
+The chapters inject faults with three `kates` commands. Pick the one that answers what you want to learn:
 
 | Command | What it runs | Reach for it when |
 |----------------------------------------|--------------------------------|----------------------------|
@@ -26,16 +22,12 @@ The chapters inject faults with three `kates` commands, and the one you reach fo
 | `kates disruption playbook run <name>` | A playbook: a disruption plan that ships with Kates | You want a common failure, such as losing a zone, without writing the plan |
 | `kates resilience run -f <file>` | A performance test, with one fault injected after a steady-state wait | You want the fault's cost to a workload, or an INTEGRITY run through it |
 
-A Game Day is the session your team runs around these commands, from hypothesis to follow-up, and Chaos Engineering Theory shows how to structure one.
+Only a resilience run carries a workload, so it's the one that can tell you whether records were lost. A Game Day is the session your team runs around these commands, and [The Game Day Methodology](06-chaos-theory.md#the-game-day-methodology) shows how to structure one.
 
 ## The Payments Question
 
-This Part checks the loss target: `krafter` loses no acknowledged record when one broker or one zone fails. Two disruption plans kill a broker (`payments-broker-loss.json`) and every Kafka pod in zone `alpha` (`payments-zone-loss.json`), and `kates disruption run --config <plan> --fail-on-sla-breach` grades each against its `sla` block. A plan runs no workload of its own: it reads the brokers' metrics from Prometheus. So submit the Part II scenario file with `kates test apply -f payments-scenarios.yaml`, without `--wait`, and run the plan while that LOAD run produces.
+Two disruption plans and two resilience files test the loss target. The plans kill a broker (`payments-broker-loss.json`) and every Kafka pod in zone `alpha` (`payments-zone-loss.json`), and `kates disruption run --config <plan> --fail-on-sla-breach` grades each against its `sla` block. A plan runs no workload of its own: it reads the brokers' metrics from Prometheus. So submit the Part II scenario file with `kates test apply -f payments-scenarios.yaml`, without `--wait`, and run the plan while that LOAD run produces.
 
-A plan can't measure loss, so the verdicts come from two resilience files, `payments-integrity-broker.yaml` and `payments-integrity-zone.yaml`. Each runs an INTEGRITY test through one of the same two faults with `kates resilience run -f <file>`, which prints that run's ID as `Test Run` and can return before the run ends. Wait until `kates test get <id>` shows the run `DONE`, and read its `Lost`, `RPO` and `Verdict` there. The target holds when `kates resilience run` reported `Status COMPLETED` and the INTEGRITY run shows `Lost` 0 with a measured RPO. When `Lost` is 0, an RPO of `not measured` means the fault never reached the run.
+A plan can't measure loss, so the verdicts come from the resilience files, `payments-integrity-broker.yaml` and `payments-integrity-zone.yaml`. Each runs an INTEGRITY test through one of the same two faults with `kates resilience run -f <file>`, which prints that run's ID as `Test Run` and can return before the run ends. Wait until `kates test get <id>` shows the run `DONE`, and read its `Lost`, `RPO` and `Verdict` there. The target holds when `kates resilience run` reported `Status COMPLETED` and the INTEGRITY run shows `Lost` 0 with a measured RPO. When `Lost` is 0, an RPO of `not measured` means the fault never reached the run.
 
-Run the zone file only once the broker file's INTEGRITY run is `DONE`, because the two runs share a topic and a consumer group. The safety guard checks only a resilience run's namespace and that its fault leaves a broker untouched, so first preview the zone's pods with `kates disruption playbook run az-failure --dry-run`.
-
-## Practice
-
-[Tutorial 3: Chaos Engineering with Kates](../tutorials/03-chaos-engineering.md) runs a disruption plan, a playbook and a resilience run on the lab. [Tutorial 4: Data Integrity Under Fire](../tutorials/04-integrity-under-fire.md) kills a broker while an INTEGRITY run is producing, and reads the verdict.
+Run the zone file only once the broker file's INTEGRITY run is `DONE`, because the two runs share a topic and a consumer group. The safety guard counts a resilience run's brokers but holds it to no `maxAffectedBrokers`, so preview the zone's pods first with `kates disruption playbook run az-failure --dry-run`.

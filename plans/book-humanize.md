@@ -32,7 +32,7 @@ Everything else in the catalog applies. Three rules matter most here:
 
 ## The Work
 
-The work is done in four passes, each its own pull request so the diffs stay reviewable.
+The work is done in four passes, each its own commit on the book's open pull request, so a pass reads as one diff and the book merges once.
 
 ### Pass 1 — The Pages That Set the Voice
 
