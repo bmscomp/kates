@@ -75,9 +75,10 @@ Every pass must keep all the book's checks green: `scripts/check-book-style.sh` 
 
 ## Decisions for the Author
 
+Decided on 2026-11-01: the book keeps "you" throughout, as STYLE.md says, and an "In practice" story is told in the second person too, with no first-person voice.
+
 These are yours to make before Pass 1 starts:
 
-- Whether the book speaks in one author's voice ("I ran this on `panda`…") or keeps the current "you" throughout. STYLE.md says "you"; a first-person "In practice" box is a common middle ground.
 - Which real incidents from the project may be told, and how much detail is public.
 - Whether to keep the reading times on the Part pages.
 
