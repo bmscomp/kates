@@ -252,12 +252,21 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// 4. Execution Plan (Helm)
 	PrintPhaseHeader(nextDeployPhase(), "Executing Deployment Pipeline")
 
+	newDC := func(ctx context.Context) *deployContext {
+		return newDeployContext(ctx, ns, valuesFile, report, vp, primary)
+	}
+	return runDeployAndReport(commandContext(cmd), newDC, target, ns, errorLog, sharedEntries, deployStartTime)
+}
+
+// runDeployAndReport runs the pipeline and reports its outcome: the error
+// (saved to errorLog), an interruption, or the summary of a success.
+func runDeployAndReport(base context.Context, newDC func(context.Context) *deployContext, target string, ns resolvedNamespaces, errorLog string, sharedEntries []DeploySummaryEntry, deployStartTime time.Time) error {
 	// From here on Ctrl-C stops the deploy instead of ending kates: helm gets
 	// SIGTERM and time to record its release state (deployCommand), and the
 	// cert-manager webhook is put back. Before the pipeline nothing is
 	// half-applied, so Go's default, ending kates at once, is kept there. The
 	// first signal restores that default, so a second one still ends kates.
-	ctx, stop := signal.NotifyContext(commandContext(cmd), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(base, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {
 		<-ctx.Done()
@@ -268,14 +277,13 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		restoreFailOpenCertMgrWebhook(ctx)
 	}
 
-	dc := newDeployContext(ctx, ns, valuesFile, report, vp, primary)
+	dc := newDC(ctx)
 	res := runDeployPipeline(dc, sharedEntries, deployStartTime)
 	// A signal during the pipeline, read before stop(), which cancels ctx
 	// too. The summary and the port forwards after it run on the command's
 	// context, where Ctrl-C ends kates as it did.
 	interrupted := ctx.Err() != nil
 	stop()
-	base := commandContext(cmd)
 
 	if interrupted && (res.err != nil || res.dashboardErr != nil) {
 		// A failure before the Ctrl-C is still the deploy's error.
