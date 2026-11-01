@@ -14,7 +14,7 @@ What it manages:
 - **ChaosExperiments** — installed into your target namespaces via a post-install Job.
 - **ChaosEngines** — rendered from `engines:`, with first-class probes and pod components.
 - **Monitoring** — optional ServiceMonitor + Grafana dashboard.
-- **NetworkPolicy / Kyverno / PDB / GameDay** — optional, all off by default.
+- **NetworkPolicy** — on by default, so the operator runs where its namespace denies all traffic. **Kyverno / PDB / GameDay** — optional, off by default.
 
 ## Prerequisites
 
@@ -47,7 +47,7 @@ helm upgrade --install chaos ./kates-chaos \
 
 | Overlay | Use | Notable defaults |
 |---------|-----|------------------|
-| `values-kind.yaml` | Local Kind / dev | `pullPolicy: IfNotPresent`, NetworkPolicy off |
+| `values-kind.yaml` | Local Kind / dev | `pullPolicy: IfNotPresent` |
 | `values-generic.yaml` | Production K8s | `pullPolicy: Always`, NetworkPolicy + Kyverno on |
 
 ## Configuration Reference
@@ -136,13 +136,13 @@ Each key under `engines:` renders a `ChaosEngine`. Probes and pod `components` a
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `networkPolicy.enabled` | Scope chaos-infra traffic | `false` |
+| `networkPolicy.enabled` | Scope chaos-infra traffic | `true` |
 | `networkPolicy.apiServer.enabled` | Egress to the Kubernetes API server (**operator needs it**) | `true` |
 | `networkPolicy.apiServer.ports` / `ipBlock` | API-server ports / CIDR pin | `[443,6443]` / `{}` |
 | `networkPolicy.dns.enabled` | DNS egress | `true` |
 | `networkPolicy.monitoring.enabled` | Prometheus scrape ingress to the exporter | `true` |
 | `networkPolicy.monitoring.namespace` / `port` | Scrape source ns / exporter port | `monitoring` / `8080` |
-| `networkPolicy.targets.enabled` | Egress to `rbac.targetNamespaces` | `true` |
+| `networkPolicy.targets.enabled` | Egress to `rbac.targetNamespaces`, and a policy in each of them giving Litmus's engine pods (`chaosUID`) DNS and the API server | `true` |
 | `networkPolicy.extraIngress` / `extraEgress` | Raw rules appended verbatim | `[]` |
 | `networkPolicies.enabled` | **Deprecated** alias — OR'd with `networkPolicy.enabled` | `false` |
 

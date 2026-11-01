@@ -239,3 +239,42 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+---
+# For a namespace that denies all traffic by default: the gateway takes S3
+# calls on 8333 from Velero and the bucket Job; its pods need DNS and each
+# other. Nothing here dials out beyond that.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: velero-seaweedfs
+  labels:
+    app.kubernetes.io/name: seaweedfs
+    app.kubernetes.io/instance: velero-seaweedfs
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: seaweedfs
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - port: 8333
+          protocol: TCP
+    # Master, volume server and filer call each other on the pod's address.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: seaweedfs
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: seaweedfs

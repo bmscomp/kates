@@ -30,9 +30,6 @@ monitoring:
     labels:
       release: monitoring
 
-networkPolicy:
-  enabled: false
-
 pdb:
   enabled: false
 

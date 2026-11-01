@@ -15,7 +15,7 @@ type: application
 # setting either is now refused with the constant to edit named.
 # Patch: testImages.kubectl moves to kates-tester 1.34.1, the tag the v1.34.1
 # release publishes; every chart that runs it pins the same one.
-version: 0.11.19
+version: 0.11.20
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
@@ -36,12 +36,18 @@ keywords:
 icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/icon.png
 dependencies:
   - name: kafka-common
-    version: 0.1.1
+    version: 0.1.2
     repository: file://../kafka-common
 annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "The workers' NetworkPolicy allows the API server (networkPolicy.apiServer, on by default, 443 and 6443). The workers read their KafkaUser Secret through it (Strimzi's KubernetesSecretConfigProvider); without it they hung at start until the liveness probe killed them, on every cluster that enforces policies"
+    - kind: added
+      description: "A pre-install hook NetworkPolicy for the Helm tests and the preflight and secret-sync Jobs: DNS, the API server and Kafka. The tests ran kubectl against an API server they could not reach wherever the namespace denies all traffic"
+    - kind: changed
+      description: "Packs kafka-common 0.1.2"
     - kind: changed
       description: "testImages.kubectl moves to kates-tester 1.34.1, the tag the v1.34.1 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.30.1 (nothing under tester/ moved), so this is the pin, not the tooling."
     - kind: changed

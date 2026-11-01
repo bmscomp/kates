@@ -29,7 +29,7 @@ It is lab-grade: no replication, no backups, and the passwords come from values 
 | `parameters` | `{}` | More server settings, each passed as `-c name=value`; the schema refuses the three replication settings above |
 | `persistence.enabled` | `true` | `false` keeps the data in an emptyDir, which goes with the pod |
 | `persistence.size`, `persistence.storageClass` | `8Gi`, cluster default | The data volume |
-| `networkPolicy.enabled` | `false` | Admit 5432 only from `networkPolicy.allowNamespaces` and `networkPolicy.allowPods` (label selectors), and the chart's Helm test |
+| `networkPolicy.enabled` | `true` | Admit 5432 from `networkPolicy.allowNamespaces` and `networkPolicy.allowPods` (label selectors; both empty: every namespace) and the chart's Helm test, and give the test DNS and the database |
 | `resources` | 100m/128Mi requests, 512Mi limit | Container resources |
 | `tests.resources` | 10m/32Mi requests, 64Mi limit | The Helm test pod's resources |
 | `podLabels` | `{}` | Extra pod labels; the chart's own win on a clash |

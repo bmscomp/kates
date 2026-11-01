@@ -748,6 +748,13 @@ networkPolicy:
   dns:
     namespaceSelector: {}
     podSelector: {}
+  # -- The API server: the workers read their KafkaUser Secrets through it
+  # (Strimzi's KubernetesSecretConfigProvider) and hang at start without it
+  apiServer:
+    enabled: true
+    ports: [443, 6443]
+    # -- Restrict to the control-plane CIDR on locked-down clusters
+    ipBlock: {}
   # -- Kafka broker egress (source + target). MM2 reaches arbitrary broker IPs,
   # so egress is to any destination on these ports.
   kafka:

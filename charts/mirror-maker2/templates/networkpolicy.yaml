@@ -35,6 +35,11 @@ spec:
   egress:
     # DNS
     {{- include "kafka-common.netpol.dnsEgress" $np.dns | nindent 4 }}
+    {{- $api := $np.apiServer | default dict }}
+    {{- if include "kafka-common.enabled" (list $api.enabled true) }}
+    # The API server (KubernetesSecretConfigProvider)
+    {{- include "kafka-common.netpol.apiServerEgress" (dict "ports" $api.ports "ipBlock" $api.ipBlock) | nindent 4 }}
+    {{- end }}
     {{- if $np.kafka.perSource }}
     {{- /* One rule per destination instead of 0.0.0.0/0. An in-cluster source
            or target is reachable by its namespace, so the policy names the

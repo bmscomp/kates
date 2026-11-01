@@ -5,7 +5,7 @@ name: strimzi-operator
 # Connect build; the Helm tests get resources, and podLabels is new.
 # Patch: testImages.kubectl moves to kates-tester 1.34.1, the tag the v1.34.1
 # release publishes; every chart that runs it pins the same one.
-version: 0.4.12
+version: 0.4.13
 # Tracks the Strimzi operator version this chart deploys. The CLI rewrites this
 # (and the dependency version) in a generated copy when another version is
 # selected; the repository copy is the pin.
@@ -32,6 +32,8 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "A pre-install hook NetworkPolicy giving the CRD upgrade Job and the Helm tests DNS, HTTPS and the API server, where the namespace denies all traffic. The operator's own policy never selected them. Rendered with operatorPolicy.enabled; Helm leaves it behind on uninstall"
     - kind: changed
       description: "testImages.kubectl moves to kates-tester 1.34.1, the tag the v1.34.1 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.30.1 (nothing under tester/ moved), so this is the pin, not the tooling."
     - kind: changed

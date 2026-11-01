@@ -14,9 +14,11 @@ maintainers:
 name: velero
 sources:
 - https://github.com/vmware-tanzu/velero
-version: 11.3.4
+version: 11.3.5
 annotations:
   artifacthub.io/changes: |
+    - kind: added
+      description: "networkPolicy (enabled by default): DNS, the API server and the object store (networkPolicy.objectStorePorts: 443, 8333, 9000) out, metrics (8085) in, for the server, the node agent, the CRD Jobs and the Helm test. A pre-install hook, so the CRD upgrade Job has it; Helm leaves it behind on uninstall"
     - kind: changed
       description: "Kates defaults (upstream ships these empty): podSecurityContext runs as 65534:65534, non-root, with the RuntimeDefault seccomp profile; containerSecurityContext and kubectl.containerSecurityContext forbid privilege escalation and drop every capability; resources (100m/128Mi, limit 512Mi), upgradeJobResources (50m/128Mi, limit 256Mi) and kubectl.resources (10m/32Mi, limit 128Mi) are set. The Deployment and the upgrade-crds and cleanup-crds Jobs pass the Restricted Pod Security Standard. Plugin initContainers are written by the installer and need the same securityContext and resources"
     - kind: changed

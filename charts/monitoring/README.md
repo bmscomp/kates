@@ -24,6 +24,9 @@ Grafana is exposed as a NodePort on `30080` by default (dev convenience).
 | `kube-prometheus-stack.*` | see values | Full pass-through to the subchart (Grafana, Prometheus, Alertmanager, exporters) |
 | `chaosAlerts.enabled` | `false` | PrometheusRules for LitmusChaos experiment alerts; four of them read the ChaosEngine state series described [below](#kube-state-metrics-and-the-chaosengine) |
 | `kafkaNamespace` | `kafka` | Namespace used in Kafka PromQL expressions |
+| `networkPolicy.enabled` | `true` | Policies that let the whole stack run where the namespace denies all traffic: DNS, the API server and the namespace for every component, open egress for Prometheus and Alertmanager, Grafana's UI on 3000 and HTTPS out. The operator's webhook and the admission Jobs take theirs from `kube-prometheus-stack.prometheusOperator.networkPolicy.enabled` (`true`) |
+| `networkPolicy.clientNamespaces` | `[]` | Namespaces that may query Prometheus (9090) and Alertmanager (9093); empty admits every namespace |
+| `networkPolicy.apiServerPorts` | `[443, 6443]` | API server ports the stack's controllers dial |
 | `networkPolicy.prometheusKafkaEgress.enabled` | `true` | Allow Prometheus egress to Kafka metrics ports (for default-deny clusters) |
 | `networkPolicy.prometheusKafkaEgress.ports` | `[9404]` | Scrapable ports on Kafka pods |
 | `dashboards.enabled` | `true` | Install this chart's Grafana dashboards via sidecar labels |

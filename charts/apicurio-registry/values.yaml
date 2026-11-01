@@ -144,7 +144,7 @@ topologySpreadConstraints: []
 
 # -- NetworkPolicy configuration. Namespace names are values, not hardcoded.
 networkPolicy:
-  enabled: false
+  enabled: true
   # -- Namespaces whose pods may call the registry REST API (8080)
   clientNamespaces:
     - connect

@@ -38,6 +38,15 @@ upstream ships it: `allowPrivilegeEscalation` is not set, because a default of
 `false` would be merged into a `privileged: true` setting, a pair the API
 server refuses.
 
+It also adds one template, `templates/networkpolicy.yaml`, for namespaces
+that deny all traffic by default. `networkPolicy.enabled` (on) gives every pod
+of the release DNS, the API server (`networkPolicy.apiServerPorts`, 443 and
+6443) and the object store at any address (`networkPolicy.objectStorePorts`,
+443, 8333 for SeaweedFS and 9000 for MinIO), and admits the metrics port 8085.
+It is a pre-install hook, so the upgrade-crds Job has it too, and Helm leaves
+it behind on uninstall. The SeaweedFS store `make velero` applies
+(`config/velero/seaweedfs.yaml`) carries a policy of its own.
+
 The **label-namespace** Job (rendered when `namespace.labels` is not empty;
 `{}` by default) cannot pass either: upstream's template gives it no security
 context and no resources, and no value reaches them. Leave `namespace.labels`

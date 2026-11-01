@@ -5,9 +5,11 @@ description: A Helm chart for Kubernetes of Apicurio Registry, backed by the
 icon: https://design.jboss.org/apicurio/logo/logofiles/apicurio_icon_lightbkg_color.svg
 name: apicurio-registry
 type: application
-version: 0.4.1
+version: 0.5.0
 annotations:
   artifacthub.io/changes: |
+    - kind: changed
+      description: "networkPolicy.enabled is true by default, so the registry runs where its namespace denies all traffic: the REST API from its own namespace and networkPolicy.clientNamespaces, metrics from monitoring, DNS and Kafka out. The policy also lets the release's own pods reach each other, which the Helm test needs. Set it back to false where another policy already covers the registry"
     - kind: fixed
       description: "The Helm test pod passes Pod Security Standards restricted with requests and a limit: 10m/32Mi requests, 64Mi limit, a pod security context with seccompProfile RuntimeDefault, all as tests.resources, tests.podSecurityContext and tests.securityContext"
     - kind: changed

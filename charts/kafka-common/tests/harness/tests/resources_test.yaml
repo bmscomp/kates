@@ -136,6 +136,17 @@ tests:
       - equal:
           path: 'spec.egress[1].ports[1].port'
           value: 6443
+  - it: gives the hook Jobs DNS, the API server and Kafka ahead of them
+    template: netpol-jobs.yaml
+    asserts:
+      - equal: {path: 'metadata.annotations["helm.sh/hook"]', value: 'pre-install,pre-upgrade'}
+      - equal: {path: 'metadata.annotations["helm.sh/hook-delete-policy"]', value: before-hook-creation}
+      - equal: {path: 'spec.podSelector.matchLabels["app.kubernetes.io/instance"]', value: RELEASE-NAME}
+      - equal: {path: 'spec.podSelector.matchExpressions[0].values', value: [preflight, secret-sync]}
+      - equal: {path: spec.policyTypes, value: [Egress]}
+      - equal: {path: 'spec.egress[0].ports[0].port', value: 53}
+      - equal: {path: 'spec.egress[1].ports', value: [{port: 6443, protocol: TCP}]}
+      - equal: {path: 'spec.egress[2].ports', value: [{port: 9092, protocol: TCP}, {port: 9093, protocol: TCP}]}
   - it: writes SCRAM client properties with printf
     template: tests-props.yaml
     set:

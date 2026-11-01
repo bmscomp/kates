@@ -77,4 +77,54 @@ spec:
     {{- with $np.extraEgress }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+{{- if (($np.targets).enabled | default true) }}
+{{- /* Litmus starts the runner, the experiment Job and its helpers in the
+       ChaosEngine's namespace, not this one, and each of them talks to the
+       API server first: where that namespace denies all traffic they hang at
+       the first call. One policy per target namespace gives them DNS and the
+       API server, nothing else. */}}
+{{- range $t := $targets }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kates-chaos.fullname" $ }}-experiments
+  namespace: {{ $t.name }}
+  labels:
+    {{- include "kates-chaos.labels" $ | nindent 4 }}
+spec:
+  # Every pod Litmus starts for an engine carries its chaosUID; the
+  # experiment's own labels come from its ChaosExperiment definition.
+  podSelector:
+    matchExpressions:
+      - key: chaosUID
+        operator: Exists
+  policyTypes:
+    - Egress
+  egress:
+    {{- if (($np.dns).enabled | default true) }}
+    - to:
+        - namespaceSelector: {}
+      ports:
+        {{- range ($np.dns).ports | default (list 53) }}
+        - protocol: UDP
+          port: {{ . }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+    {{- end }}
+    {{- if (($np.apiServer).enabled | default true) }}
+    - {{- with ($np.apiServer).ipBlock }}
+      to:
+        - ipBlock:
+            {{- toYaml . | nindent 12 }}
+      {{- end }}
+      ports:
+        {{- range ($np.apiServer).ports | default (list 443 6443) }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+    {{- end }}
+{{- end }}
+{{- end }}
 {{- end }}

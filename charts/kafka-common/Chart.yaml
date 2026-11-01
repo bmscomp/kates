@@ -2,7 +2,7 @@ apiVersion: v2
 name: kafka-common
 description: Library chart — the templates the Strimzi charts share (names and labels, rails, Kafka client authentication, the Connect worker spec, KafkaUser, secret sync, NetworkPolicy and monitoring fragments, the Grafana grid, the preflight probe)
 type: library
-version: 0.1.1
+version: 0.1.2
 kubeVersion: ">=1.27.0-0"
 home: https://github.com/bmscomp/kates
 sources:
@@ -19,6 +19,8 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "kafka-common.netpol.jobs: a pre-install hook NetworkPolicy giving a release's hook Jobs DNS, the API server and Kafka, for namespaces that deny all traffic"
     - kind: added
       description: "kafka-common.podLabels (the chart's labels over a user's podLabels map, so a selector never changes), kafka-common.image (a mirror registry in front of an image reference, as charts/kates does with global.imageRegistry) and kafka-common.restricted.pod / .restricted.container (the Pod Security Standards restricted contexts Strimzi's restricted provider sets)"
     - kind: added

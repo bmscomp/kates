@@ -116,3 +116,45 @@ reports Running. Call with (dict "chart" … "bootstrap" … "ports" <list>
 {{- end -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+Egress for a release's hook Jobs (preflight, secret sync) where the namespace
+denies all traffic: DNS, the API server, and Kafka on the given ports at any
+address. A pre-install hook ahead of them, since a pre-install Job runs
+before any ordinary resource exists; never deleted after it succeeds, so the
+post-install Jobs and the CronJob have it too. Call with (dict "name" …
+"namespace" … "labels" <YAML> "instance" <release> "components" <list>
+"kafkaPorts" <list> "api" <dict ports ipBlock>).
+*/}}
+{{- define "kafka-common.netpol.jobs" -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .name }}
+  namespace: {{ .namespace }}
+  labels:
+    {{- .labels | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .instance }}
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          {{- toYaml .components | nindent 10 }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- include "kafka-common.netpol.dnsEgress" (dict) | nindent 4 }}
+    {{- include "kafka-common.netpol.apiServerEgress" (dict "ports" (.api).ports "ipBlock" (.api).ipBlock) | nindent 4 }}
+    - ports:
+        {{- range .kafkaPorts }}
+        - port: {{ int . }}
+          protocol: TCP
+        {{- end }}
+{{- end }}

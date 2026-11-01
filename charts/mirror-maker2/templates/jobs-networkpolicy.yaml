@@ -1,0 +1,14 @@
+{{- /* DNS, the API server and Kafka for the Helm tests and the preflight and
+       secret-sync Jobs, where the namespace denies all traffic
+       (kafka-common.netpol.jobs). Some tests and the secret-sync pods carry
+       the chart's own component label, the others `test`. */}}
+{{- if .Values.networkPolicy.enabled }}
+{{- include "kafka-common.netpol.jobs" (dict
+      "name" (printf "%s-jobs" (include "mirror-maker2.fullname" .))
+      "namespace" (include "mirror-maker2.namespace" .)
+      "labels" (include "mirror-maker2.labels" .)
+      "instance" .Release.Name
+      "components" (list "preflight" "test" "mirror-maker2")
+      "kafkaPorts" .Values.networkPolicy.kafka.ports
+      "api" .Values.networkPolicy.apiServer) }}
+{{- end }}

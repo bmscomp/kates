@@ -20,6 +20,14 @@ spec:
       ports:
         - port: {{ .Values.containerPort }}
           protocol: TCP
+    # The Helm test, which asks Headlamp for its page
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "headlamp.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: {{ .Values.containerPort }}
+          protocol: TCP
   egress:
     - to:
         - namespaceSelector: {}
@@ -35,5 +43,12 @@ spec:
         - port: 443
           protocol: TCP
         - port: {{ .Values.networkPolicy.apiServer.port | default 6443 }}
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "headlamp.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: {{ .Values.containerPort }}
           protocol: TCP
 {{- end }}

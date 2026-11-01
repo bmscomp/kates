@@ -220,10 +220,11 @@ engines: {}
 
 # ── Network policy ───────────────────────────────────────────────────────────
 # Default-deny is NOT imposed; this policy scopes what the chaos infra pods in
-# the release namespace may talk to. Egress must include the Kubernetes API
-# server (the operator needs it) and DNS.
+# the release namespace may talk to, and is what lets them run where the
+# namespace denies all traffic by default. Egress must include the Kubernetes
+# API server (the operator needs it) and DNS.
 networkPolicy:
-  enabled: false
+  enabled: true
   # -- Egress to the Kubernetes API server (required by the chaos operator)
   apiServer:
     enabled: true

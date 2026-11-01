@@ -19,6 +19,9 @@
         "networkPolicy": {
             "type": "object",
             "properties": {
+                "enabled": { "type": "boolean" },
+                "clientNamespaces": { "type": "array", "items": { "type": "string" } },
+                "apiServerPorts": { "type": "array", "items": { "type": "integer" } },
                 "prometheusKafkaEgress": {
                     "type": "object",
                     "properties": {

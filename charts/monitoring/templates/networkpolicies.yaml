@@ -1,0 +1,143 @@
+{{- /*
+What the stack needs where every namespace starts from default-deny (ingress
+and egress). Prometheus and Alertmanager get open egress: they scrape and
+notify targets anywhere, kubelets and node IPs included, which no selector
+can name. Every other pod gets DNS, the API server and its own namespace.
+Ingress from outside the namespace has no `from` where the API server or a
+kubelet calls: they call from host addresses no namespaceSelector matches.
+The operator's webhook ingress and the admission Jobs come from the subchart
+(kube-prometheus-stack.prometheusOperator.networkPolicy).
+*/ -}}
+{{- $np := .Values.networkPolicy | default dict }}
+{{- if $np.enabled }}
+{{- $ns := .Release.Namespace }}
+{{- $clients := $np.clientNamespaces | default list }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-monitoring-base
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kates-monitoring.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - prometheus
+          - alertmanager
+          - grafana
+          - kube-state-metrics
+          - kube-prometheus-stack-prometheus-operator
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # The stack's own pods: Prometheus scraping, Grafana querying, the test.
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - ports:
+        {{- range ($np.apiServerPorts | default (list 443 6443)) }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+    - to:
+        - podSelector: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-monitoring-prometheus
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kates-monitoring.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - prometheus
+          - alertmanager
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # The query API, for Kates and whoever else clientNamespaces names.
+    - from:
+        {{- if $clients }}
+        {{- range $clients }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ tpl . $ | quote }}
+        {{- end }}
+        {{- else }}
+        - namespaceSelector: {}
+        {{- end }}
+      ports:
+        - port: 9090
+          protocol: TCP
+        - port: 9093
+          protocol: TCP
+  egress:
+    - {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-monitoring-grafana
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kates-monitoring.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: grafana
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # The UI, for an ingress controller or a port-forward from anywhere.
+    - ports:
+        - port: 3000
+          protocol: TCP
+  egress:
+    # Plugin and dashboard downloads, and datasources outside the cluster.
+    - ports:
+        - port: 443
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-monitoring-test
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kates-monitoring.labels" . | nindent 4 }}
+spec:
+  # The Helm test, which asks Prometheus and Grafana whether they are ready.
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: kates-monitoring
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - podSelector: {}
+{{- end }}

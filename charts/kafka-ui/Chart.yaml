@@ -4,7 +4,7 @@ description: A Helm chart for deploying Kafka UI (Kafbat) with Strimzi SCRAM-SHA
 type: application
 # Patch: the package ships the environment overlays (values-*.yaml), which
 # kates deploy passes with -f when it installs the published chart.
-version: 0.3.2
+version: 0.3.3
 appVersion: "v1.5.0"
 kubeVersion: ">=1.27.0-0"
 home: https://github.com/bmscomp/kates
@@ -25,6 +25,12 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "Egress to Kafka Connect and the schema registry is allowed in any namespace on their ports. It named the Kafka namespace, but kates deploy puts Connect in its own, so the UI could not reach it where policies are enforced"
+    - kind: fixed
+      description: "The NetworkPolicy lets the Helm test reach the UI on 8080; the test pod is selected by it and had neither the ingress nor the egress"
+    - kind: changed
+      description: "values-generic.yaml no longer switches networkPolicy off"
     - kind: changed
       description: "The package ships the environment overlays (values-*.yaml), which .helmignore used to leave out, so kates deploy installs the published chart with the same -f overlays as a checkout, and helm pull --untar hands them to anyone else"
     - kind: fixed
