@@ -102,6 +102,7 @@ var (
 	deployPortForward        bool
 	deployDryRun             bool
 	deployWithKafkaUI        bool
+	deployWithKates          bool
 	deployWithMirrorMaker2   bool
 	deployMM2NS              string
 	deployNamespaceLabels    []string
@@ -131,6 +132,7 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployWithSecretManager, "with-secret-manager", false, "Deploy Secret Manager (e.g., External Secrets Operator)")
 	deployCmd.Flags().BoolVar(&deployWithStrimzi, "with-strimzi", true, "Deploy Strimzi Operator")
 	deployCmd.Flags().BoolVar(&deployWithKafkaConnect, "with-kafka-connect", false, "Deploy Kafka Connect with PostgreSQL CDC (Debezium)")
+	deployCmd.Flags().BoolVar(&deployWithKates, "with-kates", true, "Deploy the Kates backend and its PostgreSQL database")
 	deployCmd.Flags().BoolVar(&deployWithKafkaUI, "with-kafka-ui", true, "Deploy Kafka UI for browser-based cluster monitoring")
 	deployCmd.Flags().BoolVar(&deployWithMirrorMaker2, "with-mirror-maker2", false, "Deploy MirrorMaker 2 as a loopback mirror of the primary (replication lab; kates migrate for real sources)")
 	deployCmd.Flags().StringArrayVar(&deployNamespaceLabels, "namespace-label", nil, "Label to apply to the namespaces deploy ensures (key=value, repeatable; overrides KATES_NAMESPACE_LABELS, which overrides the labels file)")
@@ -436,7 +438,9 @@ func configureDeploySelection(cmd *cobra.Command, wizard bool) error {
 		if err := checkAdminlessPrerequisites(context.Background(), resolveNamespaces()); err != nil {
 			return err
 		}
-		adminlessComplianceMissing = missingComplianceGrants(context.Background(), resolveNamespaces().kafka)
+		if deployWithKates {
+			adminlessComplianceMissing = missingComplianceGrants(context.Background(), resolveNamespaces().kafka)
+		}
 		if len(adminlessComplianceMissing) > 0 {
 			output.Warn(complianceRoleHandoff(resolveNamespaces(), adminlessComplianceMissing))
 		}
@@ -691,7 +695,9 @@ func finishDeploy(ctx context.Context, target string, ns resolvedNamespaces, ent
 	// Store the key from Secret kates-api-key in the active context,
 	// unless that context holds a key kates did not put there or its API
 	// refuses the key (it points at another cluster).
-	updateActiveContextAPIKey(ctx, ns.app)
+	if deployWithKates {
+		updateActiveContextAPIKey(ctx, ns.app)
+	}
 
 	if deployPortForward {
 		RunPortForwards(ctx, target, ns.kafka, ns.app, ns.jaeger)

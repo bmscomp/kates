@@ -186,7 +186,9 @@ func adminlessGrants(ns resolvedNamespaces) map[string][]string {
 		for _, namespace := range adminlessStrimziNamespaces(ns) {
 			add(namespace, "podmonitors.monitoring.coreos.com", "prometheusrules.monitoring.coreos.com")
 		}
-		add(ns.app, "servicemonitors.monitoring.coreos.com", "prometheusrules.monitoring.coreos.com")
+		if deployWithKates {
+			add(ns.app, "servicemonitors.monitoring.coreos.com", "prometheusrules.monitoring.coreos.com")
+		}
 	}
 	for namespace, resources := range grants {
 		slices.Sort(resources)

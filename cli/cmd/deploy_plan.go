@@ -71,6 +71,7 @@ func runComponentForm(picked *[]string) error {
 	isolated := "Isolated Namespaces (kafka, kates, monitoring, litmus)"
 	componentOptions := []huh.Option[string]{
 		option("🦊 Strimzi Operator", "strimzi", deployWithStrimzi),
+		option("📦 Kates Backend", "kates", deployWithKates),
 		option("🔗 Kafka Connect + PostgreSQL (CDC)", "kafka-connect", deployWithKafkaConnect),
 		option("💻 Kafka UI (Dashboard)", "kafka-ui", deployWithKafkaUI),
 		option("🔁 MirrorMaker 2 (loopback mirror of the primary)", "mirror-maker2", deployWithMirrorMaker2),
@@ -84,7 +85,7 @@ func runComponentForm(picked *[]string) error {
 		// engineering, and monitoring only as the scrape of a Prometheus
 		// already on the cluster.
 		isolated = "Isolated Namespaces (existing ones: kafka, connect, db, kates)"
-		componentOptions = []huh.Option[string]{componentOptions[1], componentOptions[2], componentOptions[3]}
+		componentOptions = []huh.Option[string]{componentOptions[1], componentOptions[2], componentOptions[3], componentOptions[4]}
 		prometheus := prometheusOperatorAPI(context.Background())
 		if prometheus {
 			componentOptions = append(componentOptions,
@@ -95,10 +96,9 @@ func runComponentForm(picked *[]string) error {
 	componentFields := []huh.Field{
 		huh.NewMultiSelect[string]().
 			Title("Select Components").
-			Description("Space toggles, enter confirms. Kafka and the Kates backend are always deployed. After · is what is installed now.").
+			Description("Space toggles, enter confirms. Kafka is always deployed; Kates Backend brings its own PostgreSQL. After · is what is installed now.").
 			Options(componentOptions...).
 			Value(picked),
-		huh.NewNote().Title("Always deployed").Description("📦 Kates Backend + 🐘 Kates Database (PostgreSQL)\n📨 Kafka Cluster"),
 	}
 	if len(leftOut) > 0 {
 		componentFields = append(componentFields, huh.NewNote().Title("Not installed admin-less").Description(describeLeftOut(leftOut)))
@@ -229,6 +229,7 @@ func applyPickedComponents(picked []string) {
 	deployWithKyverno = false
 	deployWithStrimzi = false
 	deployWithKafkaUI = false
+	deployWithKates = false
 	deployWithMirrorMaker2 = false
 	deployAdminlessScrape = false
 
@@ -240,6 +241,8 @@ func applyPickedComponents(picked []string) {
 			deployWithKafkaConnect = true
 		case "kafka-ui":
 			deployWithKafkaUI = true
+		case "kates":
+			deployWithKates = true
 		case "mirror-maker2":
 			deployWithMirrorMaker2 = true
 		case "chaos":
@@ -269,7 +272,9 @@ func printTopologyResolution() {
 			PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Kafka Connect", deployConnectNS))
 			PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Database", deployDbNS))
 		}
-		PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Kates App", deployAppNS))
+		if deployWithKates {
+			PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Kates App", deployAppNS))
+		}
 		if deployWithKafkaUI {
 			PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Kafka UI", deployKafkaUINS))
 		}
@@ -305,6 +310,9 @@ func printComponentSelection() {
 	}
 	if deployWithKyverno {
 		PrintPhaseSuccess("Kyverno (Policies)")
+	}
+	if deployWithKates {
+		PrintPhaseSuccess("Kates Backend")
 	}
 	if deployWithKafkaUI {
 		PrintPhaseSuccess("Kafka UI (Dashboard)")
@@ -390,7 +398,9 @@ func componentSelected(id string) bool {
 		return deployWithMirrorMaker2
 	case "chaos":
 		return deployWithChaos
-	case "kafka", "kafka-users", "kates":
+	case "kates":
+		return deployWithKates
+	case "kafka", "kafka-users":
 		return true
 	}
 	return false

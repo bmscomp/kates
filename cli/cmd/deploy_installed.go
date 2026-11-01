@@ -299,6 +299,7 @@ var componentFlags = map[string]string{
 	"apicurio":        "--with-schema-registry apicurio",
 	"connect-cluster": "--with-kafka-connect",
 	"kafka-ui":        "--with-kafka-ui",
+	"kates":           "--with-kates",
 	"mm2":             "--with-mirror-maker2",
 	"monitoring":      "--with-monitoring",
 }

@@ -1094,3 +1094,42 @@ func TestRunExecDefault_NonVerboseCommandsRunConcurrently(t *testing.T) {
 		t.Errorf("two concurrent sleep 0.3 took %s, so they ran one after the other", elapsed)
 	}
 }
+
+// --with-kates=false deploys the rest of the stack without the Kates backend
+// and its database: no kates release is installed, Kafka still is.
+func TestDeployCommand_WithoutKates(t *testing.T) {
+	saveComponentFlags(t)
+	deployTopology, deployNamespace = "single", "kates-test"
+	deployWithSchemaRegistry = "none"
+	deployWithChaos, deployWithMonitoring, deployWithCertManager, deployWithKyverno = false, false, false, false
+	deployWithStrimzi, deployWithKafkaConnect = false, false
+	deployWithKates = false
+
+	var helmCalls []string
+	var mu sync.Mutex
+	runExecFn = func(ctx context.Context, name string, args ...string) error { return nil }
+	runExecStdinFn = func(ctx context.Context, name string, args []string, stdinData string) error { return nil }
+	runHelmFn = func(ctx context.Context, args ...string) error {
+		mu.Lock()
+		helmCalls = append(helmCalls, "helm "+strings.Join(args, " "))
+		mu.Unlock()
+		return nil
+	}
+	isHelmReleaseDeployedFn = func(ctx context.Context, release, namespace string) bool { return false }
+	defaultExecutor = &MockExecutor{}
+
+	_ = deployCmd.Flags().Set("topology", deployTopology)
+	if err := runDeploy(deployCmd, []string{}); err != nil {
+		t.Fatalf("runDeploy failed: %v", err)
+	}
+	foundKafka := false
+	for _, c := range helmCalls {
+		if strings.Contains(c, "helm upgrade --install kates ") {
+			t.Errorf("kates was installed with --with-kates=false: %s", c)
+		}
+		foundKafka = foundKafka || strings.Contains(c, "helm upgrade --install krafter")
+	}
+	if !foundKafka {
+		t.Error("Kafka was not installed")
+	}
+}

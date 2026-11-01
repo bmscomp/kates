@@ -238,7 +238,9 @@ func selectedDeployNamespaces(dc *deployContext) []string {
 	}
 
 	add(dc.ns.kafka)
-	add(dc.ns.app)
+	if deployWithKates {
+		add(dc.ns.app)
+	}
 	if deployWithMonitoring {
 		add(dc.ns.jaeger)
 	}
@@ -1605,6 +1607,7 @@ func (dc *deployContext) katesComponent() component {
 	return component{
 		id: "kates", name: "Kates Backend", namespace: appNS,
 		deps: []string{"kafka-users", "postgres", "monitoring"}, timeout: 8 * time.Minute,
+		enabled: func() bool { return deployWithKates },
 		// The KafkaUser was already waited on (kafka-users) — just read the Secret.
 		secrets: []secretCopy{{name: "kates-backend"}},
 		banner: func(ctx context.Context) string {

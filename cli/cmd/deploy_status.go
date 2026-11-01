@@ -167,10 +167,8 @@ func statusComponents(kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaU
 		{"B", "🔗", "Kafka Connect", "connect-cluster", connectNS, "kafkaconnects.kafka.strimzi.io", "connect-cluster"},
 		{"B", "📊", "Monitoring Stack", "monitoring", jaegerNS, "pod", "-l release=monitoring"},
 		{"C", "📋", "Apicurio Registry", "apicurio", kafkaNS, "pod", "-l app.kubernetes.io/instance=apicurio"},
-		// The instance label also matches the chart's embedded PostgreSQL pod, so
-		// each workload is checked by name: one row for the API, one for its database.
+		// By name: the instance label also matches the chart's embedded PostgreSQL pod.
 		{"C", "📦", "Kates Backend", "kates", appNS, "deployment", "kates"},
-		{"C", "🐘", "Kates Database", "kates", appNS, "statefulset", "kates-postgresql"},
 		{"C", "💻", "Kafka UI", "kafka-ui", kafkaUINS, "pod", "-l app.kubernetes.io/name=kafka-ui"},
 		{"C", "🔁", "MirrorMaker 2", "mm2", mm2NS, "kafkamirrormaker2s.kafka.strimzi.io", "mm2-mirror-maker2"},
 		{"C", "🧪", "Litmus Chaos", "chaos", chaosNS, "pod", "-l app.kubernetes.io/instance=chaos"},
