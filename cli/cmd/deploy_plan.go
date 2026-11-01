@@ -499,4 +499,6 @@ type deployContext struct {
 	// existing release.
 	installedMu  sync.Mutex
 	installedNow map[string]bool
+	// policyValues are the -f arguments of .policies' values, by chart.
+	policyValues map[string][]string
 }

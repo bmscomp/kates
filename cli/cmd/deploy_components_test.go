@@ -854,6 +854,7 @@ func TestDeployGroupBReconcilesKafkaWhenReleaseExistsButCRNotReady(t *testing.T)
 			Name:      "krafter",
 			Namespace: "kafka",
 		},
+		policyValues: map[string][]string{"kafka-cluster": {"-f", "kafka-cluster-policies.yaml"}},
 	}, "kafka")
 	if err != nil {
 		t.Fatalf("kafka component returned error: %v", err)
@@ -864,6 +865,13 @@ func TestDeployGroupBReconcilesKafkaWhenReleaseExistsButCRNotReady(t *testing.T)
 	}
 	if !sliceContainsPrefix(helmCalls, "upgrade --install krafter charts/kafka-cluster -n kafka") {
 		t.Fatalf("Kafka release was not reconciled; helm calls = %v", helmCalls)
+	}
+	// .policies' values go to the chart, after deploy's own values files.
+	for _, call := range helmCalls {
+		if strings.HasPrefix(call, "upgrade --install krafter") &&
+			strings.Index(call, "-f kafka-cluster-policies.yaml") < strings.LastIndex(call, "values-platform.yaml") {
+			t.Errorf("policies values missing or before deploy's files: %s", call)
+		}
 	}
 }
 

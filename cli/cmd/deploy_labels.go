@@ -7,7 +7,9 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
 
@@ -32,29 +34,27 @@ var (
 	reservedLabelDomains = []string{"kubernetes.io", "k8s.io", "helm.sh", "strimzi.io", "kates.io"}
 )
 
-// addLabelsFileFlag registers --labels-file on a command that creates
-// namespaces; every such command shares namespaceLabelsFile.
+// addLabelsFileFlag registers --labels-file and --policies-file on a command
+// that creates namespaces; every such command shares namespaceLabelsFile and
+// policiesFilePath.
 func addLabelsFileFlag(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&namespaceLabelsFile, "labels-file", "", "File of key=value labels for the namespaces Kates creates (default: ./.labels, when it exists)")
+	cmd.Flags().StringVar(&namespaceLabelsFile, "labels-file", "", "File of key=value labels for the namespaces Kates creates (default: ./.labels, when it exists; .policies' namespaceLabels win a clash)")
+	addPoliciesFileFlag(cmd)
 }
 
+var warnLabelsFileOnce sync.Once
+
 // namespaceUserLabels merges the user's namespace labels, later sources
-// winning per key: the labels file, then KATES_NAMESPACE_LABELS, then
+// winning per key: the labels file, then the current kube context's
+// namespaceLabels in .policies, then KATES_NAMESPACE_LABELS, then
 // --namespace-label. sources says where each key's value came from.
 func namespaceUserLabels() (labels, sources map[string]string, err error) {
 	labels, sources = map[string]string{}, map[string]string{}
-	path, required := namespaceLabelsFile, true
-	if path == "" {
-		path, required = defaultLabelsFile, false
+	if err := addLabelsFileLabels(labels, sources); err != nil {
+		return nil, nil, err
 	}
-	data, err := os.ReadFile(path)
-	switch {
-	case err == nil:
-		if err := parseNamespaceLabelsFile(path, string(data), labels, sources); err != nil {
-			return nil, nil, err
-		}
-	case required || !errors.Is(err, fs.ErrNotExist):
-		return nil, nil, fmt.Errorf("labels file: %w", err)
+	if err := addPoliciesNamespaceLabels(labels, sources); err != nil {
+		return nil, nil, err
 	}
 	if raw := strings.TrimSpace(os.Getenv(namespaceLabelsEnv)); raw != "" {
 		if err := addDeployNamespaceLabelSpecs(labels, sources, raw, namespaceLabelsEnv); err != nil {
@@ -67,6 +67,44 @@ func namespaceUserLabels() (labels, sources map[string]string, err error) {
 		}
 	}
 	return labels, sources, nil
+}
+
+// addLabelsFileLabels adds the labels of --labels-file, or of ./.labels when
+// it exists.
+func addLabelsFileLabels(labels, sources map[string]string) error {
+	path, required := namespaceLabelsFile, true
+	if path == "" {
+		path, required = defaultLabelsFile, false
+	}
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		if err := parseNamespaceLabelsFile(path, string(data), labels, sources); err != nil {
+			return err
+		}
+		warnLabelsFileOnce.Do(func() {
+			output.Hint(path + " is read as namespace labels; .policies holds them now, per kube context, under namespaceLabels")
+		})
+	case required || !errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("labels file: %w", err)
+	}
+	return nil
+}
+
+// addPoliciesNamespaceLabels adds the current kube context's namespaceLabels
+// from .policies. kubectl is asked for the context only when the file has
+// environments.
+func addPoliciesNamespaceLabels(labels, sources map[string]string) error {
+	doc, err := readPoliciesDoc()
+	if err != nil || len(doc.Environments) == 0 {
+		return err
+	}
+	env := currentContextName()
+	path, _ := policiesFile()
+	for k, v := range doc.Environments[env].NamespaceLabels {
+		labels[k], sources[k] = v, path+": environments."+env
+	}
+	return nil
 }
 
 // parseNamespaceLabelsFile reads key=value lines. Blank lines and # comment

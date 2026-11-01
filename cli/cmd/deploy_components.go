@@ -689,7 +689,7 @@ func (dc *deployContext) strimziComponent() component {
 				"--set", "crdUpgrade.enabled=false"}
 			opArgs = append(opArgs, versionArgs...)
 			opArgs = append(opArgs, "--timeout", "10m")
-			return runHelmFn(ctx, opArgs...)
+			return runHelmFn(ctx, append(opArgs, dc.policyArgs("strimzi-operator")...)...)
 		},
 		wait: func(ctx context.Context) error {
 			return dc.waitPods(ctx, ns, "name=strimzi-cluster-operator", 5*time.Minute, "Strimzi operator readiness failed")
@@ -1064,7 +1064,7 @@ func (dc *deployContext) monitoringComponent() component {
 				dl.Println("    - Reusing existing Prometheus Operator CRDs...")
 				monitoringArgs = append(monitoringArgs, "--set", "kube-prometheus-stack.crds.enabled=false")
 			}
-			return runHelmFn(ctx, monitoringArgs...)
+			return runHelmFn(ctx, append(monitoringArgs, dc.policyArgs("monitoring")...)...)
 		},
 		wait: func(ctx context.Context) error {
 			if err := dc.waitPods(ctx, jaegerNS, "release=monitoring", 10*time.Minute, ""); err != nil {
@@ -1106,9 +1106,9 @@ func (dc *deployContext) postgresComponent() component {
 			// This repository's chart, on the official postgres image: its
 			// defaults are the demo's (debezium/debezium, database orders,
 			// wal_level=logical), and it keeps bitnami/postgresql's names.
-			return runHelmFn(ctx, "upgrade", "--install", "postgresql", chartRootPath("charts/cdc-postgresql"),
+			return runHelmFn(ctx, append([]string{"upgrade", "--install", "postgresql", chartRootPath("charts/cdc-postgresql"),
 				"-n", dbNS, "--create-namespace",
-				"--timeout", "5m")
+				"--timeout", "5m"}, dc.policyArgs("cdc-postgresql")...)...)
 		},
 		wait: func(ctx context.Context) error {
 			if err := waitComponentReadySilent(ctx, deployDbNS, "app.kubernetes.io/instance=postgresql", 5*time.Minute); err != nil {
@@ -1203,7 +1203,7 @@ func (dc *deployContext) kafkaComponent() component {
 			// (Values files are already appended above so these overrides take precedence)
 			kafkaArgs = append(kafkaArgs, dc.scrapeArgs("charts/kafka-cluster")...)
 
-			return runHelmFn(ctx, kafkaArgs...)
+			return runHelmFn(ctx, append(kafkaArgs, dc.policyArgs("kafka-cluster")...)...)
 		},
 		wait: func(ctx context.Context) error {
 			deadline := deployClock.Now().Add(15 * time.Minute)
@@ -1430,7 +1430,7 @@ func (dc *deployContext) kafkaConnectHelmArgs(bootstrap, kafkaSvcDomain, connect
 	// CRDs its PodMonitor needs exist; without --with-monitoring the
 	// chart's own API check keeps a bare cluster installable.
 	connectArgs = append(connectArgs, dc.scrapeArgs("charts/connect-cluster")...)
-	return connectArgs
+	return append(connectArgs, dc.policyArgs("connect-cluster")...)
 }
 
 // debeziumConnectorYAML is the Debezium source connector: its namespace, the
@@ -1568,7 +1568,8 @@ func (dc *deployContext) apicurioComponent() component {
 			return fmt.Sprintf("\n📦 Deploying Apicurio Schema Registry (Namespace: %s)...", kafkaNS)
 		},
 		install: func(ctx context.Context) error {
-			return runHelmFn(ctx, "upgrade", "--install", "apicurio", chartRootPath("charts/apicurio-registry"), "-n", kafkaNS, "--create-namespace", "--timeout", "5m")
+			return runHelmFn(ctx, append([]string{"upgrade", "--install", "apicurio", chartRootPath("charts/apicurio-registry"), "-n", kafkaNS, "--create-namespace", "--timeout", "5m"},
+				dc.policyArgs("apicurio-registry")...)...)
 		},
 	}
 }
@@ -1661,6 +1662,7 @@ func (dc *deployContext) katesComponent() component {
 					katesArgs = append(katesArgs, "--set", "rbac.kafkaNamespaceRole=false")
 				}
 			}
+			katesArgs = append(katesArgs, dc.policyArgs("kates")...)
 			katesArgs = append(katesArgs, "--timeout", "8m")
 
 			dl.Println("    - Waiting for Kates backend pods to become ready (this may take 2-3 minutes)...")
@@ -1704,7 +1706,7 @@ func (dc *deployContext) kafkaUIComponent() component {
 			if overlay := dc.chartOverlay(chartRootPath("charts/kafka-ui")); dc.fileExists(overlay) {
 				helmArgs = append(helmArgs, "-f", overlay)
 			}
-			return runHelmFn(ctx, helmArgs...)
+			return runHelmFn(ctx, append(helmArgs, dc.policyArgs("kafka-ui")...)...)
 		},
 	}
 }
@@ -1760,6 +1762,7 @@ func (dc *deployContext) mirrorMaker2Component() component {
 				)
 			}
 			helmArgs = append(helmArgs, dc.scrapeArgs("charts/mirror-maker2")...)
+			helmArgs = append(helmArgs, dc.policyArgs("mirror-maker2")...)
 			helmArgs = append(helmArgs, "--timeout", "10m")
 			return runHelmFn(ctx, helmArgs...)
 		},
@@ -1795,7 +1798,7 @@ func (dc *deployContext) chaosComponent() component {
 				"--set", "rbac.kafkaNamespace=" + kafkaNS}
 			chaosArgs = append(chaosArgs, dc.scrapeArgs("charts/kates-chaos")...)
 			chaosArgs = append(chaosArgs, "--timeout", "5m")
-			return runHelmFn(ctx, chaosArgs...)
+			return runHelmFn(ctx, append(chaosArgs, dc.policyArgs("kates-chaos")...)...)
 		},
 		wait: func(ctx context.Context) error {
 			return dc.waitPods(ctx, chaosNS, "app.kubernetes.io/instance=chaos", 5*time.Minute, "")
