@@ -859,7 +859,8 @@ Labels come from three sources. For a key that more than one sets, the later sou
 | Source | Form | Order |
 |:--------------------------------|:------------------------------------|:-----------------|
 | `.labels`, or the `--labels-file` file | One `key=value` per line | First |
-| `KATES_NAMESPACE_LABELS` | Comma-separated `key=value` entries | Second |
+| `namespaceLabels` of the current kube context in `.policies` | A YAML map; see [Kyverno Policies File](#kyverno-policies-file) | Second |
+| `KATES_NAMESPACE_LABELS` | Comma-separated `key=value` entries | Third |
 | `--namespace-label` | One `key=value` per flag, repeatable | Last |
 
 A key given twice inside the variable, or in two flags, takes its last value. Every source follows the same rules, which are the Kubernetes label syntax plus a set of reserved prefixes:
@@ -943,6 +944,59 @@ A run that finds an operator namespace installed leaves its labels as they are. 
 `kates auto` and `kates kyverno apply` label their namespaces the way `kates deploy` does. The scripts are simpler. `ensure_namespace` reads only `.labels` in the directory you run the script from, not `--labels-file` or `KATES_NAMESPACE_LABELS`, and applies its lines with `kubectl label namespace <ns> … --overwrite`. It adds no managed-by label and no annotation, so a label whose line you delete stays on the namespace. It checks only that each line starts with a letter or digit and holds a `=`, and stops on any other line; kubectl checks the rest of the syntax, and nothing refuses the reserved prefixes. Without a `.labels`, or with one that has no labels, it labels nothing.
 
 Where your account may not create namespaces at all, [Running Without Cluster Admin](#running-without-cluster-admin) installs the `kates` chart into a namespace the team already has.
+
+## Kyverno Policies File
+
+A cluster's Kyverno policies often ask for more than namespace labels: a label on every pod, an allowed registry, resource limits. `.policies` records what one cluster needs, so that `kates deploy` gives it to every chart it installs. It holds one environment per kube context, so a file can describe your Kind cluster, staging and production side by side. `.gitignore` lists it, and Kates writes it readable by your user only, because it names teams, cost centers and registries.
+
+```yaml
+environments:
+  kind-panda:
+    namespaceLabels:
+      team: payments
+    podLabels:
+      team: payments
+      cost-center: cc-42
+    values:
+      kates:
+        global:
+          imageRegistry: registry.internal/kates
+    unresolved:
+      - chart: kafka-cluster
+        namespace: kafka
+        policy: disallow-host-path
+        rule: host-path
+        message: HostPath volumes are forbidden.
+        fix: a PolicyException of your own
+```
+
+Each key of an environment does one thing on a deploy:
+
+| Key | What `kates deploy` does with it |
+|:--------------------------|:----------------------------------------------------------------|
+| `namespaceLabels` | Labels the namespaces it creates or deploys into, after `.labels` and before `KATES_NAMESPACE_LABELS` and `--namespace-label` |
+| `podLabels` | Sets the labels on every pod of every chart it installs, under each value that labels that chart's pods: `podLabels`, and a subchart's own, such as `strimzi-kafka-operator.labels`. A label the chart's `values` already set there wins |
+| `values` | Values per chart, by chart name, passed after deploy's own values files; a value deploy sets with `--set` still wins |
+| `unresolved` | Nothing: deploy warns, naming each rule, and installs. They are the rules the last check could not fix |
+
+Deploy reads the environment named after the kube context it deploys to. A context with no environment gets nothing from the file. `--policies-file <path>` reads another file, which must exist. Deploy refuses a file with a key it doesn't know, a label that breaks the [label rules](#step-2--check-the-labels), or values for a chart it doesn't install.
+
+### Fill It In From the Cluster
+
+`kates kyverno check --write-policies` holds the charts to the current context's policies, as described in [kyverno check](10-cli-reference.md#kyverno-check), and writes what they need into that context's environment:
+
+```bash
+kates kyverno check --stack --write-policies
+```
+
+- The check renders the namespaces deploy creates, with their labels, as well as the charts. So it finds the namespace labels a policy requires too.
+- A missing label gets its value from `--label key=value`. Otherwise it gets the one exact value the policy's pattern names, such as `cost-center: cc-42`. A pattern of `?*`, a choice of values like `web | data`, or an optional key has no one value. Those labels go under `unresolved` for you to fill in.
+- Every other failed rule goes under `unresolved`, with the chart value most likely to fix it. Put that value under `values.<chart>`, or write a PolicyException.
+- Labels and values already in the environment are kept, and other environments are left alone. A label the environment already sets that a policy still refuses goes under `unresolved`, naming the refused value.
+
+Run the check again after editing. It applies the environment to the render the way deploy would, so an empty `unresolved` and exit code `0` mean deploy's charts pass the policies the check can evaluate offline.
+
+`.labels` still works, as namespace labels, and Kates says once per run that `.policies` now holds them. Move them under `namespaceLabels` of each environment when you're ready.
 
 ## Running Without Cluster Admin
 

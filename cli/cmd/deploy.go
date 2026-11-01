@@ -169,7 +169,17 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer pinKubeContext(target)()
+	// Again, now that the target is the current context: .policies' namespace
+	// labels are the target's.
+	if namespaceLabels, namespaceLabelSources, err = namespaceUserLabels(); err != nil {
+		return err
+	}
+	policies, err := readDeployPolicies(target)
+	if err != nil {
+		return err
+	}
 	PrintDeployBanner(target)
+	warnUnresolvedPolicies(policies)
 
 	// Guarded by isInteractive: the forms open /dev/tty directly, so without a
 	// terminal they fail with "could not open a new TTY" rather than falling
@@ -214,6 +224,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if err := writeDeployValues(executor, valuesFile, report, primary.Name); err != nil {
 		return err
 	}
+	policyValues, err := writeDeployPolicyValues(policies, valuesFile)
+	if err != nil {
+		return err
+	}
 
 	// Resolve namespaces before building entries
 	ns := resolveNamespaces()
@@ -253,7 +267,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	PrintPhaseHeader(nextDeployPhase(), "Executing Deployment Pipeline")
 
 	newDC := func(ctx context.Context) *deployContext {
-		return newDeployContext(ctx, ns, valuesFile, report, vp, primary)
+		dc := newDeployContext(ctx, ns, valuesFile, report, vp, primary)
+		dc.policyValues = policyValues
+		return dc
 	}
 	return runDeployAndReport(commandContext(cmd), newDC, target, ns, errorLog, sharedEntries, deployStartTime)
 }

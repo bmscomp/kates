@@ -214,6 +214,7 @@ secrets/
 .env.*
 !.env.example
 .labels
+.policies
 credentials.json
 service-account.json
 

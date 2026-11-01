@@ -28,6 +28,7 @@ var (
 	kyvernoCheckStack     bool
 	kyvernoCheckWriteTo   string
 	kyvernoCheckLabels    []string
+	kyvernoCheckPolicies  bool
 )
 
 // kyvernoPathFn finds the Kyverno CLI, which evaluates the policies offline.
@@ -43,9 +44,6 @@ type kyvernoStackChart struct {
 	deps []string
 	// values are files of the chart deploy always passes, under the chart root.
 	values []string
-	// labelKeys are the values whose maps label every pod the chart renders:
-	// podLabels, and a wrapped subchart's own (scripts/check-chart-policies.sh label_args).
-	labelKeys []string
 	// exceptions: the chart renders kyvernoPolicy.exceptions as a PolicyException.
 	exceptions bool
 }
@@ -56,24 +54,18 @@ type kyvernoStackChart struct {
 // add one here if a policy turns on it.
 var kyvernoStackCharts = []kyvernoStackChart{
 	{name: "strimzi-operator", release: "strimzi-operator", ns: func(resolvedNamespaces) string { return operatorNS },
-		selected: func() bool { return deployWithStrimzi }, deps: []string{"build"},
-		labelKeys: []string{"podLabels", "strimzi-kafka-operator.labels"}},
+		selected: func() bool { return deployWithStrimzi }, deps: []string{"build"}},
 	{name: "monitoring", release: "monitoring", ns: func(n resolvedNamespaces) string { return n.jaeger },
-		selected: func() bool { return deployWithMonitoring }, deps: []string{"update"},
-		labelKeys: []string{"podLabels", "kube-prometheus-stack.commonLabels", "kube-prometheus-stack.grafana.podLabels",
-			"kube-prometheus-stack.prometheusOperator.podLabels", "kube-prometheus-stack.kube-state-metrics.podLabels",
-			"kube-prometheus-stack.prometheus-node-exporter.podLabels"}},
+		selected: func() bool { return deployWithMonitoring }, deps: []string{"update"}},
 	{name: "kafka-cluster", ns: func(n resolvedNamespaces) string { return n.kafka },
 		selected: func() bool { return true }, deps: []string{"update"},
-		values: []string{"charts/kafka-cluster/values-platform.yaml"}, labelKeys: []string{"podLabels"}},
+		values: []string{"charts/kafka-cluster/values-platform.yaml"}},
 	{name: "connect-cluster", release: "connect-cluster", ns: func(n resolvedNamespaces) string { return n.connect },
-		selected: func() bool { return deployWithKafkaConnect }, deps: []string{"update", "--skip-refresh"},
-		labelKeys: []string{"podLabels"}},
+		selected: func() bool { return deployWithKafkaConnect }, deps: []string{"update", "--skip-refresh"}},
 	{name: "mirror-maker2", release: "mm2", ns: func(n resolvedNamespaces) string { return n.mm2 },
-		selected: func() bool { return deployWithMirrorMaker2 }, deps: []string{"update", "--skip-refresh"},
-		labelKeys: []string{"podLabels"}},
+		selected: func() bool { return deployWithMirrorMaker2 }, deps: []string{"update", "--skip-refresh"}},
 	{name: "kates", release: "kates", ns: func(n resolvedNamespaces) string { return n.app },
-		selected: func() bool { return true }, labelKeys: []string{"podLabels"}, exceptions: true},
+		selected: func() bool { return true }, exceptions: true},
 }
 
 // kyvernoCheckedCharts are the charts this run checks: --stack's, --chart's,
@@ -156,6 +148,13 @@ files back with -f <chart>=<file>. Kafka's broker pods come from the Kafka
 CR's templates, which Strimzi renders: the kafka-cluster chart's podLabels
 reach them, but the check sees only the CR.
 
+The current kube context's environment of .policies applies as deploy
+applies it (its pod labels and values, before -f and --set), and each
+namespace is checked as the Namespace deploy would create, with its labels.
+--write-policies writes into that environment the labels the policies need,
+from --label or the one value a policy's pattern names, and lists every rule
+no value fixes under unresolved.
+
 It reads ClusterPolicies, ValidatingPolicies and ImageValidatingPolicies, the
 namespace's Policies, and PolicyExceptions in every namespace (the release's
 only, when the account may not list the others). A kind the cluster does not
@@ -201,6 +200,26 @@ rule fails, 2 when the check could not run or could not read every policy.`,
 			return couldNotTell(err.Error())
 		}
 
+		// The current context's .policies, as deploy would apply them there.
+		doc, err := readPoliciesDoc()
+		if err != nil {
+			return couldNotTell(err.Error())
+		}
+		env := ""
+		if len(doc.Environments) > 0 || kyvernoCheckPolicies {
+			env = currentContextName()
+		}
+		policies := doc.Environments[env]
+		namespaceLabels, err := deployNamespaceLabelMap()
+		if err != nil {
+			return couldNotTell(err.Error())
+		}
+		policyDir, err := os.MkdirTemp("", "kates-kyverno-policies-")
+		if err != nil {
+			return couldNotTell(err.Error())
+		}
+		defer os.RemoveAll(policyDir)
+
 		resolved := resolveNamespaces()
 		exceptions := readKyvernoExceptionScope(ctx)
 		reads := map[string]kyvernoRead{}
@@ -211,14 +230,21 @@ rule fails, 2 when the check could not run or could not read every policy.`,
 				ns = c.ns(resolved)
 			}
 			read, ok := reads[ns]
+			namespace := ""
 			if !ok {
+				// Each namespace once, with the first chart deploy puts there.
+				namespace = deployNamespaceManifest(ns, namespaceLabels)
 				if read, err = readKyvernoPolicies(ctx, ns); err != nil {
 					return couldNotTell(err.Error())
 				}
 				read.exceptions = slices.DeleteFunc(read.exceptions, func(e []byte) bool { return !exceptions.acceptsObject(e) })
 				reads[ns] = read
 			}
-			report, err := checkKyvernoChart(ctx, kyvernoBin, c, ns, read, exceptions)
+			policyArgs, err := policies.writeChartValues(policyDir, c.name)
+			if err != nil {
+				return couldNotTell(err.Error())
+			}
+			report, err := checkKyvernoChart(ctx, kyvernoBin, c, ns, read, exceptions, policyArgs, namespace)
 			if err != nil {
 				return couldNotTell(c.name + ": " + err.Error())
 			}
@@ -229,19 +255,40 @@ rule fails, 2 when the check could not run or could not read every policy.`,
 			}
 			reports = append(reports, report)
 		}
+		if kyvernoCheckPolicies {
+			if env == "" {
+				return couldNotTell("--write-policies: kubectl has no current context to file the policies under")
+			}
+			var all [][]byte
+			for _, r := range reads {
+				all = append(all, r.policies...)
+			}
+			updated := policies.withFindings(reports, labels, policyLabelRules(all))
+			path, err := saveDeployPolicies(env, updated)
+			if err != nil {
+				return couldNotTell(err.Error())
+			}
+			output.Hint(fmt.Sprintf("Wrote environment %s of %s: %d namespace label(s), %d pod label(s), %d rule(s) left unresolved; check again to confirm",
+				env, path, len(updated.NamespaceLabels), len(updated.PodLabels), len(updated.Unresolved)))
+		}
 		return finishKyvernoCheck(reports)
 	},
 }
 
 // checkKyvernoChart renders one chart in ns and holds it to the policies read.
-func checkKyvernoChart(ctx context.Context, kyvernoBin string, c kyvernoStackChart, ns string, read kyvernoRead, exceptions kyvernoExceptionScope) (kyvernoCheckReport, error) {
+// namespace, when not empty, is the manifest of the namespace deploy would
+// create for the chart, held to the policies with the render.
+func checkKyvernoChart(ctx context.Context, kyvernoBin string, c kyvernoStackChart, ns string, read kyvernoRead, exceptions kyvernoExceptionScope, policyArgs []string, namespace string) (kyvernoCheckReport, error) {
 	report := kyvernoCheckReport{Chart: c.name, Namespace: ns, Unread: read.unread}
 	if len(read.policies) == 0 {
 		return report, nil
 	}
-	render, err := renderChart(ctx, c, ns)
+	render, err := renderChart(ctx, c, ns, policyArgs)
 	if err != nil {
 		return report, err
+	}
+	if namespace != "" {
+		render = append(render, []byte("\n---\n"+namespace)...)
 	}
 	report.ExceptionNote = exceptions.note(ns, render)
 	dir, err := os.MkdirTemp("", "kates-kyverno-check-")
@@ -441,7 +488,7 @@ func listKyvernoKind(ctx context.Context, resource, scope, ns string) ([][]byte,
 // renderChart renders a chart as deploy would install it in ns, after the
 // helm dependency command deploy runs on it. kyverno.io/v2 lets the chart
 // render its own PolicyException, as on a cluster that has Kyverno.
-func renderChart(ctx context.Context, c kyvernoStackChart, ns string) ([]byte, error) {
+func renderChart(ctx context.Context, c kyvernoStackChart, ns string, policyArgs []string) ([]byte, error) {
 	dir := chartRootPath("charts/" + c.name)
 	if len(c.deps) > 0 && !chartsPublished {
 		if _, err := commandRunner.Output(ctx, "helm", append(append([]string{"dependency"}, c.deps...), dir)...); err != nil {
@@ -456,6 +503,8 @@ func renderChart(ctx context.Context, c kyvernoStackChart, ns string) ([]byte, e
 	for _, f := range c.values {
 		args = append(args, "-f", chartRootPath(f))
 	}
+	// .policies' values first, so a -f or --set of this run wins over them.
+	args = append(args, policyArgs...)
 	for _, f := range forChart(kyvernoCheckValues, c.name) {
 		args = append(args, "-f", f)
 	}
@@ -539,15 +588,18 @@ func joinDocuments(items [][]byte) []byte {
 // --policy-report gives it (an openreports.io ClusterReport, or a
 // wgpolicyk8s.io one from older CLIs: the results are the same shape).
 type kyvernoResult struct {
-	Policy    string `json:"policy"`
-	Rule      string `json:"rule"`
-	Result    string `json:"result"`
-	Message   string `json:"message"`
-	Resources []struct {
-		Kind      string `json:"kind"`
-		Namespace string `json:"namespace"`
-		Name      string `json:"name"`
-	} `json:"resources"`
+	Policy    string            `json:"policy"`
+	Rule      string            `json:"rule"`
+	Result    string            `json:"result"`
+	Message   string            `json:"message"`
+	Resources []kyvernoResource `json:"resources"`
+}
+
+// kyvernoResource is a resource a result names.
+type kyvernoResource struct {
+	Kind      string `json:"kind"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
 }
 
 // parseKyvernoReport reads the report from kyverno's output, where warnings
@@ -627,11 +679,18 @@ func (r *kyvernoCheckReport) add(results []kyvernoResult) {
 		for _, o := range res.Resources {
 			r.Findings[i].Resources = append(r.Findings[i].Resources, o.Kind+"/"+o.Name)
 		}
-		if res.Result != "warn" {
+		// The release's PolicyException exempts its own resources, never the namespace deploy creates.
+		onNamespace := !slices.ContainsFunc(res.Resources, func(o kyvernoResource) bool { return o.Kind != "Namespace" })
+		if res.Result != "warn" && !onNamespace {
 			if rules[res.Policy] == nil {
 				rules[res.Policy] = map[string]bool{}
 			}
 			rules[res.Policy][baseRule(res.Rule)] = true
+		}
+	}
+	for i, f := range r.Findings {
+		if key, scope := missingLabel(f); scope == "namespace" {
+			r.Findings[i].Fix = "namespaceLabels." + key + " in .policies, or --namespace-label " + key + "=<value>"
 		}
 	}
 	for policy, names := range rules {
@@ -795,19 +854,35 @@ var podLabelPath = regexp.MustCompile(`/((?:spec/(?:jobTemplate/spec/)?template/
 // missingPodLabel is the pod label a finding asks for, when the finding is
 // on pods or pod templates only; "" otherwise.
 func missingPodLabel(f kyvernoFinding) string {
+	if key, scope := missingLabel(f); scope == "pod" {
+		return key
+	}
+	return ""
+}
+
+// missingLabel is the label a finding asks for and what it labels: "pod"
+// for pods and pod templates, "namespace" for namespaces; "" when the
+// finding is not a missing label on those alone.
+func missingLabel(f kyvernoFinding) (key, scope string) {
 	m := podLabelPath.FindStringSubmatch(f.Message)
 	if m == nil {
-		return ""
+		return "", ""
 	}
+	scope = "pod"
 	if m[1] == "" {
-		for _, r := range f.Resources {
-			if !strings.HasPrefix(r, "Pod/") {
-				return ""
-			}
+		kind := func(prefix string) bool {
+			return len(f.Resources) > 0 && !slices.ContainsFunc(f.Resources, func(r string) bool { return !strings.HasPrefix(r, prefix) })
+		}
+		switch {
+		case kind("Pod/"):
+		case kind("Namespace/"):
+			scope = "namespace"
+		default:
+			return "", ""
 		}
 	}
 	// JSON Pointer escapes a / in the key as ~1.
-	return strings.ReplaceAll(strings.ReplaceAll(m[2], "~1", "/"), "~0", "~")
+	return strings.ReplaceAll(strings.ReplaceAll(m[2], "~1", "/"), "~0", "~"), scope
 }
 
 // writeKyvernoValues writes dir/<chart>-kyverno.yaml with what the check can
@@ -859,7 +934,7 @@ func writeKyvernoValues(dir string, c kyvernoStackChart, r kyvernoCheckReport, l
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
-	for _, key := range c.labelKeys {
+	for _, key := range chartPodLabelKeys(c.name) {
 		if len(set) == 0 {
 			break
 		}
@@ -927,7 +1002,9 @@ func init() {
 	f.StringArrayVar(&kyvernoCheckCharts, "chart", nil, "Chart to check: "+strings.Join(kyvernoStackChartNames(), ", ")+" (repeatable; default: kates)")
 	f.BoolVar(&kyvernoCheckStack, "stack", false, "Check every chart kates deploy would install with the --with-* flags given")
 	f.StringVar(&kyvernoCheckWriteTo, "write-values", "", "Write <chart>-kyverno.yaml into this directory for each chart with a failed rule")
-	f.StringArrayVar(&kyvernoCheckLabels, "label", nil, "Value of a pod label a policy requires, as key=value, for --write-values (repeatable)")
+	f.StringArrayVar(&kyvernoCheckLabels, "label", nil, "Value of a label a policy requires, as key=value, for --write-values and --write-policies (repeatable)")
+	f.BoolVar(&kyvernoCheckPolicies, "write-policies", false, "Write the labels and values the policies need into the current kube context's environment of .policies (or --policies-file)")
+	addLabelsFileFlag(kyvernoCheckCmd)
 	// deploy's own flags, bound to its variables, so --stack sees what deploy would install, where.
 	for _, name := range []string{"with-strimzi", "with-monitoring", "with-kafka-connect", "with-mirror-maker2",
 		"kafka-ns", "connect-ns", "app-ns", "monitoring-ns", "mm2-ns", "kafka-name"} {

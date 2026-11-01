@@ -63,7 +63,8 @@ func stubKyvernoCheck(t *testing.T, report string) *proc.Fake {
 		if got := read("exceptions.yaml"); got != kyvernoException {
 			t.Errorf("exceptions.yaml = %q", got)
 		}
-		if got := read("render.yaml"); got != "kind: Deployment\n" {
+		// The chart's render, then the namespace deploy would create for it.
+		if got := read("render.yaml"); !strings.HasPrefix(got, "kind: Deployment\n\n---\napiVersion: v1\nkind: Namespace\nmetadata:\n  name: team\n") {
 			t.Errorf("render.yaml = %q", got)
 		}
 		for _, want := range []string{"--exception", "--exceptions-within-resources", "--audit-warn", "--policy-report"} {
@@ -388,7 +389,7 @@ func TestWriteKyvernoValuesSetsTheLabelEverywhere(t *testing.T) {
 	if err := yaml.Unmarshal(b, &values); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range kyvernoStackChartNamed(t, "monitoring").labelKeys {
+	for _, key := range chartPodLabelKeys("monitoring") {
 		m := values
 		for _, part := range strings.Split(key, ".") {
 			m, _ = m[part].(map[string]any)
@@ -469,9 +470,9 @@ func TestKyvernoStackLabelKeysMatchTheChartPolicyCheck(t *testing.T) {
 		}
 		return keys
 	}
-	for _, c := range kyvernoStackCharts {
-		if got := keysOf(c.name); !slices.Equal(c.labelKeys, got) {
-			t.Errorf("%s: labelKeys %q, label_args %q", c.name, c.labelKeys, got)
+	for _, chart := range deployCharts {
+		if got := keysOf(chart); !slices.Equal(chartPodLabelKeys(chart), got) {
+			t.Errorf("%s: chartPodLabelKeys %q, label_args %q", chart, chartPodLabelKeys(chart), got)
 		}
 	}
 }

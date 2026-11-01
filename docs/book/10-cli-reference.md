@@ -1530,6 +1530,7 @@ Its flags choose the shape of the stack and how much it asks:
 | `--with-mirror-maker2` | Deploy MirrorMaker 2 as a loopback mirror of the primary (default: `false`); real sources are `kates migrate up --from …` |
 | `--mm2-ns` | Namespace for MirrorMaker 2 in the isolated topology (default: `kafka`, where the `kates-mm2` credential lives; elsewhere the credential is copied) |
 | `--labels-file` | Labels for the namespaces deploy uses, one `key=value` per line (default: `.labels` in the current directory, skipped when missing; a named file must exist) |
+| `--policies-file` | The [Kyverno policies file](12-deployment.md#kyverno-policies-file): namespace labels, pod labels and chart values per kube context (default: `.policies` in the current directory, skipped when missing; a named file must exist) |
 | `--namespace-label` | One `key=value` label for those namespaces, repeatable; it wins over `KATES_NAMESPACE_LABELS` and the labels file |
 | `--no-write-probes` | Skip the introspection probes that create a namespace, a Secret or pods, as `--dry-run` does |
 | `--checkout` | Install the charts of the Kates checkout in this directory instead of the published ones; `KATES_CHECKOUT` does the same for every command |
@@ -2151,10 +2152,13 @@ kates kyverno check -n team -f team-values.yaml
 kates kyverno check -n team --set podLabels.team=payments
 kates kyverno check --stack --with-kafka-connect
 kates kyverno check --stack --label team=payments --write-values kyverno/
+kates kyverno check --stack --write-policies
 kates kyverno check --chart kafka-cluster -o json
 ```
 
 By default it checks the `kates` chart. `--chart` names the charts to check, from `strimzi-operator`, `monitoring`, `kafka-cluster`, `connect-cluster`, `mirror-maker2` and `kates`. `--stack` checks each of them that `kates deploy` would install with the same `--with-*` flags. Each chart goes in the namespace `kates deploy` would put it in, set by the `--*-ns` flags (the Strimzi operator always goes in `strimzi-operator`). `-n` puts every chart in one namespace instead. The release names are deploy's too: `--kafka-name` for the Kafka cluster, `mm2` for MirrorMaker 2. Charts render with their defaults plus the values files deploy always passes (`values-platform.yaml` for `kafka-cluster`). They don't get the values deploy derives from the cluster, such as the cluster domain, the bootstrap address or the resolved versions. A `-f` or `--set` entry applies to every chart checked, or to one chart when you prefix it with the chart's name: `-f kafka-cluster=kafka.yaml`, `--set kates=image.tag=1.0`.
+
+The current kube context's environment of [`.policies`](12-deployment.md#kyverno-policies-file) applies as `kates deploy` would apply it: its pod labels and values go into each render, before `-f` and `--set`. Each namespace the charts go into is checked once too, as the Namespace deploy would create there, with the labels from `.labels`, `.policies` and `KATES_NAMESPACE_LABELS`. A namespace that already exists keeps any labels of its own, which the check doesn't read. `--write-policies` writes what the policies need into that environment, as [Fill It In From the Cluster](12-deployment.md#fill-it-in-from-the-cluster) describes.
 
 It reads ClusterPolicies, ValidatingPolicies and ImageValidatingPolicies, each namespace's Policies, and PolicyExceptions in every namespace, or only in the chart's namespace when the account may not list the others. A kind the cluster doesn't have is skipped. One the account may not read is named, and the check can't pass without it. The render gets the release namespace on each object, as `helm install` would set it, so exceptions that match by namespace apply. The `kates` chart's own `kyvernoPolicy.exceptions` count too.
 
@@ -2164,7 +2168,7 @@ Each rule that doesn't pass is listed with the resources it failed on and the ch
 
 | The rule is about | Chart value |
 |---|---|
-| A label, such as `/metadata/labels/team/` | `podLabels.team=<value>` |
+| A label, such as `/metadata/labels/team/` | `podLabels.team=<value>`; on a Namespace, `namespaceLabels.team` in `.policies` or `--namespace-label` |
 | Image pull secrets | `global.imagePullSecrets` |
 | A `latest` or mutable image tag | `image.tag`, and the tag of the image the rule names |
 | Allowed or trusted registries | `global.imageRegistry` |
@@ -2211,7 +2215,10 @@ The flags:
 | `--values`, `-f` | A values file for every chart checked, or `<chart>=<file>` for one; repeatable |
 | `--set` | A value as `helm --set` for every chart checked, or `<chart>=<key>=<value>` for one; repeatable |
 | `--write-values` | Write `<chart>-kyverno.yaml` into this directory for each chart with a failed rule |
-| `--label` | The value of a pod label a policy requires, as `key=value`, for `--write-values`; repeatable |
+| `--label` | The value of a label a policy requires, as `key=value`, for `--write-values` and `--write-policies`; repeatable |
+| `--write-policies` | Write the labels and values the policies need into the current kube context's environment of `.policies` |
+| `--policies-file` | The policies file to apply and write (default: `.policies` in the current directory, skipped when missing; a named file must exist) |
+| `--labels-file` | Namespace labels, as for `kates deploy` |
 
 It exits `0` when no rule fails, `1` when one does, and `2` when it couldn't run: no `kyverno` CLI on the `PATH`, a `helm dependency` or `helm template` error, a rule Kyverno couldn't evaluate, or a policy kind the account may not read. With `-o json` it prints a list with one object per chart: `chart`, `namespace`, `unread`, `pass`, `skip`, `findings` (each with `result`, `policy`, `rule`, `message`, `resources` and `fix`), `exceptions`, `exceptionNote` (set when Kyverno's exception settings change what the check counts) and `valuesFile`, with the same exit code. The charts come from where `kates deploy` takes them: the published charts of this release, or the checkout `KATES_CHECKOUT` names (a CLI built from source uses the checkout it runs in). In a checkout, it runs the same `helm dependency` command on each chart that deploy does first.
 
