@@ -50,32 +50,11 @@ var warnLabelsFileOnce sync.Once
 // --namespace-label. sources says where each key's value came from.
 func namespaceUserLabels() (labels, sources map[string]string, err error) {
 	labels, sources = map[string]string{}, map[string]string{}
-	path, required := namespaceLabelsFile, true
-	if path == "" {
-		path, required = defaultLabelsFile, false
-	}
-	data, err := os.ReadFile(path)
-	switch {
-	case err == nil:
-		if err := parseNamespaceLabelsFile(path, string(data), labels, sources); err != nil {
-			return nil, nil, err
-		}
-		warnLabelsFileOnce.Do(func() {
-			output.Hint(path + " is read as namespace labels; .policies holds them now, per kube context, under namespaceLabels")
-		})
-	case required || !errors.Is(err, fs.ErrNotExist):
-		return nil, nil, fmt.Errorf("labels file: %w", err)
-	}
-	doc, err := readPoliciesDoc()
-	if err != nil {
+	if err := addLabelsFileLabels(labels, sources); err != nil {
 		return nil, nil, err
 	}
-	if len(doc.Environments) > 0 {
-		env := currentContextName()
-		policies, _ := policiesFile()
-		for k, v := range doc.Environments[env].NamespaceLabels {
-			labels[k], sources[k] = v, policies+": environments."+env
-		}
+	if err := addPoliciesNamespaceLabels(labels, sources); err != nil {
+		return nil, nil, err
 	}
 	if raw := strings.TrimSpace(os.Getenv(namespaceLabelsEnv)); raw != "" {
 		if err := addDeployNamespaceLabelSpecs(labels, sources, raw, namespaceLabelsEnv); err != nil {
@@ -88,6 +67,44 @@ func namespaceUserLabels() (labels, sources map[string]string, err error) {
 		}
 	}
 	return labels, sources, nil
+}
+
+// addLabelsFileLabels adds the labels of --labels-file, or of ./.labels when
+// it exists.
+func addLabelsFileLabels(labels, sources map[string]string) error {
+	path, required := namespaceLabelsFile, true
+	if path == "" {
+		path, required = defaultLabelsFile, false
+	}
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		if err := parseNamespaceLabelsFile(path, string(data), labels, sources); err != nil {
+			return err
+		}
+		warnLabelsFileOnce.Do(func() {
+			output.Hint(path + " is read as namespace labels; .policies holds them now, per kube context, under namespaceLabels")
+		})
+	case required || !errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("labels file: %w", err)
+	}
+	return nil
+}
+
+// addPoliciesNamespaceLabels adds the current kube context's namespaceLabels
+// from .policies. kubectl is asked for the context only when the file has
+// environments.
+func addPoliciesNamespaceLabels(labels, sources map[string]string) error {
+	doc, err := readPoliciesDoc()
+	if err != nil || len(doc.Environments) == 0 {
+		return err
+	}
+	env := currentContextName()
+	path, _ := policiesFile()
+	for k, v := range doc.Environments[env].NamespaceLabels {
+		labels[k], sources[k] = v, path+": environments."+env
+	}
+	return nil
 }
 
 // parseNamespaceLabelsFile reads key=value lines. Blank lines and # comment

@@ -291,9 +291,20 @@ func checkKyvernoChart(ctx context.Context, kyvernoBin string, c kyvernoStackCha
 		render = append(render, []byte("\n---\n"+namespace)...)
 	}
 	report.ExceptionNote = exceptions.note(ns, render)
-	dir, err := os.MkdirTemp("", "kates-kyverno-check-")
+	results, err := runKyvernoApply(ctx, kyvernoBin, read, render, exceptions.accepts(ns))
 	if err != nil {
 		return report, err
+	}
+	report.add(results)
+	return report, nil
+}
+
+// runKyvernoApply holds render to the policies read, with the exceptions
+// read and, when withinRender, the PolicyException the render holds.
+func runKyvernoApply(ctx context.Context, kyvernoBin string, read kyvernoRead, render []byte, withinRender bool) ([]kyvernoResult, error) {
+	dir, err := os.MkdirTemp("", "kates-kyverno-check-")
+	if err != nil {
+		return nil, err
 	}
 	defer os.RemoveAll(dir)
 	files := map[string][]byte{
@@ -303,13 +314,13 @@ func checkKyvernoChart(ctx context.Context, kyvernoBin string, c kyvernoStackCha
 	}
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), body, 0o600); err != nil {
-			return report, err
+			return nil, err
 		}
 	}
 	kyvernoArgs := []string{"apply", filepath.Join(dir, "policies.yaml"),
 		"--resource", filepath.Join(dir, "render.yaml"),
 		"--audit-warn", "--policy-report", "--output-format", "json"}
-	if exceptions.accepts(ns) {
+	if withinRender {
 		// The chart's own PolicyException (kyvernoPolicy.exceptions) is in the render.
 		kyvernoArgs = append(kyvernoArgs, "--exceptions-within-resources")
 	}
@@ -320,10 +331,9 @@ func checkKyvernoChart(ctx context.Context, kyvernoBin string, c kyvernoStackCha
 	out, _ := commandRunner.Combined(ctx, kyvernoBin, kyvernoArgs...)
 	results, err := parseKyvernoReport(out)
 	if err != nil {
-		return report, fmt.Errorf("kyverno apply: %w", err)
+		return nil, fmt.Errorf("kyverno apply: %w", err)
 	}
-	report.add(results)
-	return report, nil
+	return results, nil
 }
 
 // kyvernoExceptionScope is the namespace Kyverno accepts PolicyExceptions
@@ -826,6 +836,13 @@ func renderKyvernoChartCheck(r kyvernoCheckReport) {
 	}
 	output.Table([]string{"Result", "Policy/Rule", "Resources", "Message", "Chart value"}, rows)
 	fmt.Println()
+	renderKyvernoExceptions(r)
+	output.Hint(fmt.Sprintf("%d passed, %d skipped, %d did not pass", r.Pass, r.Skip, len(r.Findings)))
+}
+
+// renderKyvernoExceptions prints the exceptions that would exempt the release
+// from the rules it failed.
+func renderKyvernoExceptions(r kyvernoCheckReport) {
 	if len(r.Exceptions) > 0 {
 		output.SubHeader("Or exempt the release")
 		if !kyvernoChartHasExceptions(r.Chart) {
@@ -840,7 +857,6 @@ func renderKyvernoChartCheck(r kyvernoCheckReport) {
 		}
 		fmt.Println()
 	}
-	output.Hint(fmt.Sprintf("%d passed, %d skipped, %d did not pass", r.Pass, r.Skip, len(r.Findings)))
 }
 
 func kyvernoChartHasExceptions(chart string) bool {
@@ -923,34 +939,11 @@ func writeKyvernoValues(dir string, c kyvernoStackChart, r kyvernoCheckReport, l
 		return "", err
 	}
 	path := filepath.Join(dir, c.name+"-kyverno.yaml")
-	values := map[string]any{}
-	if b, err := os.ReadFile(path); err == nil {
-		if err := yaml.Unmarshal(b, &values); err != nil {
-			return "", fmt.Errorf("%s: %w", path, err)
-		}
-		if values == nil {
-			values = map[string]any{}
-		}
-	} else if !os.IsNotExist(err) {
+	values, err := readValuesFile(path)
+	if err != nil {
 		return "", err
 	}
-	for _, key := range chartPodLabelKeys(c.name) {
-		if len(set) == 0 {
-			break
-		}
-		m := values
-		for _, part := range strings.Split(key, ".") {
-			next, ok := m[part].(map[string]any)
-			if !ok {
-				next = map[string]any{}
-				m[part] = next
-			}
-			m = next
-		}
-		for k, v := range set {
-			m[k] = v
-		}
-	}
+	setPodLabels(values, c.name, set, true)
 	var out bytes.Buffer
 	fmt.Fprintf(&out, "# Written by kates kyverno check for the %s chart in %s.\n# Check again with -f %s=%s\n", c.name, r.Namespace, c.name, path)
 	if len(values) > 0 {
@@ -964,6 +957,24 @@ func writeKyvernoValues(dir string, c kyvernoStackChart, r kyvernoCheckReport, l
 		writeUnfixed(&out, c, r.Namespace, notes, unfixed)
 	}
 	return path, os.WriteFile(path, out.Bytes(), 0o644)
+}
+
+// readValuesFile reads a values file written earlier; a missing one is empty.
+func readValuesFile(path string) (map[string]any, error) {
+	values := map[string]any{}
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return values, nil
+	} else if err != nil {
+		return nil, err
+	}
+	if err := yaml.Unmarshal(b, &values); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if values == nil {
+		values = map[string]any{}
+	}
+	return values, nil
 }
 
 // writeUnfixed comments each rule --write-values could not fix, and the

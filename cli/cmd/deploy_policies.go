@@ -142,6 +142,16 @@ func (p deployPolicies) chartValues(chart string) map[string]any {
 	if values == nil {
 		values = map[string]any{}
 	}
+	setPodLabels(values, chart, p.PodLabels, false)
+	return values
+}
+
+// setPodLabels sets labels under every value that labels chart's pods,
+// keeping a label values already sets there unless overwrite.
+func setPodLabels(values map[string]any, chart string, labels map[string]string, overwrite bool) {
+	if len(labels) == 0 {
+		return
+	}
 	for _, key := range chartPodLabelKeys(chart) {
 		m := values
 		for _, part := range strings.Split(key, ".") {
@@ -152,13 +162,12 @@ func (p deployPolicies) chartValues(chart string) map[string]any {
 			}
 			m = next
 		}
-		for k, v := range p.PodLabels {
-			if _, set := m[k]; !set {
+		for k, v := range labels {
+			if _, set := m[k]; overwrite || !set {
 				m[k] = v
 			}
 		}
 	}
-	return values
 }
 
 // writeChartValues writes chartValues(chart) into dir and returns the -f
