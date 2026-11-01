@@ -7,6 +7,17 @@ The half of Kates that does the work isn't on your machine. The `kates` CLI runs
 - Say what the [safety guard](appendix-a-glossary.md#gl-safety-guard) checks before a [disruption plan](appendix-a-glossary.md#gl-disruption-plan) injects a fault, and what it rolls back when a step fails
 - Say where a run's results live, and how long each piece of them lasts
 
+## Context and Goals
+
+Kates measures a Kafka cluster by loading it and breaking it on purpose, so its design answers to the cluster it disturbs. Four goals shape it:
+
+- Run the load and the faults from inside the cluster, so the CLI needs only a REST connection and an API key
+- Behave the same whichever API, REST or gRPC, starts a run
+- Keep every run's results readable while Kafka is down, the state a fault creates on purpose
+- Refuse a disruption plan that would hit every broker before it touches the cluster
+
+[Design Decisions](#design-decisions) shows what each goal cost.
+
 ## High-Level Architecture
 
 Kates has two halves: the `kates` CLI on your machine, and the [Kates API](appendix-a-glossary.md#gl-kates-api) in the cluster, as one Deployment beside the Kafka cluster it tests. The Kates API generates the load, asks for the faults, grades disruption plans and keeps every run in [PostgreSQL](appendix-a-glossary.md#gl-postgresql). Around them, `kates deploy` installs Kafka, PostgreSQL, LitmusChaos, Prometheus and Grafana.
@@ -85,6 +96,19 @@ The table lists what Kates is built with and the tools it works beside; the [Ver
 | Backup | Velero and SeaweedFS | Cluster backup and restore |
 | Policy Engine | Kyverno | Admission control, PSS enforcement, NetworkPolicy generation |
 
+## Design Decisions
+
+Four decisions set how Kates behaves under load and under faults. Each row gives what was chosen, the alternative Kates supports or rejects, why, and what it costs:
+
+| Decision | Alternative | Why | Cost |
+|:--|:--|:--|:--|
+| Native benchmark backend: load runs inside the Kates API pod | The Trogdor benchmark backend, with Trogdor agents you run | `kates deploy` installs nothing more | Load shares the pod's CPU and memory, so a ceiling can be the pod's |
+| Results in PostgreSQL | A Kafka topic on the cluster under test | Results stay readable while Kafka is unreachable | With PostgreSQL down, no run can be created or read |
+| Lifecycle events through a transactional outbox | Producing each event straight to Kafka | The event commits with the status change and waits out a Kafka outage | A webhook fires only after its event's round trip through Kafka |
+| The safety guard checks the whole plan first | Checking only before each step | A plan that would hit every broker never starts | It counts brokers only, not KRaft controllers or the ISR |
+
+The last row's limits are in [Limits of the Guard](07-chaos-practice.md#limits-of-the-guard). [Where Results Live](#where-results-live) gives the outbox's retry and dead-letter rules.
+
 ## The Kates API
 
 The Kates API is a Quarkus application that serves a REST API and a gRPC API ([gRPC API Reference](16-grpc-api.md)) and runs each test from start to finish. Both APIs call the same service layer, so a test run behaves the same whichever API starts it. The gRPC API covers fewer operations, and some of its responses carry less than their REST counterparts, as its chapter lists.
@@ -119,13 +143,13 @@ Nothing about the run is written to Kafka except its load: the run and its resul
 
 ### The Orchestrator
 
-When a test is created, the orchestrator (`TestOrchestrator`) merges the request with the defaults of its test type, and creates the [topic](appendix-a-glossary.md#gl-topic) with the requested [partition](appendix-a-glossary.md#gl-partition) count and [replication factor](appendix-a-glossary.md#gl-rf) if it doesn't exist. It then starts the producers and consumers through the benchmark backend and polls each task. On every poll of a running test, it keeps the latency buckets recorded so far as one [heatmap](appendix-a-glossary.md#gl-heatmap) row.
+When a test is created, the orchestrator merges the request with the defaults of its test type, and creates the [topic](appendix-a-glossary.md#gl-topic) with the requested [partition](appendix-a-glossary.md#gl-partition) count and [replication factor](appendix-a-glossary.md#gl-rf) if it doesn't exist. It then starts the producers and consumers through the benchmark backend and polls each task. On every poll of a running test, it keeps the latency buckets recorded so far as one [heatmap](appendix-a-glossary.md#gl-heatmap) row.
 
 The report it builds on request carries summary metrics, broker correlation and whether the run met its [SLA](appendix-a-glossary.md#gl-sla) thresholds, which are targets you set, in the style of an SLO.
 
 ### The Native Benchmark Backend
 
-The native benchmark backend (`NativeKafkaBackend`) runs each test's producers and consumers on virtual threads inside the Kates API [@jep444]. It is one of two benchmark backends; the other, `trogdor`, sends the workload to a Trogdor coordinator, and [Test Types Deep Dive](05-test-types.md) compares them. Its producers send records of the configured size with the test's [acknowledgment mode](appendix-a-glossary.md#gl-acks) and throttle to its throughput, and its consumers read in the test's [consumer group](appendix-a-glossary.md#gl-consumer-group). Each task records its latencies, and an INTEGRITY task also tracks sequence numbers, acknowledgment gaps and duplicates.
+The native benchmark backend runs each test's producers and consumers on virtual threads inside the Kates API [@jep444]. It is one of two benchmark backends; the other, `trogdor`, sends the workload to a Trogdor coordinator, and [Test Types Deep Dive](05-test-types.md) compares them. Its producers send records of the configured size with the test's [acknowledgment mode](appendix-a-glossary.md#gl-acks) and throttle to its throughput, and its consumers read in the test's [consumer group](appendix-a-glossary.md#gl-consumer-group). Each task records its latencies, and an INTEGRITY task also tracks sequence numbers, acknowledgment gaps and duplicates.
 
 ### How Latency Is Recorded
 
@@ -210,7 +234,7 @@ Before the plan touches the cluster, the safety guard counts the brokers its ste
 
 The CLI is a standalone Go binary built with Cobra. It calls the Kates API over REST for test, report and disruption operations. For cluster provisioning and lifecycle tasks such as `kates deploy`, `kates clean` and `kates ports`, it runs `kubectl`, `helm` and `kind` instead. It keeps your contexts, [profiles](appendix-a-glossary.md#gl-profile) and [snapshots](appendix-a-glossary.md#gl-snapshot) in files in your home directory; the [Commands](10-cli-reference.md#commands) table in CLI Reference says which command uses which.
 
-Like `kubectl`, the CLI has named contexts, so one CLI can target several Kates APIs. It prints tables, badges, metric bars and [sparklines](appendix-a-glossary.md#gl-sparkline) on a terminal, and JSON with `-o json` for scripts. `kates test scaffold export <name>` writes a ready-to-use YAML [scenario file](appendix-a-glossary.md#gl-scenario-file) to the current directory, and `kates test scaffold list` browses the library, filtered with `--type LOAD` if you like. `kates test watch` follows a run as it progresses.
+Like `kubectl`, the CLI has named contexts, so one CLI can switch between Kates APIs. It prints tables, badges, metric bars and [sparklines](appendix-a-glossary.md#gl-sparkline) on a terminal, and JSON with `-o json` for scripts. `kates test scaffold export <name>` writes a ready-to-use YAML [scenario file](appendix-a-glossary.md#gl-scenario-file) to the current directory, and `kates test scaffold list` browses the library, filtered with `--type LOAD` if you like. `kates test watch` follows a run as it progresses.
 
 ## Where Results Live
 
@@ -246,7 +270,7 @@ What lives in the Kates API's memory goes with its pod. When the Kates API shuts
 
 ### Data Model
 
-PostgreSQL holds the runs and their per-task results, disruption reports, schedules, webhooks, baselines, snapshots and audit events. Flyway creates and upgrades the schema when the Kates API starts, from the migrations in `kates/src/main/resources/db/migration/`.
+PostgreSQL holds the runs and their per-task results, disruption reports, schedules, webhooks, baselines, snapshots and audit events. The Kates API creates and upgrades the schema with Flyway when it starts, so an upgraded image migrates the database on its first start.
 
 ### Graceful Degradation
 
@@ -264,6 +288,6 @@ When you cancel a run, the Kates API stops its tasks and stores it as `FAILED`, 
 - A LOAD run is one request to the Kates API, which creates the topic, runs producers and consumers and stores the result; reports are built on request.
 - Latencies are recorded to the microsecond up to 60 s; the heatmap is a coarser copy kept in memory.
 - A disruption plan is refused before anything runs if it would hit too many brokers; rollback runs only when a step fails.
-- Results live in PostgreSQL, not Kafka; heatmaps, security grades and built reports live only in the Kates API's memory.
+- Results live in PostgreSQL; heatmaps, security grades and built reports live only in the Kates API's memory.
 
-Every number the Kates API records is a number about `krafter`. [The Cluster Under Test](03-cluster.md) describes that cluster — its brokers and controllers, its zones, its replication settings — so that you can tell a Kafka limit from a Kates one.
+Every number the Kates API records is a number about `krafter`. [The Cluster Under Test](03-cluster.md) describes that cluster, from its brokers and controllers to its zones and replication settings, so that you can tell a Kafka limit from a Kates one.

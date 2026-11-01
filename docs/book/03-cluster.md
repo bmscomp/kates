@@ -1,13 +1,13 @@
 # The Cluster Under Test
 
-Before you can measure performance or inject chaos, you need to understand the system you're testing. Without that, you collect numbers and draw the wrong conclusions — blaming Kafka for a bottleneck that's actually [page cache](appendix-a-glossary.md#gl-page-cache) eviction, or celebrating a [throughput](appendix-a-glossary.md#gl-throughput) number that's only possible because replication was silently disabled.
+Numbers from a cluster you don't understand lead to the wrong conclusions: you blame Kafka for a bottleneck that's [page cache](appendix-a-glossary.md#gl-page-cache) eviction, or celebrate a [throughput](appendix-a-glossary.md#gl-throughput) number that's only possible because replication was silently disabled.
 
 The cluster is `krafter`: a [KRaft](appendix-a-glossary.md#gl-kraft) deployment with dedicated controller and broker pods, one of each per zone, on the three-node `panda` Kind cluster. Every number in Parts II to IV comes from it, from a quick [LOAD](appendix-a-glossary.md#gl-test-type) run to a multi-hour ENDURANCE run.
 
 After this chapter, you can:
 
 - Explain the Kafka ideas the book relies on, as `krafter` uses them
-- Sketch the `krafter` node layout — dedicated KRaft [controllers](appendix-a-glossary.md#gl-controller) and zone-pinned [brokers](appendix-a-glossary.md#gl-broker) — and explain why the roles are separated
+- Sketch the `krafter` node layout, with its dedicated KRaft [controllers](appendix-a-glossary.md#gl-controller) and zone-pinned [brokers](appendix-a-glossary.md#gl-broker), and explain why the roles are separated
 - Predict from the failure tolerance matrix whether a given broker or controller loss stops writes, loses data, or neither
 - Explain how the ~2Gi page cache budget and [`min.insync.replicas=2`](appendix-a-glossary.md#gl-min-insync-replicas) shape every latency number you measure here
 - Inspect the live cluster with the `kates cluster` commands instead of memorizing its state
@@ -20,7 +20,7 @@ The rest of this chapter, and of the book, describes `krafter` in Kafka's own te
 
 Kafka stores records in [topics](appendix-a-glossary.md#gl-topic): named streams that producers write to and consumers read from. Each topic is split into [partitions](appendix-a-glossary.md#gl-partition), which are ordered, append-only logs that different brokers can hold and different consumers can read at the same time [@kreps2011kafka]. Within its partition, each record has an [offset](appendix-a-glossary.md#gl-offset): its position, a number that only grows.
 
-Each partition is kept as several replicas on different brokers, three on `krafter`. One replica is the partition's [leader](appendix-a-glossary.md#gl-partition-leader), and it takes every write to the partition; the others, its followers, fetch the leader's log and copy it. How many copies a write must reach before the leader acknowledges it is the subject of [Replication Configuration](#replication-configuration), and what happens when a leader's broker fails is the subject of [What Happens During a Broker Failure](#what-happens-during-a-broker-failure).
+Each partition has replicas on different brokers, three on `krafter`. One replica is the partition's [leader](appendix-a-glossary.md#gl-partition-leader), and it takes every write to the partition; the others, its followers, fetch the leader's log and copy it. How many copies a write must reach before the leader acknowledges it is the subject of [Replication Configuration](#replication-configuration), and what happens when a leader's broker fails is the subject of [What Happens During a Broker Failure](#what-happens-during-a-broker-failure).
 
 When a test names a topic that doesn't exist yet, Kates creates it with the spec's `partitions`, `replicationFactor` and `minInsyncReplicas`. A topic that already exists keeps its own settings, whatever the spec says.
 
@@ -75,7 +75,7 @@ graph TB
 
 The cards name the pools. Strimzi numbers the nodes when it creates the pools, so a pod's name, such as `krafter-brokers-alpha-0`, ends in an ID that `kates cluster topology` shows on your lab. Yours may differ, and a fault's `targetBrokerId` follows the ID, not the zone.
 
-The separation matters more than it might seem. In a combined-role cluster, a heavy I/O workload on a broker could delay metadata operations like [leader elections](appendix-a-glossary.md#gl-leader-election) — the very operations you need to be fast during a failure. Dedicated roles take metadata work out of the brokers' JVMs, so a broker's garbage-collection pauses and heap pressure don't delay it. They don't isolate the hardware under the pods, though. On `panda` every controller shares its node with a broker, and Kubernetes sets aside the controller's CPU request and memory but not disk I/O or network bandwidth, so a broker that saturates either can still slow the quorum.
+In a combined-role cluster, a heavy I/O workload on a broker could delay metadata operations like [leader elections](appendix-a-glossary.md#gl-leader-election), which are the operations you need to be fast during a failure. Dedicated roles take metadata work out of the brokers' JVMs, so a broker's garbage-collection pauses and heap pressure don't delay it. They don't isolate the hardware under the pods, though. On `panda` every controller shares its node with a broker, and Kubernetes sets aside the controller's CPU request and memory but not disk I/O or network bandwidth, so a broker that saturates either can still slow the quorum.
 
 ### Node Labeling and Zone Simulation
 
@@ -105,13 +105,13 @@ The table gives the memory, CPU, storage and heap of each pod in the `krafter` l
 | Broker | 4Gi | 1000m / 2000m | 50Gi | 2Gi fixed |
 | Total | 15Gi | 4.5 / 9 cores | 165Gi | none |
 
-These are the lab's figures. The chart's own `nodePools.roleDefaults` match the memory, CPU and heap but give a broker 100Gi and a controller 10Gi, and `kates detect --generate-values` sizes the per-zone pools from the cluster it finds. Read the values you deployed with rather than this table.
+These are the lab's figures. The chart's own `nodePools.roleDefaults` match the memory, CPU and heap but give a broker 100Gi and a controller 10Gi, and `kates detect --generate-values` sizes the per-zone pools from the cluster it finds. For your own cluster, read the values you deployed with.
 
-The 4Gi broker memory with a 2048m fixed heap (`-Xms2048m -Xmx2048m`) leaves about 2Gi for the page cache. Kafka serves a consumer that keeps up from that cache; one that falls behind, or a run with large records, reads from disk, and latency climbs. The budget is small on purpose, so that effect shows within minutes of a LOAD run rather than hours. Treat the numbers as `krafter`'s: compare runs on this cluster with each other, and measure again on the cluster the payments workload will run on.
+The 4Gi broker memory with a 2048m fixed heap (`-Xms2048m -Xmx2048m`) leaves about 2Gi for the page cache. Kafka serves a consumer that keeps up from that cache; one that falls behind, or a run with large records, reads from disk, and latency climbs. The budget is small on purpose, so that effect shows within minutes of a LOAD run. Treat the numbers as `krafter`'s: compare runs on this cluster with each other, and measure again on the cluster the payments workload will run on.
 
 At the payments rate of 2,000 records per second of 1 KiB, about 2 MiB a second, a 2Gi page cache holds at most the last 17 minutes or so of the topic. A consumer further behind than that reads from disk.
 
-GC logging is enabled (`gcLoggingEnabled: true`) on all brokers, making it possible to correlate latency spikes with garbage collection pauses. [Performance Theory](04-performance-theory.md) explains why GC pauses dominate tail latency.
+GC logging is enabled (`gcLoggingEnabled: true`) on all brokers, so you can correlate latency spikes with garbage collection pauses. [Performance Theory](04-performance-theory.md) explains why GC pauses dominate tail latency.
 
 ## Replication Configuration
 
@@ -138,7 +138,7 @@ graph LR
     L -->|"3. Ack once both<br/>have fetched it"| P
 ```
 
-A producer using `acks=all` waits for every replica currently in the ISR, not just for two of them. On a healthy cluster the leader waits for both followers, so the slower follower's copy sits inside every acknowledgment, and inside the produce latency you measure. The payments workload this book follows writes with `acks=all`, so it pays that cost on every record. As brokers fall out of the ISR the write keeps flowing until the ISR is one, below the floor, and then the leader refuses it rather than keep a single copy [@kleppmann2017designing]; [ISR Shrink and Expand](06-chaos-theory.md#isr-shrink-and-expand) follows that sequence. The [Failure Tolerance Matrix](#failure-tolerance-matrix) below applies this rule row by row.
+A producer using `acks=all` waits for every replica currently in the ISR, however many that is; `min.insync.replicas` sets only the floor. On a healthy cluster the leader waits for both followers, so the slower follower's copy sits inside every acknowledgment, and inside the produce latency you measure. The payments workload this book follows writes with `acks=all`, so it pays that cost on every record. As brokers fall out of the ISR the write keeps flowing until the ISR is one, below the floor. Then the leader refuses the write, since accepting it would leave a single copy [@kleppmann2017designing]; [ISR Shrink and Expand](06-chaos-theory.md#isr-shrink-and-expand) follows that sequence. The [Failure Tolerance Matrix](#failure-tolerance-matrix) below applies this rule row by row.
 
 `min.insync.replicas` applies only to `acks=all`. An `acks=1` write, SPIKE's default, is acknowledged as soon as the leader has it, so a leader that fails before its followers copy the record takes the record with it.
 
@@ -192,7 +192,7 @@ Every `krafter` install has the two internal listeners, and the third, `external
 
 The two internal listeners are the chart's base `kafka.listeners`. The external one is not: `kafka.externalAccess.type` defaults to `none`, so the chart's own values expose nothing outside the cluster until you set it to `nodeport`, `loadbalancer` or `ingress` (the Kind overlay pins it to `none`). The preset appends a listener named `external` on port 9094 with TLS and SCRAM-SHA-512. On a cluster other than kind, `kates deploy` declares the same listener itself, in the `kafka.listeners` of the `.build/values-detected.yaml` it layers under the [platform profile](appendix-a-glossary.md#gl-platform-profile): a NodePort, or a LoadBalancer on EKS, GKE and AKS. `kafka.externalAccess.allowedCidrs` narrows only the chart's rule for the port; Strimzi's policy still admits every source until the listener carries [`networkPolicyPeers`](appendix-a-glossary.md#gl-networkpolicypeers), which the preset can't set ([Security & Compliance](17-security.md)).
 
-Every Kates run uses the listener the Kates API is deployed with, `plain` on port 9092 by default (`kafka.bootstrapServers` in the `kates` chart); no test field picks another. Measuring what TLS costs therefore means deploying the Kates API against `tls` and running the same LOAD test again. Because the CPU budget per broker is limited here, that overhead is more pronounced than on production hardware, so measure it rather than assuming a fixed figure.
+Every Kates run uses the listener the Kates API is deployed with, `plain` on port 9092 by default (`kafka.bootstrapServers` in the `kates` chart); no test field picks another. Measuring what TLS costs therefore means deploying the Kates API against `tls` and running the same LOAD test again. Because the CPU budget per broker is limited here, that overhead is larger than on production hardware, so measure it on the cluster the workload will run on.
 
 ## Topics
 
@@ -207,13 +207,13 @@ The `kafka-cluster` chart's platform profile creates these topics as [`KafkaTopi
 | `kates-dlq` | 3 | unlimited | none | Polls it every 30 seconds and logs what arrives |
 | `kates-probe-topic` | 3 | 1h | none | Writes ten 100-byte records to it each time a resilience run's `producer-throughput` probe runs |
 
-A test produces to whatever topic its spec names, so the others carry traffic only when a test or a script names them, as several example [scenario files](appendix-a-glossary.md#gl-scenario-file) in `cli/examples` do. Their partition counts, retention and compression are the profile's settings, not a measure of any traffic Kates generates.
+A test produces to whatever topic its spec names, so the others carry traffic only when a test or a script names them, as most of the example [scenario files](appendix-a-glossary.md#gl-scenario-file) in `cli/examples` do. Their partition counts, retention and compression are the profile's settings, not a measure of any traffic Kates generates.
 
 The topic the Kates API writes on every run isn't in the table, because the profile doesn't create it. `kates-test-events` carries each run's lifecycle events to the Kates API's webhook consumer, and `krafter` doesn't create a topic on first use (`auto.create.topics.enable: false`). So the Kates API creates it through the Kafka Admin API, checking when it starts and every minute after. It gives the topic one partition, three replicas (fewer on a smaller cluster), `cleanup.policy: delete` and 7 days' retention, and leaves an existing `kates-test-events` as it is. [Where Results Live](02-architecture.md#where-results-live) follows an event through it.
 
 ## Operational Components
 
-Beyond the brokers and controllers, the cluster can include several components that affect how the system behaves under test. On `panda`, only the [Entity Operator](appendix-a-glossary.md#gl-entity-operator) of these four runs:
+Beyond the brokers and controllers, the cluster can include four components that affect how it behaves under test. On `panda`, only the [Entity Operator](appendix-a-glossary.md#gl-entity-operator) of these four runs:
 
 | Component | What it does | On `panda` | Elsewhere |
 |-----------|---------|---------|---------------------------|
@@ -226,7 +226,7 @@ Beyond the brokers and controllers, the cluster can include several components t
 
 ## Changing the Topology for Different Scenarios
 
-The default node layout, three brokers and three controllers, covers the most common testing scenarios. Two changes to it are worth knowing before Part III, each with its own cost.
+The default node layout has three brokers and three controllers. Two changes to it are worth knowing before Part III, each with its own cost.
 
 ### Testing with More Brokers
 
@@ -244,7 +244,7 @@ The published chart carries its SeaweedFS subchart and the `kafka-common` [libra
 
 `kates deploy` and `make kafka` (`scripts/deploy-kafka-generic.sh`) install the same `krafter` Kafka cluster under different [Helm releases](appendix-a-glossary.md#gl-helm-release), `krafter` and `kafka-cluster` respectively; `helm list -n kafka` shows which one you have. The `helm` commands here take the release from `RELEASE`.
 
-A pool's own `replicas` wins over `nodePools.roleDefaults`, so where the broker count lives depends on how the release was installed. `kates deploy` and `make kafka` (with its default `ENV=kind`) generate the pools, each with a `replicas` of its own. On `panda`, `krafter-current.yaml` lists one broker pool per zone under `nodePools.pools` — `brokers-alpha`, `brokers-sigma` and `brokers-gamma`, at `replicas: 1` each — and the broker resources under `nodePools.roleDefaults.broker.resources`. A file still in the older shape, with `brokerPools` and `brokerDefaults`, works too, because the chart translates it; [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) explains how the values layer.
+A pool's own `replicas` wins over `nodePools.roleDefaults`, so where the broker count lives depends on how the release was installed. `kates deploy` and `make kafka` (with its default `ENV=kind`) generate the pools, each with a `replicas` of its own. On `panda`, `krafter-current.yaml` lists one broker pool per zone under `nodePools.pools` (`brokers-alpha`, `brokers-sigma` and `brokers-gamma`, at `replicas: 1` each) and the broker resources under `nodePools.roleDefaults.broker.resources`. A file still in the older shape, with `brokerPools` and `brokerDefaults`, works too, because the chart translates it; [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) explains how the values layer.
 
 The generated values also size each broker for one per zone: the broker resources give every broker close to half of a node's CPU and memory, up to 8000m and 16Gi, with requests equal to limits. A second broker in a zone shares that zone's node with the first one and the zone's controller, and unless the caps apply, the three ask for more than the node has. A fourth broker therefore takes two edits in `krafter-current.yaml`: raise one pool's `replicas` (`brokers-alpha` to `2` adds the broker in `alpha`), and halve the broker resources, requests and limits alike. Keep the memory at 3Gi or more, which leaves the JVM 1Gi beyond the broker's 2048m heap (`nodePools.roleDefaults.broker.jvmOptions`). With a file that holds 8000m and 16Gi, the edited entries read:
 
@@ -352,7 +352,7 @@ kates cluster broker configs <broker-id>
 kates health
 ```
 
-These commands use the Kafka AdminClient API through the Kates API — no direct broker access needed from the CLI. For the full CLI reference, see [CLI Reference](10-cli-reference.md). To follow the cluster during a test or a chaos experiment, `kates cluster watch` refreshes a view with [sparkline](appendix-a-glossary.md#gl-sparkline) trends every 5 seconds, as [Cluster Watch](09-observability.md#cluster-watch) in Observability & Monitoring describes.
+These commands use the Kafka AdminClient API through the Kates API, so the CLI needs no direct access to the brokers. For the full CLI reference, see [CLI Reference](10-cli-reference.md). To follow the cluster during a test or a chaos experiment, `kates cluster watch` refreshes a view with [sparkline](appendix-a-glossary.md#gl-sparkline) trends every 5 seconds, as [Cluster Watch](09-observability.md#cluster-watch) in Observability & Monitoring describes.
 
 ::: {.callout-tip title="Try it: Does the live krafter match this chapter?"}
 Confirm the node layout described in this chapter matches your live `krafter` cluster:

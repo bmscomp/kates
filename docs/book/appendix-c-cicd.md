@@ -1,12 +1,12 @@
 # CI/CD Pipeline
 
-This appendix documents the GitHub Actions workflows that automate building, testing, and releasing the Kates platform — from pull-request validation to production image publishing and CLI binary releases. The repository carries further workflows for the Apicurio Registry chart (`ci-apicurio.yml`), the Connect and tester image build checks (`ci-connect.yml`, `ci-tester.yml`), the release pin PR's image scan (`ci-release.yml`, below), native-image builds (`native.yml`), the linters (`lint.yml`), dependency review and the weekly rescan of released images (`security.yml`), CodeQL (`codeql.yml`), chart publishing (`publish-charts.yml`), registry descriptions (`sync-registry-descriptions.yml`), and documentation builds (`docs.yml`, `book.yml`); they follow the same patterns and are not covered here.
+This appendix documents the GitHub Actions workflows that build, test and release the Kates platform, from pull-request validation to the published images and CLI binaries. The repository carries further workflows for the Apicurio Registry chart (`ci-apicurio.yml`), the Connect and tester image build checks (`ci-connect.yml`, `ci-tester.yml`), the release pin PR's image scan (`ci-release.yml`, below), native-image builds (`native.yml`), the linters (`lint.yml`), dependency review and the weekly rescan of released images (`security.yml`), CodeQL (`codeql.yml`), chart publishing (`publish-charts.yml`), registry descriptions (`sync-registry-descriptions.yml`), and documentation builds (`docs.yml`, `book.yml`). They follow the same patterns and are not covered here.
 
-Two things to keep in mind while reading. First, **any job that renders a chart runs `helm dependency build` first** — `strimzi-operator` pulls the operator subchart from `quay.io`, and `kafka-cluster`, `connect-cluster` and `mirror-maker2` all resolve the `kafka-common` library through a `file://` dependency. `helm lint` only warns about a missing dependency and still exits 0, so a job that skips the build can be green while the chart cannot be deployed. Second, the expensive jobs — the ones that stand up a Kind cluster and scrape a real broker — are gated behind a schedule, a manual dispatch, or a pull-request label, and never run on an ordinary push.
+Two rules hold across these workflows. First, **any job that renders a chart runs `helm dependency build` first**: `strimzi-operator` pulls the operator subchart from `quay.io`, and `kafka-cluster`, `connect-cluster` and `mirror-maker2` all resolve the `kafka-common` library through a `file://` dependency. `helm lint` only warns about a missing dependency and still exits 0, so a job that skips the build can be green while the chart cannot be deployed. Second, the expensive jobs, the ones that stand up a Kind cluster and scrape a real broker, are gated behind a schedule, a manual dispatch, or a pull-request label, and never run on an ordinary push.
 
 ## Pipeline Overview
 
-The diagram below traces how repository events trigger the validation, live-scrape, and release workflows and publish multi-architecture artifacts to container registries and GitHub Releases:
+The diagram below traces how repository events trigger the validation, live-scrape and release workflows and publish multi-architecture artifacts to container registries and GitHub Releases:
 
 ```mermaid
 %%| label: fig-cicd-pipeline-overview
@@ -68,13 +68,13 @@ graph LR
     RC -->|"binaries"| GHR["GitHub Release + Homebrew tap"]
 ```
 
-The validation workflows trigger independently — each filters its own jobs by path and there is no chaining between them. The `metrics-live` jobs live inside `ci-kafka-charts.yml` and `ci-mirror-maker2.yml` rather than in a workflow of their own, because they share those workflows' triggers and contracts; what separates them is the `if:` gate that keeps them off the push path.
+The validation workflows trigger independently: each filters its own jobs by path, and none chains to another. The `metrics-live` jobs live inside `ci-kafka-charts.yml` and `ci-mirror-maker2.yml`, because they share those workflows' triggers and contracts. An `if:` gate keeps them off the push path.
 
 ## Path-Based Change Detection
 
 Every validation workflow starts on every push and pull request, and then decides *inside the run* what to do: a first `changes` job uses `dorny/paths-filter` to classify the diff, and each real job carries an `if:` on that classification. A docs-only change starts `ci.yml` and skips every job in it within seconds.
 
-The filters used to be workflow-level `paths:` blocks, and the move is not cosmetic. A workflow that never starts never reports a check, and a required status check that never reports blocks the merge forever — so a path-filtered workflow could not be required by branch protection at all. A job that starts and skips itself counts as passed. Each workflow therefore ends in a **gate** job (`Gate · Backend`, `Gate · Kafka charts`, …) that runs unconditionally, passes when every job it depends on succeeded or was skipped, and fails on any failure or cancellation. The gates are the only checks the `main` ruleset requires; adding or renaming a job inside a workflow never touches branch protection.
+The filters used to be workflow-level `paths:` blocks, and the move is not cosmetic. A workflow that never starts never reports a check, and a required status check that never reports blocks the merge forever, so a path-filtered workflow could not be required by branch protection at all. A job that starts and skips itself counts as passed. Each workflow therefore ends in a **gate** job (`Gate · Backend`, `Gate · Kafka charts`, …) that runs unconditionally, passes when every job it depends on succeeded or was skipped, and fails on any failure or cancellation. The gates are the only checks the `main` ruleset requires; adding or renaming a job inside a workflow never touches branch protection.
 
 | Workflow | Filtered on |
 |----------|-------------|
@@ -97,7 +97,7 @@ Every workflow also shares three conventions: a `concurrency` group per branch (
 
 ## Backend CI (`ci.yml`)
 
-**Purpose:** Validates the Kates API's code, CLI code, Helm chart integrity, Kyverno policies, and config YAML on every push and pull request.
+**Purpose:** Validates the Kates API's code, CLI code, Helm chart integrity, Kyverno policies and config YAML on every push and pull request.
 
 **Triggers:**
 - Push to `main` branch (paths in the table above)
@@ -121,7 +121,7 @@ Every workflow also shares three conventions: a `concurrency` group per branch (
 - **Java 21** is used as the build JDK, matching the project's compiler target (`maven.compiler.release`)
 - The JUnit reporter globs both `surefire-reports` and `failsafe-reports`. Globbing only surefire made every integration-test result invisible in the checks UI — the job still went red, with no indication of which test broke
 - The Trivy scan fails the build on `CRITICAL` findings only, with `ignore-unfixed` set, and is pointed at `.trivyignore.yaml` explicitly. The scan target is `kates/`, the ignore file is at the repository root, and an ignore file that is silently not loaded is the worst of both worlds
-- The **Go race detector** (`-race`) is always enabled to catch data races in CLI concurrency paths (e.g., streaming watch, dashboard refresh); packages run serially (`-p 1`) to keep memory in check. `scripts/check-cli-compat.sh` then runs the real binary under piped stdout, `NO_COLOR`, `TERM=dumb`, `--plain` and an unset locale — the conditions that produce escape codes in CI logs, which unit tests never see — and `scripts/check-cli-style.sh` is its static companion
+- The **Go race detector** (`-race`) is always enabled to catch data races in CLI concurrency paths (e.g., streaming watch, dashboard refresh); packages run serially (`-p 1`) to keep memory in check. `scripts/check-cli-compat.sh` then runs the real binary under piped stdout, `NO_COLOR`, `TERM=dumb`, `--plain` and an unset locale. Those are the conditions that produce escape codes in CI logs, and unit tests never see them. `scripts/check-cli-style.sh` is its static companion
 
 ### What Helm Lint Actually Checks
 
@@ -155,7 +155,7 @@ Each render sets the `team` label through the chart's `podLabels` and every othe
 
 ## Kafka Charts CI (`ci-kafka-charts.yml`)
 
-**Purpose:** Checks the Strimzi charts — `strimzi-operator`, `kafka-cluster`, `connect-cluster`, `mirror-maker2`, and the `kafka-common` library they share — the way `ci-mirror-maker2.yml` checks MirrorMaker 2: rendered across every overlay and toggle, not only on defaults.
+**Purpose:** Checks the Strimzi charts (`strimzi-operator`, `kafka-cluster`, `connect-cluster`, `mirror-maker2` and the `kafka-common` library they share) the way `ci-mirror-maker2.yml` checks MirrorMaker 2: rendered with the defaults and across every overlay and toggle.
 
 **Triggers:**
 
@@ -173,15 +173,15 @@ Each render sets the `team` label through the chart's `podLabels` and every othe
 
 ### The Library Job
 
-A library chart cannot be rendered on its own, so `kafka-common` is exercised through a harness chart that calls every template while helm-unittest asserts on the output — including the refusals. The helm-unittest plugin version is read from `versions.env` (`HELM_UNITTEST_VERSION`) rather than floating, for the same reason every other tool version is pinned there.
+A library chart cannot be rendered on its own, so `kafka-common` is exercised through a harness chart that calls every template while helm-unittest asserts on the output, refusals included. The helm-unittest plugin version is pinned in `versions.env` (`HELM_UNITTEST_VERSION`), like every other tool version.
 
-The job ends with a packaging assertion: `helm package charts/kafka-common` must produce an archive with no `tests/` directory in it. A test harness that ships to users is not a test harness, it is dead weight in every install.
+The job ends with a packaging assertion: `helm package charts/kafka-common` must produce an archive with no `tests/` directory in it. A test harness that ships to users is dead weight in every install.
 
 ### The Render Matrix
 
-The `matrix` job fans out over `strimzi-operator`, `kafka-cluster`, `connect-cluster` and `mirror-maker2`. Each job first fetches dependencies — always `helm dependency build charts/strimzi-operator/`, because the CRD schemas every render is checked against come from the operator chart this repository pins rather than from a community catalogue that may not carry the v1 Strimzi schemas at all, and then `helm dependency build` for the matrix chart itself when it declares dependencies.
+The `matrix` job fans out over `strimzi-operator`, `kafka-cluster`, `connect-cluster` and `mirror-maker2`. Each job first fetches dependencies. It always runs `helm dependency build charts/strimzi-operator/`: every render is checked against the CRD schemas in the operator chart this repository pins, since a community catalogue may not carry the v1 Strimzi schemas at all. It then runs `helm dependency build` for the matrix chart itself when that chart declares dependencies.
 
-`scripts/check-chart-matrix.py <chart>` then walks `scripts/chart-matrix/<chart>.yaml`, which lists the renders (overlays, toggles, API-version sets, Kubernetes versions) and the rails. Every render is checked three ways: against the pinned Strimzi CRDs with `scripts/check-strimzi-crs.py` (pruned fields, missing required fields, enum violations, duplicate keys), with kubeconform for built-in kinds, and against the render's own `assert` entries. The rails are the inverse — renders that must be **refused**, with the refusal message asserted, so a rail that fails for the wrong reason is not mistaken for a working one.
+`scripts/check-chart-matrix.py <chart>` then walks `scripts/chart-matrix/<chart>.yaml`, which lists the renders (overlays, toggles, API-version sets, Kubernetes versions) and the rails. Every render is checked three ways: against the pinned Strimzi CRDs with `scripts/check-strimzi-crs.py` (pruned fields, missing required fields, enum violations, duplicate keys), with kubeconform for built-in kinds, and against the render's own `assert` entries. The rails are the inverse: renders that must be **refused**, with the refusal message asserted, so a rail that fails for the wrong reason is not mistaken for a working one.
 
 ::: {.callout-note}
 A render marked `known: <ID>` in the matrix file is a documented defect that must still reproduce. The job fails when such a render *stops* failing, so a marker cannot outlive its fix. That is the opposite of the usual skip annotation, and it is deliberate: a stale exemption is how a fixed bug quietly comes back.
@@ -199,13 +199,13 @@ The remaining steps in each matrix job:
 
 ### The Live Scrape
 
-`metrics-live` asks the one question a render cannot answer: what does a real worker actually expose? It creates a three-zone Kind cluster from `config/cluster.yaml` and deploys Strimzi and Kafka through `scripts/deploy-kafka-generic.sh`, with `scripts/metric-contract/live/kafka-cluster.yaml` layered on `charts/kafka-cluster/values-ci.yaml` in the same install. The live file turns on the exporter agent, the Kafka Exporter and Cruise Control, and runs two brokers, because Strimzi refuses Cruise Control beside one. The job then produces and consumes real traffic as the platform's own principal, port-forwards each exporter's `/metrics`, and runs the contract against the capture.
+`metrics-live` asks the one question a render cannot answer: what does a real worker expose? It creates a three-zone Kind cluster from `config/cluster.yaml` and deploys Strimzi and Kafka through `scripts/deploy-kafka-generic.sh`, with `scripts/metric-contract/live/kafka-cluster.yaml` layered on `charts/kafka-cluster/values-ci.yaml` in the same install. The live file turns on the exporter agent, the Kafka Exporter and Cruise Control, and runs two brokers, because Strimzi refuses Cruise Control beside one. The job then produces and consumes real traffic as the platform's own principal, port-forwards each exporter's `/metrics`, and runs the contract against the capture.
 
 The traffic step is not ceremony. A cluster nobody has written to registers a fraction of its per-topic, request and consumer-group beans, so scraping an idle broker would pass a contract that a busy one fails. For the `connect-cluster` leg the job additionally waits for at least two connectors to report `RUNNING`, since the task and client beans do not exist until a connector runs.
 
 The contract asks whether each series a board reads exists. `scripts/check-dashboards-live.py --scrape` then asks whether each board query finds it: it loads the capture into a throwaway Prometheus and evaluates every selector on every board. That step is advisory. The capture is raw exporter output, without the labels a PodMonitor adds at scrape time (`namespace`, `pod`, the `strimzi_io_*` family). The boards' `namespace` and `cluster` variables are built on those labels, so they resolve to nothing, and the check fails every query scoped by them. The report still prints, and still annotates the run.
 
-Captures are uploaded as an artifact with a 14-day retention, so a note about an uncatalogued series can be turned into a catalogue entry without paying for another cluster. On failure the job collects cluster state, custom resources, events, and the logs of the Kafka pods and the Strimzi operator into a second artifact.
+Captures are uploaded as an artifact with a 14-day retention, so a note about an uncatalogued series can be turned into a catalogue entry without paying for another cluster. On failure the job collects cluster state, custom resources, events and the logs of the Kafka pods and the Strimzi operator into a second artifact.
 
 ::: {.callout-important}
 This job costs minutes and a cluster, so a pull request runs it only when it touches the `live` paths, and `Gate · Kafka charts` then requires it to pass. The weekly and manual runs catch what breaks without a commit, such as a new runner image or a change in an upstream chart repository. On any other pull request, the render-time contract check in the `matrix` job is what gates a merge.
@@ -215,7 +215,7 @@ This job costs minutes and a cluster, so a pull request runs it only when it tou
 
 ## MirrorMaker 2 CI (`ci-mirror-maker2.yml`)
 
-**Purpose:** Validates the `mirror-maker2` chart, the migration path it exists for, and the metrics its dashboard reads. Three jobs with very different costs.
+**Purpose:** Validates the `mirror-maker2` chart, the migration path it exists for, and the metrics its dashboard reads. Its three jobs differ in cost, and the table gives each one's gate and timeout.
 
 ### What It Runs
 
@@ -227,25 +227,25 @@ This job costs minutes and a cluster, so a pull request runs it only when it tou
 
 ### Chart Validation
 
-Cheap enough to run on every pull request, and it does considerably more than a lint. It opens with `helm dependency build charts/mirror-maker2/` — the chart is built on the `kafka-common` library, so nothing renders until that resolves — then lints `mirror-maker2` and `legacy-kafka` and renders every overlay the chart ships: `kind`, `dev`, `prod`, `generic`, `mtls`, `migrate-2x`, `migrate-3x`, `migrate-4x`, `readonly-source`, `fan-in`, `failover` and `scale`.
+This job is cheap enough to run on every pull request, and it does more than lint. It opens with `helm dependency build charts/mirror-maker2/`, because the chart is built on the `kafka-common` library and nothing renders until that resolves. It then lints `mirror-maker2` and `legacy-kafka` and renders every overlay the chart ships: `kind`, `dev`, `prod`, `generic`, `mtls`, `migrate-2x`, `migrate-3x`, `migrate-4x`, `readonly-source`, `fan-in`, `failover` and `scale`.
 
-`values-failback.yaml` is rendered with a source cluster named on the command line rather than as shipped, and that is the point: the overlay ships an *empty* source so the chart refuses a bare render instead of silently mirroring the target into itself.
+`values-failback.yaml` is rendered with a source cluster named on the command line. The overlay ships an *empty* source on purpose, so the chart refuses a bare render instead of silently mirroring the target into itself.
 
 The rest of the job:
 
-- **Safety rails must reject bad input** — a guard that has never been observed to fail is indistinguishable from no guard, so each rail's refusal is asserted
+- **Safety rails must reject bad input**: a guard that has never been observed to fail is indistinguishable from no guard, so each rail's refusal is asserted
 - Renders are validated against the Strimzi CRD schemas with kubeconform and PyYAML alongside
 - The Grafana dashboard's JSON parses and its layout holds; every query on it is valid PromQL; the go/no-go panel on the migration board behaves
-- The metric contract and `promtool` checks, plus `promtool` **unit tests** for the SLI and SLO rules — not just that they parse, but that they compute what they claim to
+- The metric contract and `promtool` checks, plus `promtool` **unit tests** for the SLI and SLO rules, which assert that each rule computes what it claims to
 - Every alert's `runbook_url` anchor resolves to a heading in `docs/mirror-maker2-runbook.md`
 - Every embedded pod script parses under `dash`, and the migration scripts pass `shellcheck`
 - A render diff against the last commit that carried a different chart version, asserting that the previous version's overlays still render **additively**. Deliberate removals are listed in the job with the decision behind each one; anything not on that list is a regression by definition. The job checks out with `fetch-depth: 0`, because a shallow clone has no history to walk
 
 ### Migration e2e and the Live Scrape
 
-`migration-e2e` stands up a Kind cluster, a real Kafka 2.8.2 or 3.9.1 broker, and a real mirror, then asserts on real records. The `workflow_dispatch` input selects one source version or both. The whole point of the chart is this job; the whole point of not running it every time is that nobody waits ten minutes for a typo fix.
+`migration-e2e` stands up a Kind cluster, a real Kafka 2.8.2 or 3.9.1 broker, and a real mirror, then asserts on real records. The `workflow_dispatch` input selects one source version or both. This job tests what the chart exists for. It stays off ordinary runs so that nobody waits ten minutes for a typo fix.
 
-`metrics-live` is the same tier and the same cluster shape with a different question. Chart validation proves every series the rules and the dashboard read is one the exporter rules *can* produce, against a hand-written catalogue of MBeans; this job scrapes a real worker and diffs the catalogue against it, so an attribute a Kafka upgrade renames surfaces here rather than as an empty panel.
+`metrics-live` is the same tier and the same cluster shape with a different question. Chart validation proves every series the rules and the dashboard read is one the exporter rules *can* produce, against a hand-written catalogue of MBeans; this job scrapes a real worker and diffs the catalogue against it, so an attribute a Kafka upgrade renames surfaces in this job before it can show up as an empty panel.
 
 ---
 
@@ -267,8 +267,8 @@ The rest of the job:
 ### Key Details
 
 - Uses **Docker Buildx** on native runners for each architecture — `ubuntu-latest` for amd64 and `ubuntu-24.04-arm` for arm64 — so no QEMU emulation is needed
-- The matrix runs three combinations in parallel; **native/arm64 is excluded** from CI because GraalVM native-image is too slow even on native ARM runners — that combination is validated at release time instead
-- Images are built with `push: false` — no registry writes during validation
+- The matrix runs three combinations in parallel; **native/arm64 is excluded** from CI because GraalVM native-image is too slow even on native ARM runners; that combination is validated at release time instead
+- Images are built with `push: false`, so validation writes nothing to a registry
 - Build cache is stored via GitHub Actions cache (scoped per variant and architecture) to speed up subsequent builds
 
 ```yaml
@@ -285,7 +285,7 @@ strategy:
 
 ## Integration Tests (`integration.yml`)
 
-**Purpose:** Spins up an ephemeral Kind cluster and validates what needs a real Kubernetes API — cluster topology, the `kates detect` compatibility gate, and server-side dry-runs of the Kafka manifests. Chart linting and config parsing are `ci.yml`'s job and are not repeated here.
+**Purpose:** Spins up an ephemeral Kind cluster and validates what needs a real Kubernetes API: cluster topology, the `kates detect` compatibility gate and server-side dry-runs of the Kafka manifests. Chart linting and config parsing are `ci.yml`'s job and are not repeated here.
 
 **Triggers:**
 - Push to `main` branch (paths in the table above)
@@ -303,7 +303,7 @@ The workflow provisions a Kind cluster inside the GitHub Actions runner via `hel
 | Helm | `versions.env` `HELM_VERSION` | Available for the manifests that need it |
 | Go | `cli/go.mod` | Builds the `kates` CLI from source for the compatibility gate |
 
-The pins are **not** declared in the workflow. The `load-versions` composite action exports them from `versions.env` into `$GITHUB_ENV`, and fails if one is missing — a silently empty `KIND_VERSION` would request a download URL with a hole in it and install a 404. The node image is deliberately left out of the action's inputs too: `config/cluster.yaml` names it per node, `scripts/check-versions.sh` asserts that file against `versions.env`, and passing the image as a flag as well would create a second source of truth that silently wins over the file.
+The pins are **not** declared in the workflow. The `load-versions` composite action exports them from `versions.env` into `$GITHUB_ENV`, and fails if one is missing. A silently empty `KIND_VERSION` would request a download URL with a hole in it and install a 404. The node image is deliberately left out of the action's inputs too: `config/cluster.yaml` names it per node, `scripts/check-versions.sh` asserts that file against `versions.env`, and passing the image as a flag as well would create a second source of truth that silently wins over the file.
 
 ### Validation Steps
 
@@ -315,9 +315,9 @@ The pins are **not** declared in the workflow. The `load-versions` composite act
 
 ### Key Details
 
-- The Kafka manifests are validated with `kubectl apply --dry-run=server` — the Strimzi operator is **not** installed, so this checks manifest validity against the API server rather than deploying a running Kafka cluster
+- The Kafka manifests are validated with `kubectl apply --dry-run=server`. The Strimzi operator is **not** installed, so this checks each manifest against the API server and deploys no running Kafka cluster
 - The job has a **30-minute timeout** and posts a per-check results table to the GitHub Actions step summary, read from each step's real outcome
-- There is no explicit teardown. `helm/kind-action` registers a post step that deletes the cluster it created, on success and on failure alike; a `kind delete` of our own would only race it
+- There is no explicit teardown. `helm/kind-action` registers a post step that deletes the cluster it created, on success and on failure alike; a `kind delete` step in the workflow would only race it
 
 ---
 
@@ -359,7 +359,7 @@ The pins are **not** declared in the workflow. The `load-versions` composite act
 
 ## Publish Kates Tester Image (`publish-tester.yml`)
 
-**Purpose:** Builds and pushes the `kates-tester` image — a lightweight container used in Helm test hooks and integration testing.
+**Purpose:** Builds and pushes the `kates-tester` image, a lightweight container used in Helm test hooks and integration testing.
 
 **Triggers:**
 - Tag push matching `v*`
@@ -374,7 +374,7 @@ The pins are **not** declared in the workflow. The `load-versions` composite act
 | **Contents** | `kcat`, the Apache Kafka CLI scripts, `kubectl`, `curl`, `jq`, DNS and netcat utilities |
 | **Platforms** | `linux/amd64`, `linux/arm64` (cross-built with QEMU) |
 
-The tester image is referenced by the Kafka charts' test hooks — `kafka-cluster`, `connect-cluster`, `mirror-maker2` and `strimzi-operator` all pin it under `testImages`, and the operator chart's CRD-upgrade hook runs on it too. It validates Kafka connectivity, SCRAM authentication, and ACL enforcement from inside the cluster. The Litmus experiments under `config/litmus/experiments/` run their probes and jobs on it as well. `scripts/check-versions.sh` holds every one of these pins to the kates chart's `appVersion`, the tag each release publishes.
+The tester image is referenced by the Kafka charts' test hooks: `kafka-cluster`, `connect-cluster`, `mirror-maker2` and `strimzi-operator` all pin it under `testImages`, and the operator chart's CRD-upgrade hook runs on it too. It validates Kafka connectivity, SCRAM authentication and ACL enforcement from inside the cluster. The Litmus experiments under `config/litmus/experiments/` run their probes and jobs on it as well. `scripts/check-versions.sh` holds every one of these pins to the kates chart's `appVersion`, the tag each release publishes.
 
 A tag is too late to find out that the Dockerfile no longer builds: the build checks the Kafka tarball against `KAFKA_SHA512` and each jar in `tester/kafka-lib-overrides.txt` against its SHA-256, and `release.yml` creates the GitHub Release only once this image is published. So `ci-tester.yml` builds the image for `linux/amd64` on every pull request that touches `tester/**`, without pushing, then checks that `kafka-topics.sh --version` reports the Dockerfile's `KAFKA_VERSION`, that each overridden library is in `/opt/kafka/libs` exactly once and at its patched version, and that Trivy passes it with the same settings as the release scan.
 
@@ -401,22 +401,22 @@ A tag is too late to find out that the Dockerfile no longer builds: the build ch
 
 ### Two Details Worth Knowing
 
-**The tag folds in the Kafka base version.** The image's identity is the pair (Debezium, Kafka base), so the tag is `<debezium>-kafka-<kafka>` — for example `3.6.2-kafka-4.3.1`. Tagging by Debezium alone meant a base bump did not move the tag, and `connect:<debezium>` silently changed content under a fixed name. The Kafka version is parsed out of the base `FROM` line, and the job fails rather than guessing if that parse comes back empty.
+**The tag folds in the Kafka base version.** The image's identity is the pair (Debezium, Kafka base), so the tag is `<debezium>-kafka-<kafka>`, for example `3.6.2-kafka-4.3.1`. Tagging by Debezium alone meant a base bump did not move the tag, and `connect:<debezium>` silently changed content under a fixed name. The Kafka version is parsed out of the base `FROM` line, and the job fails if that parse comes back empty.
 
-**Manifests carry annotations, not labels.** `Dockerfile.connect` has a complete `LABEL` block, but labels live in the per-platform image config and a multi-arch index has none — so nothing propagated and the registry's description page stayed blank. The merge job sets `DOCKER_METADATA_ANNOTATIONS_LEVELS: index` and passes each annotation to `imagetools`, which can write them where `docker manifest create` cannot.
+**Manifests carry annotations, not labels.** `Dockerfile.connect` has a complete `LABEL` block, but labels live in the per-platform image config and a multi-arch index has none, so nothing propagated and the registry's description page stayed blank. The merge job sets `DOCKER_METADATA_ANNOTATIONS_LEVELS: index` and passes each annotation to `imagetools`, which can write them where `docker manifest create` cannot.
 
-The `update-charts` job is what keeps `charts/connect-cluster` honest: it rewrites `image:` in `values.yaml` and the `kates.io/connect-image` annotation in `Chart.yaml` to the tag just published, and commits with `[skip ci]`. `appVersion` is deliberately left alone — since `connect-cluster` 2.0 it tracks the Kafka line, like `mirror-maker2`'s, while the image pin and the annotation carry the build identity. `scripts/check-versions.sh` asserts all of that agrees.
+The `update-charts` job is what keeps `charts/connect-cluster` honest: it rewrites `image:` in `values.yaml` and the `kates.io/connect-image` annotation in `Chart.yaml` to the tag the job published, and commits with `[skip ci]`. `appVersion` is deliberately left alone. Since `connect-cluster` 2.0 it tracks the Kafka line, like `mirror-maker2`'s, while the image pin and the annotation carry the build identity. `scripts/check-versions.sh` asserts all of that agrees.
 
 ---
 
 ## Release (`release.yml`)
 
-**Purpose:** The one workflow a version tag starts. It cross-compiles the Kates CLI for all supported platforms, calls the three image workflows above, and — only once every image is built, verified and signed — creates the GitHub Release, updates the Homebrew tap, and `brew install`s the result on a macOS runner.
+**Purpose:** The one workflow a version tag starts. It cross-compiles the Kates CLI for all supported platforms and calls the three image workflows above. It creates the GitHub Release, updates the Homebrew tap and `brew install`s the result on a macOS runner only once every image is built, verified and signed.
 
 **Triggers:**
 - Tag push matching `v*`
 
-The image workflows are *called* (`workflow_call`) rather than triggered by the tag themselves, so a release is one run page with every job on it in dependency order. Before this, four workflows fired on the same tag with nothing between them, and a failed image build left the tap pointing at a version whose image did not exist — with nothing red to show for it.
+The tag starts only `release.yml`, which *calls* the image workflows (`workflow_call`), so a release is one run page with every job on it in dependency order. Before this, four workflows fired on the same tag with nothing between them. A failed image build left the tap pointing at a version whose image did not exist, and nothing turned red.
 
 ### Before the Tag
 
@@ -433,12 +433,12 @@ A release pin PR, on a `chore/release-*` branch, changes only pins, so the path-
 
 ### Release Process
 
-1. **Cross-compile** — `GOOS` and `GOARCH` target each platform with `CGO_ENABLED=0`; the version, commit, and build date are embedded via `-ldflags`
+1. **Cross-compile** — `GOOS` and `GOARCH` target each platform with `CGO_ENABLED=0`; the version, commit and build date are embedded via `-ldflags`
 2. **Compress** — each binary is compressed with `tar.gz`
 3. **Checksum and attest** — a SHA-256 checksum is generated per artifact, plus an aggregated `checksums.txt`; each tarball also gets a SLSA build-provenance attestation (`gh attestation verify kates-darwin-arm64.tar.gz --repo bmscomp/kates`)
 4. **Publish the images** — `publish-docker.yml`, `publish-connect.yml` and `publish-tester.yml` run as called workflows, in parallel with the CLI build
 5. Once the images are out, `publish-charts.yml` publishes the charts: it pushes, signs and attests every chart version that isn't published yet
-6. Then the release deploys the published charts: on a three-zone Kind cluster, its own Linux CLI, run outside any checkout, deploys the stack from the charts just published. It runs `--dry-run` first, then a real deploy of the Strimzi operator, Kafka and the Kates API with its PostgreSQL. `KATES_REQUIRE_SIGNED_CHARTS=1` makes every pulled chart's signature a requirement. A chart, an overlay or an image pin that can't install stops the run here, before anything points users at it. The charts are already pushed by then, so the fix ships as new chart versions
+6. Then the release deploys the published charts: on a three-zone Kind cluster, its own Linux CLI, run outside any checkout, deploys the stack from the charts step 5 published. It runs `--dry-run` first, then a real deploy of the Strimzi operator, Kafka and the Kates API with its PostgreSQL. `KATES_REQUIRE_SIGNED_CHARTS=1` makes every pulled chart's signature a requirement. A chart, an overlay or an image pin that can't install stops the run here, before anything points users at it. The charts are already pushed by then, so the fix ships as new chart versions
 7. **Create GitHub Release** — once the binaries, all three images and the chart deploy are done: uses the tag as the release, with auto-generated release notes; all tarballs and checksums are attached
 8. **Update Homebrew tap** — regenerates `Formula/kates.rb` in the `bmscomp/homebrew-tap` repository so `brew install bmscomp/tap/kates` resolves to the new release
 9. Then the Krew manifest moves to the tag: the release rewrites `plugins/kates.yaml` on `main` to the tag and the hashes of the tarballs just built, so `kubectl krew upgrade kates` from the repo's custom index (`kubectl krew index add kates https://github.com/bmscomp/kates.git`) resolves to the new release. Pre-release tags leave it alone
@@ -501,9 +501,9 @@ graph LR
     D -.->|"the tag the chart pins"| S
 ```
 
-**PR / Push flow:** Every pull request and push to `main` runs the validation workflows in parallel. They are not chained — each classifies the diff on its own, so a chart-only change runs the chart jobs and skips everything else, while a change to `cli/pkg/migrate/` runs jobs in `ci.yml`, `lint.yml`, `integration.yml` and `ci-mirror-maker2.yml`. Each workflow's `Gate ·` job is what branch protection requires.
+**PR / Push flow:** Every pull request and push to `main` runs the validation workflows in parallel. They are not chained: each classifies the diff on its own, so a chart-only change runs the chart jobs and skips everything else, while a change to `cli/pkg/migrate/` runs jobs in `ci.yml`, `lint.yml`, `integration.yml` and `ci-mirror-maker2.yml`. Each workflow's `Gate ·` job is what branch protection requires.
 
-**Scheduled flow:** The `metrics-live` jobs are gated by an `if:` inside the chart workflows rather than by a separate file, so they share their workflow's checks. They run on the weekly schedule, on a manual dispatch, on a pull request that touches their `live` paths, and (for MirrorMaker 2) on the `test-migration` label. They never run on a push to `main`, because the pull request already ran them. `security.yml` rescans the image tags the charts currently pin every Tuesday, and `native.yml` builds the native image nightly. A scheduled run that fails opens an issue labelled `ci-failure` (one per workflow, commented on while it stays open) instead of going unnoticed in the Actions tab.
+**Scheduled flow:** The `metrics-live` jobs are gated by an `if:` inside the chart workflows, so they share their workflow's checks. They run on the weekly schedule, on a manual dispatch, on a pull request that touches their `live` paths, and (for MirrorMaker 2) on the `test-migration` label. They never run on a push to `main`, because the pull request already ran them. `security.yml` rescans the image tags the charts currently pin every Tuesday, and `native.yml` builds the native image nightly. A scheduled run that fails opens an issue labelled `ci-failure` (one per workflow, commented on while it stays open) instead of going unnoticed in the Actions tab.
 
 **Release flow:** When a version tag is pushed, `release.yml` builds the CLI and calls the three image workflows; the GitHub Release and the Homebrew tap are published only after all of them have verified and signed what they pushed.
 
@@ -518,5 +518,5 @@ The release workflows require these GitHub repository secrets:
 | `HOMEBREW_TAP_TOKEN` | `release.yml` | Pushes the updated formula to `bmscomp/homebrew-tap` |
 
 ::: {.callout-note}
-`GITHUB_TOKEN` is automatically provided by GitHub Actions; the Docker Hub and Homebrew tap credentials must be configured manually in the repository settings. Image signing uses Cosign **keyless** signing through the workflow's OIDC identity — no signing-key secrets are required.
+`GITHUB_TOKEN` is automatically provided by GitHub Actions; the Docker Hub and Homebrew tap credentials must be configured manually in the repository settings. Image signing uses Cosign **keyless** signing through the workflow's OIDC identity, so no signing-key secrets are required.
 :::

@@ -10,7 +10,7 @@ Every client of `krafter`, the [Kafka cluster under test](appendix-a-glossary.md
 
 ## Threat Model
 
-Before diving into configurations, it helps to know what you're defending against. Six things can go wrong, and the chapter takes them in this order:
+Know what you are defending against before you change a setting. Six things can go wrong, and the chapter takes them in this order:
 
 | Attack surface | What goes wrong | What stops it | Section |
 |----------------|-----------------|---------------|---------|
@@ -36,7 +36,7 @@ graph LR
 ```
 
 ::: {.callout-note title="Why the performance listener skips TLS"}
-The `plain` listener, port 9092, uses SCRAM authentication and no TLS on purpose, so a baseline measures Kafka rather than encryption. Production clients belong on an encrypted listener: `external` keeps SCRAM over TLS, while `tls` needs a certificate user per client.
+The `plain` listener, port 9092, uses SCRAM authentication and no TLS on purpose, so a baseline measures Kafka without the cost of encryption. Production clients belong on an encrypted listener: `external` keeps SCRAM over TLS, while `tls` needs a certificate user per client.
 :::
 
 ## Authentication
@@ -45,7 +45,7 @@ Authentication answers the question: *"Who are you?"* Every connection to Kafka 
 
 ### Kafka Listeners
 
-Each listener enforces a specific authentication mechanism, and the choice of listener sets both the security properties and the performance cost of the connection:
+Each listener enforces one authentication mechanism, so the listener a client uses sets both the connection's security and its performance cost:
 
 | Listener | Port | Authentication | Use it for |
 |----------|------|----------------|------------|
@@ -68,7 +68,7 @@ Strimzi generates SCRAM credentials automatically when you create a `KafkaUser` 
 kubectl get secret kafka-ui -n kafka -o jsonpath='{.data.password}' | base64 -d
 ```
 
-Kubernetes Secrets are base64-encoded, not encrypted. Anyone with RBAC permission to read Secrets in the `kafka` namespace can extract every SCRAM password, and the copy of the `kates-backend` password in the `kates` namespace is just as exposed. RBAC on Secrets in both namespaces is the wall around these credentials. A NetworkPolicy doesn't help here: Secrets are read from the Kubernetes API, not from the brokers.
+Kubernetes Secrets are base64-encoded, not encrypted. Anyone with RBAC permission to read Secrets in the `kafka` namespace can extract every SCRAM password, and the copy of the `kates-backend` password in the `kates` namespace is exposed the same way. RBAC on Secrets in both namespaces is the wall around these credentials. A NetworkPolicy doesn't help here: Secrets are read from the Kubernetes API, not from the brokers.
 
 The Kates API's own service account can't read these Secrets, and doesn't need to: the kubelet hands the Kates API pod its `kates-backend` password. The `kates` chart grants the account `get` on one Secret, `postgresql`, the password of the INTEGRATION_CDC test's database, and only in the namespaces its `rbac.cdcSecretNamespaces` lists.
 
@@ -128,7 +128,7 @@ The TLS listener requires both server and client certificates [@rfc8446]. Strimz
 
 ## Authorization
 
-Authentication tells Kafka who you are. Authorization tells Kafka what you're allowed to do. Without authorization, an authenticated user can read any topic, join any consumer group, and modify any configuration — a single compromised credential becomes a full breach.
+Authentication tells Kafka who you are. Authorization tells Kafka what you're allowed to do. Without authorization, an authenticated user can read any topic, join any consumer group, and modify any configuration. One compromised credential then reaches everything.
 
 ### ACL Model
 
@@ -153,7 +153,7 @@ The platform profile ships these users. Read the Resources column as the blast r
 
 ### Adding a New Service
 
-When you onboard a new service to your Kafka cluster, follow the principle of least privilege [@saltzer1975protection] — grant only the permissions the service actually needs. Here's a template:
+When you onboard a new service to your Kafka cluster, follow the principle of least privilege [@saltzer1975protection]: grant only the permissions the service needs. Start from this template:
 
 ```yaml
 apiVersion: kafka.strimzi.io/v1
@@ -200,7 +200,7 @@ networkPolicy:
       listeners: [plain, tls]
 ```
 
-`listeners` holds listener *names* from `kafka.listeners`, not ports — the chart derives the ports. An empty `namespace` means the release namespace.
+`listeners` holds listener *names* from `kafka.listeners`, not ports: the chart derives the ports from them. An empty `namespace` means the release namespace.
 
 That rule is what lets the service in once the listeners are closed to everyone else. As the charts ship, they are not: Strimzi's own policy admits every pod to them, so the grant starts to matter only after you give the listeners `networkPolicyPeers`, as [How the Policies Combine](#how-the-policies-combine) shows.
 
@@ -263,7 +263,7 @@ Apply this file to your cluster:
 kubectl apply -f kafka-admin-user.yaml
 ```
 
-Once the Strimzi Operator processes the resource, it generates a Kubernetes Secret in the `kafka` namespace with the credentials. You can retrieve the generated SCRAM password using:
+Once the Strimzi Operator processes the resource, it generates a Kubernetes Secret in the `kafka` namespace with the credentials. Read the generated SCRAM password with:
 
 ```bash
 kubectl get secret admin-user -n kafka -o jsonpath="{.data.password}" | base64 -d
@@ -275,7 +275,7 @@ kubectl get secret admin-user -n kafka -o jsonpath="{.data.password}" | base64 -
 
 ## Audit Logging
 
-Kafka's authorizer can log every authorization decision — who accessed what, and when. The authorizer itself is already configured on `krafter`: Strimzi derives it from `spec.kafka.authorization` (`type: simple`), and it does not allow `authorizer.class.name` to be set directly in the `config` section — unsupported keys placed there are filtered out. What you control is the log level of `kafka.authorizer.logger`, which lives under `spec.kafka.logging` in the Kafka CR:
+Kafka's authorizer can log every authorization decision — who accessed what, and when. The authorizer itself is already configured on `krafter`: Strimzi derives it from `spec.kafka.authorization` (`type: simple`). Strimzi does not allow `authorizer.class.name` to be set directly in the `config` section, and filters out unsupported keys placed there. What you control is the log level of `kafka.authorizer.logger`, which lives under `spec.kafka.logging` in the Kafka CR:
 
 ```yaml
 spec:
@@ -311,7 +311,7 @@ graph TD
     ClientsCA["Clients CA<br/>5yr validity<br/>Renew 180d before expiry"] --> UserCert["Client certs for KafkaUsers<br/>with authentication.type: tls"]
 ```
 
-The Clients CA issues certificates only for `KafkaUser` resources with `authentication.type: tls`. The default managed users all authenticate with SCRAM-SHA-512, so they receive password Secrets rather than client certificates.
+The Clients CA issues certificates only for `KafkaUser` resources with `authentication.type: tls`. The default managed users all authenticate with SCRAM-SHA-512, so they receive password Secrets and no client certificates.
 
 | Property | Value | Purpose |
 |----------|-------|---------|
@@ -319,7 +319,7 @@ The Clients CA issues certificates only for `KafkaUser` resources with `authenti
 | Renewal window | 180 days before expiry | Ample time for rollout |
 | Renewal policy | `replace-key` | New key pair on renewal (stronger than key reuse) |
 
-The `replace-key` renewal policy means that on each renewal, Strimzi generates an entirely new private key rather than reusing the existing one. So a key compromised before the renewal is useless after it.
+Under the `replace-key` renewal policy, Strimzi generates a new private key on each renewal and never reuses the old one. A key compromised before the renewal is useless after it.
 
 ### Rotation Monitoring
 
@@ -349,7 +349,7 @@ If nothing is listed, run `kates deploy` again with the flags you first used. It
 
 ## Securing Kates
 
-Everything above protects `krafter` from its clients, and the Kates API is the most powerful of them. It runs load and faults as `kates-backend`, a Kafka super user, and with `rbac.scope` at its default, `cluster`, its service account holds a ClusterRole. Whoever holds its API key can put that power to work, so the key gets the same care as a Kafka password.
+Everything above protects `krafter` from its clients, and the Kates API holds more rights than any of them. It runs load and faults as `kates-backend`, a Kafka super user, and with `rbac.scope` at its default, `cluster`, its service account holds a ClusterRole. Whoever holds its API key can use those rights, so the key gets the same care as a Kafka password.
 
 ### What the Key Unlocks
 
@@ -413,7 +413,7 @@ Network policies decide which pods can open a socket to the brokers at all, so t
 
 ### How the Policies Combine
 
-Before you let a client near the brokers, you want to know which pods can open a socket to them. The answer depends on how Kubernetes combines NetworkPolicies.
+Which pods can open a socket to the brokers depends on how Kubernetes combines NetworkPolicies.
 
 Read NetworkPolicies as a union, not as a chain of filters. A policy selects pods and lists the traffic it allows. A pod that no policy selects for ingress accepts every connection. Once any policy selects it for ingress, it accepts only what one of those policies allows: the sum of all their rules. So a connection that any policy allows gets through, whatever the other policies say. A deny-all closes only the doors that no other policy opens.
 
@@ -527,10 +527,10 @@ helm upgrade krafter oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka \
 kubectl get networkpolicy krafter-kafka -n kafka
 ```
 
-The published chart carries its SeaweedFS subchart and the `kafka-common` library, so nothing is built first. `--reuse-values` keeps everything the release was installed with — for a `kates deploy` release, `values-detected.yaml`, the platform profile, the kind overlay, its `--set` flags and the version pins — and lays the file over it. Don't upgrade with the file alone: the release would lose the platform profile, and with it every `networkPolicy.clients` grant and the `kates-backend` super user. The peers admit only test pods, so Kates, Kafka UI and Connect would lose the brokers. `kates deploy` has no flag for a values file of yours, and a later run leaves the release alone, because it skips a Kafka cluster that is already installed. The `kubectl get` must find `krafter-kafka`. If it does not, the chart's policies are off and only the peers can connect: add the key from the previous paragraph and upgrade again.
+The published chart carries its SeaweedFS subchart and the `kafka-common` library, so nothing is built first. `--reuse-values` keeps everything the release was installed with (for a `kates deploy` release, `values-detected.yaml`, the platform profile, the kind overlay, its `--set` flags and the version pins) and lays the file over it. Don't upgrade with the file alone: the release would lose the platform profile, and with it every `networkPolicy.clients` grant and the `kates-backend` super user. The peers admit only test pods, so Kates, Kafka UI and Connect would lose the brokers. `kates deploy` has no flag for a values file of yours, and a later run leaves the release alone, because it skips a Kafka cluster that is already installed. The `kubectl get` must find `krafter-kafka`. If it does not, the chart's policies are off and only the peers can connect: add the key from the previous paragraph and upgrade again.
 
 ::: {.callout-warning title="Who loses access when the peers land"}
-Anything that reaches the brokers without a `networkPolicy.clients` entry loses access when the peers land: an ad-hoc debug pod, a client nobody declared. Compare the client list with what actually connects before you roll this out, and run the probe in [Testing Network Policies](#testing-network-policies) afterwards.
+Anything that reaches the brokers without a `networkPolicy.clients` entry loses access when the peers land: an ad-hoc debug pod, a client nobody declared. Compare the client list with what connects before you roll this out, and run the probe in [Testing Network Policies](#testing-network-policies) afterwards.
 :::
 
 `kafka.externalAccess.allowedCidrs` doesn't close port 9094. It narrows the chart's rule for the listener, but Strimzi's policy still admits every source to a listener without `networkPolicyPeers`, and the `externalAccess` preset can't carry them. To restrict 9094, declare the listener yourself in `kafka.listeners`, named `external`, with `ipBlock` peers. Set `kafka.externalAccess.type` to `none` so that the preset doesn't replace it; `allowedCidrs` still narrows the chart's rule for a listener of that name.
@@ -579,9 +579,9 @@ Every policy is named for its cluster, so two clusters can share a namespace. Th
 
 A seventh, `krafter-test-egress`, gives pods labeled `kates.io/test-pod=true` egress to the cluster's pods on 9090, 9091 and every listener port, DNS and the API server. It carries `helm.sh/resource-policy: keep` so a `helm test` against a reinstalled release still works.
 
-Client ports come from the listeners, so an external listener, from the `kafka.externalAccess` preset or from `kafka.listeners`, adds its port (9094 by default) to the rules that need it. `externalAccess.allowedCidrs` restricts the chart's rule for the one named `external`. The chart renders no policy that selects another release's pods — the operator's own policy belongs to the `strimzi-operator` release (`operatorPolicy`, on by default), and Kafka UI, Connect and MirrorMaker 2 each carry their own.
+Client ports come from the listeners, so an external listener, from the `kafka.externalAccess` preset or from `kafka.listeners`, adds its port (9094 by default) to the rules that need it. `externalAccess.allowedCidrs` restricts the chart's rule for the one named `external`. The chart renders no policy that selects another release's pods: the operator's own policy belongs to the `strimzi-operator` release (`operatorPolicy`, on by default), and Kafka UI, Connect and MirrorMaker 2 each carry their own.
 
-Re-derive the list rather than trusting this table, since it follows the values chain you deploy with:
+The list follows the values chain, so re-derive it from the chain you deploy with:
 
 ```bash
 helm pull oci://ghcr.io/bmscomp/charts/kafka-cluster --untar
@@ -595,7 +595,7 @@ On a running cluster, `kubectl get networkpolicy -n kafka` lists Strimzi's gener
 
 ### Testing Network Policies
 
-Don't trust that your network policies work — test them, with a test that can fail. A probe such as `nc -z` from a throwaway pod fails for many reasons that have nothing to do with policy: the image does not pull, admission rejects the pod, the name does not resolve, the broker is down. Reading every failure as "blocked" proves nothing. A failed probe is evidence of a policy drop only when:
+Test your network policies with a test that can fail. A probe such as `nc -z` from a throwaway pod fails for many reasons that have nothing to do with policy: the image does not pull, admission rejects the pod, the name does not resolve, the broker is down. Reading every failure as "blocked" proves nothing. A failed probe is evidence of a policy drop only when:
 
 - the same probe, run from a pod the policies admit, connects, so the brokers, DNS and the probe itself work;
 - the probing pod resolved the bootstrap name and its connection timed out. A policy drops packets, whereas a refusal means something answered;
@@ -833,7 +833,7 @@ kyvernoPolicy:
 
 By default `kyvernoPolicy.cosign.imagePatterns` lists `ghcr.io/bmscomp/*` and `docker.io/bmscomp/*`. `kyvernoPolicy.cosign.keyless` names the signer: `subjectRegExp` matches the `publish-docker.yml` and `publish-connect.yml` workflows on a `v*` tag, and `issuer` is GitHub's OIDC issuer, `https://token.actions.githubusercontent.com`.
 
-The check needs Kyverno 1.17 or newer. cosign 3 stores Sigstore bundle signatures, and a `ClusterPolicy` can't verify them on GHCR: its Cosign attestor looks for the legacy `.sig` tag, and its `SigstoreBundle` type misses GHCR's referrer tag ([kyverno/kyverno#16664](https://github.com/kyverno/kyverno/issues/16664)). So the check is an `ImageValidatingPolicy` (`policies.kyverno.io/v1`), which reads them from Kyverno 1.17 on. On an older Kyverno the chart refuses to render rather than leave the check out. `kates deploy --with-kyverno` and `kates kyverno apply --with-cosign` install a Kyverno that meets it when none is present. They leave an installed Kyverno as it is, so upgrade an older one first.
+The check needs Kyverno 1.17 or newer. cosign 3 stores Sigstore bundle signatures, and a `ClusterPolicy` can't verify them on GHCR: its Cosign attestor looks for the legacy `.sig` tag, and its `SigstoreBundle` type misses GHCR's referrer tag ([kyverno/kyverno#16664](https://github.com/kyverno/kyverno/issues/16664)). So the check is an `ImageValidatingPolicy` (`policies.kyverno.io/v1`), which reads them from Kyverno 1.17 on. On an older Kyverno the chart refuses to render, and never leaves the check out. `kates deploy --with-kyverno` and `kates kyverno apply --with-cosign` install a Kyverno that meets it when none is present. They leave an installed Kyverno as it is, so upgrade an older one first.
 
 Every container, init container and ephemeral container whose image matches `imagePatterns` must be signed by that identity. Other images, such as PostgreSQL, are left alone; allow only the registries you trust with `restrictRegistries`. `*` and `?` are the only wildcards, matched against the image as the pod names it, so `bmscomp/kates` doesn't match `docker.io/bmscomp/*`. On Kyverno 1.19 the policy also pins each verified image to its digest; Kyverno 1.17 verifies without pinning. The tester image, `kates-tester`, isn't signed, so don't run it in a namespace the check covers.
 
@@ -877,7 +877,7 @@ These policies are synchronized (`synchronize: true`): Kyverno recreates one tha
 
 ### Namespace Exclusions
 
-Certain system and infrastructure namespaces are excluded from automatic NetworkPolicy generation to prevent breaking core platform services:
+The policy generates no NetworkPolicy in these system and infrastructure namespaces, so a default deny can't break the platform services that run there:
 
 | Excluded Namespace | Reason |
 |--------------------|--------|
@@ -979,7 +979,7 @@ spec:
 
 ### Enforce vs Audit Modes
 
-All Kyverno policies support two operational modes, controlled by the `kyvernoPolicy.action` Helm value:
+The policies run in one of two modes, which the `kyvernoPolicy.action` Helm value sets:
 
 | Mode | Behavior | Use Case |
 |------|----------|----------|
@@ -994,7 +994,7 @@ Switch modes at runtime using the Kates CLI (see below) or by patching the Helm 
 
 ### Kates CLI: `kyverno` Subcommands
 
-The Kates CLI provides native Kyverno management through the `kates kyverno` command group:
+The `kates kyverno` command group reads the policies and switches their mode:
 
 ```bash
 # Show all ClusterPolicies with mode, readiness, and rule counts
@@ -1040,7 +1040,7 @@ Use this checklist when auditing your deployment. Each row is one control, the c
 
 ### Verifying the Posture in One Command
 
-To automate the verification of Kyverno policies, Strimzi operator health, and NetworkPolicy connectivity, use the built-in `make` target:
+One `make` target checks Kyverno rejections, Strimzi operator health and NetworkPolicy connectivity:
 
 ```bash
 make kafka-verify-policies
@@ -1050,7 +1050,7 @@ The target runs `scripts/verify-kafka-policies.sh`, which exits 0 when every che
 
 1. Scan the `kafka` namespace events for any Kyverno rejections.
 2. Find the Strimzi Cluster Operator in whichever namespaces it runs, and verify that each of them has an operator pod that is `Running` and Ready. An Evicted pod not yet garbage-collected, or a new pod still `Pending` during a rollout, does not fail the check.
-3. Check the Kafka cluster CR status to ensure it successfully reached the `Ready` state.
+3. Check that the Kafka cluster CR reached the `Ready` state.
 4. Run the probe from [Testing Network Policies](#testing-network-policies) against the `plain` listener: first a control pod labeled `kates.io/test-pod=true` in the `kafka` namespace, then a pod with no grant in `default`. It reports blocked only for a timeout after a successful lookup, with the control connected and no NetworkPolicy in `default`. A connection is a failure; any other result is inconclusive.
 
 Set `PROBE_NAMESPACE` to probe from another namespace, for example `make kafka-verify-policies PROBE_NAMESPACE=apps`; `KAFKA_NAMESPACE` and `KAFKA_CLUSTER` select another cluster. On the charts as shipped, step 4 fails, because the listeners are open to every pod until you [close them](#closing-the-listeners).

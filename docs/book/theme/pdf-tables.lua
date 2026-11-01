@@ -20,8 +20,8 @@ local function measure(blocks)
         -- theme/pdf-inline-code.lua leaves short code whole
         longest = math.max(longest, #c.text * CODE_CW)
       else
-        -- …and lets longer code break after / . - _ : = |
-        for seg in c.text:gmatch("[^%s/%.%-_:=|]+[/%.%-_:=|]?") do
+        -- …and lets longer code break after / . - _ : = | ,
+        for seg in c.text:gmatch("[^%s/%.%-_:=|,]+[/%.%-_:=|,]?") do
           longest = math.max(longest, #seg * CODE_CW)
         end
       end

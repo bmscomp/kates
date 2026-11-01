@@ -145,15 +145,15 @@
       "broken_handoff": 0
     },
     "11-api-reference.md": {
-      "bare_headings": 6,
-      "tables_without_lead_in": 3,
+      "bare_headings": 1,
+      "tables_without_lead_in": 1,
       "bold_lead_bullets": 0,
       "numbered_headings": 0,
       "formula_openings": 0,
       "changelog_phrases": 0,
       "long_fence_lines": 47,
       "mermaid_uncaptioned": 0,
-      "hr_rules": 13,
+      "hr_rules": 0,
       "scope_blockquotes": 0,
       "broken_handoff": 0
     },
@@ -333,7 +333,7 @@
       "numbered_headings": 0,
       "formula_openings": 0,
       "changelog_phrases": 0,
-      "long_fence_lines": 3,
+      "long_fence_lines": 0,
       "mermaid_uncaptioned": 0,
       "hr_rules": 0,
       "scope_blockquotes": 0,
@@ -441,7 +441,7 @@
       "mermaid_uncaptioned": 0,
       "hr_rules": 0,
       "scope_blockquotes": 0,
-      "broken_handoff": 1
+      "broken_handoff": 0
     },
     "operating-kafka-connect.md": {
       "bare_headings": 0,

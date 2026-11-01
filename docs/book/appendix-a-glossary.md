@@ -408,11 +408,11 @@ The KRaft metadata format a cluster runs, which can be no newer than its Kafka v
 
 ### Metric Contract {#gl-metric-contract}
 
-The rule that every series an alert or a dashboard panel reads is one the chart's exporter rules actually produce, which `scripts/check-metric-contract.sh` checks in CI. See [CI/CD Pipeline](appendix-c-cicd.md#the-render-matrix).
+The rule that every series an alert or a dashboard panel reads is one the chart's exporter rules produce, which `scripts/check-metric-contract.sh` checks in CI. See [CI/CD Pipeline](appendix-c-cicd.md#the-render-matrix).
 
 ### `min.insync.replicas` {#gl-min-insync-replicas}
 
-The smallest ISR a partition's leader accepts an `acks=all` write with: a floor, not a target, below which the leader refuses such writes rather than keep too few copies. 2 on `krafter` (3 replicas), so one broker can fail without stopping `acks=all` writes, and a second stops them. A test's `minInsyncReplicas` sets it when Kates creates the test topic; a topic that already exists keeps its own. See [The Cluster Under Test](03-cluster.md#replication-configuration).
+The smallest ISR a partition's leader accepts an `acks=all` write with. Below it, the leader refuses such writes, because they would keep too few copies. 2 on `krafter` (3 replicas), so one broker can fail without stopping `acks=all` writes, and a second stops them. A test's `minInsyncReplicas` sets it when Kates creates the test topic; a topic that already exists keeps its own. See [The Cluster Under Test](03-cluster.md#replication-configuration).
 
 ### MirrorMaker 2 {#gl-mirrormaker-2}
 
@@ -622,7 +622,7 @@ Replication factor: how many copies of each partition the cluster keeps, one per
 
 ### RPO {#gl-rpo}
 
-Recovery point objective: how much recently written data a failure may lose, measured in time [@swanson2010contingency]. Kates measures it rather than sets it. An INTEGRITY run inside a resilience run reports how long before the fault its oldest lost acknowledged record was sent: `0 ms` when none was lost, 'not measured' without a marked fault. A gate's `maxRpoMs` is the objective. See [Data Integrity Verification](08-data-integrity.md#integrity-under-chaos).
+Recovery point objective: how much recently written data a failure may lose, measured in time [@swanson2010contingency]. Kates measures it. An INTEGRITY run inside a resilience run reports how long before the fault its oldest lost acknowledged record was sent: `0 ms` when none was lost, 'not measured' without a marked fault. A gate's `maxRpoMs` is the objective. See [Data Integrity Verification](08-data-integrity.md#integrity-under-chaos).
 
 ### RTO {#gl-rto}
 
@@ -632,7 +632,7 @@ Recovery time objective: how long recovery from a failure may take [@swanson2010
 
 ### Safety Guard {#gl-safety-guard}
 
-The check Kates runs on a disruption plan before any fault, and on a compound or resilience run before it starts: it refuses the run when a step targets a namespace other than the Kafka cluster's and the Kates API's own, when no broker pod matches, when a plan's steps would hit more brokers than `maxAffectedBrokers`, or when no broker would be left untouched. Before each step's fault, a plan also requires every Kafka pod, controllers included, to be Running and Ready; a resilience run's fault gets no such check. It never counts controllers and doesn't check under-replicated partitions or the KRaft quorum. See [Chaos Engineering in Practice](07-chaos-practice.md#safety-guardrails).
+The check Kates runs on a disruption plan before any fault, and on a compound or resilience run before it starts. It refuses the run when a step targets a namespace other than the Kafka cluster's and the Kates API's own, when no broker pod matches, when a plan's steps would hit more brokers than `maxAffectedBrokers`, or when no broker would be left untouched. Before each step's fault, a plan also requires every Kafka pod, controllers included, to be Running and Ready; a resilience run's fault gets no such check. It never counts controllers and doesn't check under-replicated partitions or the KRaft quorum. See [Chaos Engineering in Practice](07-chaos-practice.md#safety-guardrails).
 
 ### Saturation Point {#gl-saturation-point}
 
@@ -800,7 +800,7 @@ A lightweight Java thread (Java 21) that the JVM schedules onto a few operating-
 
 ### Waiver {#gl-waiver}
 
-A recorded, time-limited exception to a requirement. In Kates, a waiver in a `KafkaReference` names a rule, a reason, an owner and an end date, and the compliance check shows that rule as WAIVED, rather than failing on it, until the date passes. See [When the Cluster Falls Short](compliance.md#when-the-cluster-falls-short).
+A recorded, time-limited exception to a requirement. In Kates, a waiver in a `KafkaReference` names a rule, a reason, an owner and an end date, and the compliance check shows that rule as WAIVED until the date passes. See [When the Cluster Falls Short](compliance.md#when-the-cluster-falls-short).
 
 ### Worker (Kafka Connect) {#gl-connect-worker}
 

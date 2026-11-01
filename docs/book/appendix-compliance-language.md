@@ -462,7 +462,7 @@ The finding quotes the error it stands for, with that error's code in brackets, 
 
 ## Canonical Form
 
-`kates compliance fmt` writes a reference in one form, so a reviewer reads a diff of meaning rather than layout. It changes no rule:
+`kates compliance fmt` writes a reference in one form, so a reviewer's diff shows only changes of meaning. It changes no rule:
 
 - Keys follow the schema's order, and a `config` section's keys are alphabetical.
 - Indentation is two spaces, and a constraint map sits on one line, as in `{min: 3}`.
