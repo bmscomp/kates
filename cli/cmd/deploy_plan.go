@@ -98,6 +98,7 @@ func runComponentForm(picked *[]string) error {
 			Description("Space toggles, enter confirms. Kafka and the Kates backend are always deployed. After · is what is installed now.").
 			Options(componentOptions...).
 			Value(picked),
+		huh.NewNote().Title("Always deployed").Description("📦 Kates Backend + 🐘 Kates Database (PostgreSQL)\n📨 Kafka Cluster"),
 	}
 	if len(leftOut) > 0 {
 		componentFields = append(componentFields, huh.NewNote().Title("Not installed admin-less").Description(describeLeftOut(leftOut)))
