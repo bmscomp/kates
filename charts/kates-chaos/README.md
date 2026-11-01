@@ -142,7 +142,7 @@ Each key under `engines:` renders a `ChaosEngine`. Probes and pod `components` a
 | `networkPolicy.dns.enabled` | DNS egress | `true` |
 | `networkPolicy.monitoring.enabled` | Prometheus scrape ingress to the exporter | `true` |
 | `networkPolicy.monitoring.namespace` / `port` | Scrape source ns / exporter port | `monitoring` / `8080` |
-| `networkPolicy.targets.enabled` | Egress to `rbac.targetNamespaces`, and a policy in each of them giving Litmus's engine pods (`chaosUID`) DNS and the API server | `true` |
+| `networkPolicy.targets.enabled` | Egress to `rbac.targetNamespaces`, and a policy in each of them giving Litmus's engine pods (`chaosUID`) open egress | `true` |
 | `networkPolicy.extraIngress` / `extraEgress` | Raw rules appended verbatim | `[]` |
 | `networkPolicies.enabled` | **Deprecated** alias — OR'd with `networkPolicy.enabled` | `false` |
 

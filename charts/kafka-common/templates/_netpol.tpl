@@ -148,6 +148,9 @@ spec:
         operator: In
         values:
           {{- toYaml .components | nindent 10 }}
+      # Never the Strimzi workers, whose egress their own policy narrows.
+      - key: strimzi.io/kind
+        operator: DoesNotExist
   policyTypes:
     - Egress
   egress:

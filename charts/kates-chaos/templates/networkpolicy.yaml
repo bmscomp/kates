@@ -77,12 +77,14 @@ spec:
     {{- with $np.extraEgress }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
-{{- if (($np.targets).enabled | default true) }}
+{{- /* Not `| default true`: that turns an explicit false back into true. */}}
+{{- if ne (toString ($np.targets).enabled) "false" }}
 {{- /* Litmus starts the runner, the experiment Job and its helpers in the
        ChaosEngine's namespace, not this one, and each of them talks to the
        API server first: where that namespace denies all traffic they hang at
-       the first call. One policy per target namespace gives them DNS and the
-       API server, nothing else. */}}
+       the first call. Their egress is left open rather than narrowed, since
+       an experiment's probes may dial anything (Kafka, HTTP endpoints), and a
+       narrower rule would cut them where nothing was denied before. */}}
 {{- range $t := $targets }}
 ---
 apiVersion: networking.k8s.io/v1
@@ -102,29 +104,7 @@ spec:
   policyTypes:
     - Egress
   egress:
-    {{- if (($np.dns).enabled | default true) }}
-    - to:
-        - namespaceSelector: {}
-      ports:
-        {{- range ($np.dns).ports | default (list 53) }}
-        - protocol: UDP
-          port: {{ . }}
-        - protocol: TCP
-          port: {{ . }}
-        {{- end }}
-    {{- end }}
-    {{- if (($np.apiServer).enabled | default true) }}
-    - {{- with ($np.apiServer).ipBlock }}
-      to:
-        - ipBlock:
-            {{- toYaml . | nindent 12 }}
-      {{- end }}
-      ports:
-        {{- range ($np.apiServer).ports | default (list 443 6443) }}
-        - protocol: TCP
-          port: {{ . }}
-        {{- end }}
-    {{- end }}
+    - {}
 {{- end }}
 {{- end }}
 {{- end }}
