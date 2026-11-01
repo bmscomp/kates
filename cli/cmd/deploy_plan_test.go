@@ -8,11 +8,11 @@ func saveComponentFlags(t *testing.T) {
 	t.Helper()
 	strimzi, connect, ui, mm2 := deployWithStrimzi, deployWithKafkaConnect, deployWithKafkaUI, deployWithMirrorMaker2
 	chaos, mon, cert, kyv := deployWithChaos, deployWithMonitoring, deployWithCertManager, deployWithKyverno
-	scrape, adminless := deployAdminlessScrape, deployAdminless
+	scrape, adminless, kates := deployAdminlessScrape, deployAdminless, deployWithKates
 	t.Cleanup(func() {
 		deployWithStrimzi, deployWithKafkaConnect, deployWithKafkaUI, deployWithMirrorMaker2 = strimzi, connect, ui, mm2
 		deployWithChaos, deployWithMonitoring, deployWithCertManager, deployWithKyverno = chaos, mon, cert, kyv
-		deployAdminlessScrape, deployAdminless = scrape, adminless
+		deployAdminlessScrape, deployAdminless, deployWithKates = scrape, adminless, kates
 	})
 }
 
@@ -29,6 +29,7 @@ func TestApplyPickedComponentsTurnsOnExactlyThePicked(t *testing.T) {
 		"strimzi": deployWithStrimzi, "kafka-connect": deployWithKafkaConnect, "kafka-ui": deployWithKafkaUI,
 		"mirror-maker2": deployWithMirrorMaker2, "chaos": deployWithChaos, "monitoring": deployWithMonitoring,
 		"cert-manager": deployWithCertManager, "kyverno": deployWithKyverno, "scrape": deployAdminlessScrape,
+		"kates": deployWithKates,
 	}
 	want := map[string]bool{"kafka-ui": true, "kyverno": true, "monitoring": true}
 	for name, got := range on {

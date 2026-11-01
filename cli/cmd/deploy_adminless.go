@@ -107,9 +107,10 @@ func applyAdminlessProfile(ctx context.Context, cmd *cobra.Command) error {
 }
 
 // dropCreateNamespace takes --create-namespace out of every helm call until
-// the returned function restores the seam. Admin-less installs only into
-// namespaces that exist, and Helm 4 server-side applies the Namespace even
-// then, which needs patch on namespaces: a team account is refused.
+// the returned function restores the seam. Deploy creates its namespaces
+// before Helm runs (ensureDeployNamespace) and keeps one that already exists;
+// Helm 4 server-side applies the Namespace even then, which needs patch on
+// namespaces: an account without it was refused on a namespace it could use.
 func dropCreateNamespace() (restore func()) {
 	helmFn := runHelmFn
 	runHelmFn = func(ctx context.Context, args ...string) error {
@@ -186,7 +187,9 @@ func adminlessGrants(ns resolvedNamespaces) map[string][]string {
 		for _, namespace := range adminlessStrimziNamespaces(ns) {
 			add(namespace, "podmonitors.monitoring.coreos.com", "prometheusrules.monitoring.coreos.com")
 		}
-		add(ns.app, "servicemonitors.monitoring.coreos.com", "prometheusrules.monitoring.coreos.com")
+		if deployWithKates {
+			add(ns.app, "servicemonitors.monitoring.coreos.com", "prometheusrules.monitoring.coreos.com")
+		}
 	}
 	for namespace, resources := range grants {
 		slices.Sort(resources)
