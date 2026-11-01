@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -180,6 +181,8 @@ func TestKyvernoCheckCannotPassWhatItCouldNotRead(t *testing.T) {
 func TestKyvernoCheckCountsOnlyExceptionsKyvernoAccepts(t *testing.T) {
 	for _, tc := range []struct{ args, note string }{
 		{`"--enablePolicyException=false"`, "accepts no PolicyException"},
+		// Kyverno 1.17 selects no exception when the namespace flag is empty.
+		{`"--enablePolicyException=true"`, "no --exceptionNamespace"},
 		{`"--enablePolicyException=true","--exceptionNamespace=kyverno"`, "only in kyverno"},
 	} {
 		stubKyvernoCheck(t, `{"results":[]}`)
@@ -262,25 +265,28 @@ func TestInNamespaceSetsTheReleaseNamespace(t *testing.T) {
 // in the namespace deploy would put it, with the values meant for it.
 func TestKyvernoCheckStackChecksWhatDeployInstalls(t *testing.T) {
 	stubKyvernoCheck(t, "")
-	vars := []*bool{&kyvernoCheckStack, &deployWithStrimzi, &deployWithMonitoring, &deployWithKafkaConnect, &deployWithMirrorMaker2}
+	vars := []*bool{&kyvernoCheckStack, &deployWithStrimzi, &deployWithMonitoring, &deployWithKafkaConnect, &deployWithMirrorMaker2, &deployWithKafkaUI, &deployWithChaos}
 	orig := make([]bool, len(vars))
 	for i, v := range vars {
 		orig[i] = *v
 	}
-	origNS := []string{deployTopology, deployKafkaNS, deployConnectNS, deployAppNS, deployKafkaName}
+	origNS := []string{deployTopology, deployKafkaNS, deployConnectNS, deployAppNS, deployKafkaName, deployDbNS, deployWithSchemaRegistry}
 	t.Cleanup(func() {
 		for i, v := range vars {
 			*v = orig[i]
 		}
-		deployTopology, deployKafkaNS, deployConnectNS, deployAppNS, deployKafkaName = origNS[0], origNS[1], origNS[2], origNS[3], origNS[4]
+		deployTopology, deployKafkaNS, deployConnectNS, deployAppNS, deployKafkaName, deployDbNS, deployWithSchemaRegistry = origNS[0], origNS[1], origNS[2], origNS[3], origNS[4], origNS[5], origNS[6]
 	})
-	kyvernoCheckStack, deployWithStrimzi, deployWithMonitoring, deployWithKafkaConnect, deployWithMirrorMaker2 = true, true, false, true, false
-	deployTopology, deployKafkaNS, deployConnectNS, deployAppNS, deployKafkaName = "isolated", "kafka", "connect", "team", "krafter"
+	kyvernoCheckStack, deployWithStrimzi, deployWithMonitoring, deployWithKafkaConnect, deployWithMirrorMaker2, deployWithKafkaUI, deployWithChaos = true, true, false, true, false, false, false
+	deployTopology, deployKafkaNS, deployConnectNS, deployAppNS, deployKafkaName, deployDbNS, deployWithSchemaRegistry = "isolated", "kafka", "connect", "team", "krafter", "database", "none"
 	kyvernoCheckNamespace = ""
 	kyvernoCheckValues = []string{"kafka-cluster=kafka.yaml", "all.yaml"}
 	kyvernoCheckSet = []string{"kates=image.tag=1.0"}
 	f := stubRunner(t).
 		On("kubectl get", `{"items":[`+kyvernoTeamPolicy+`]}`).
+		// Only kafka-cluster lacks a dependency; the others are left as they are.
+		On("helm dependency list charts/kafka-cluster", "NAME\tVERSION\tREPOSITORY\tSTATUS\nkafka-common\t0.1.1\tfile://../kafka-common\tok\nseaweedfs\t3.68.0\thttps://seaweedfs.github.io/seaweedfs/helm\tmissing\n").
+		On("helm dependency list", "NAME\tVERSION\tREPOSITORY\tSTATUS\ndep\t1.0.0\thttps://example.com\tok\n").
 		On("helm template", "kind: Pod\nmetadata:\n  name: p\n").
 		On("kyverno apply", `{"results":[{"policy":"require-team","rule":"check-team","result":"pass"}]}`)
 
@@ -293,7 +299,7 @@ func TestKyvernoCheckStackChecksWhatDeployInstalls(t *testing.T) {
 	for _, r := range reports {
 		got = append(got, r.Chart+"@"+r.Namespace)
 	}
-	if want := []string{"strimzi-operator@strimzi-operator", "kafka-cluster@kafka", "connect-cluster@connect", "kates@team"}; !slices.Equal(got, want) {
+	if want := []string{"strimzi-operator@strimzi-operator", "kafka-cluster@kafka", "connect-cluster@connect", "cdc-postgresql@database", "kates@team"}; !slices.Equal(got, want) {
 		t.Errorf("charts = %q, want %q", got, want)
 	}
 	var helm []string
@@ -303,26 +309,29 @@ func TestKyvernoCheckStackChecksWhatDeployInstalls(t *testing.T) {
 		}
 	}
 	want := []string{
-		"helm dependency build charts/strimzi-operator",
+		"helm dependency list charts/strimzi-operator",
 		"helm template strimzi-operator charts/strimzi-operator -n strimzi-operator --api-versions kyverno.io/v2 -f all.yaml",
+		"helm dependency list charts/kafka-cluster",
 		"helm dependency update charts/kafka-cluster",
 		"helm template krafter charts/kafka-cluster -n kafka --api-versions kyverno.io/v2 -f charts/kafka-cluster/values-platform.yaml -f kafka.yaml -f all.yaml",
-		"helm dependency update --skip-refresh charts/connect-cluster",
+		"helm dependency list charts/connect-cluster",
 		"helm template connect-cluster charts/connect-cluster -n connect --api-versions kyverno.io/v2 -f all.yaml",
+		"helm template postgresql charts/cdc-postgresql -n database --api-versions kyverno.io/v2 -f all.yaml",
 		"helm template kates charts/kates -n team --api-versions kyverno.io/v2 -f all.yaml --set image.tag=1.0",
 	}
 	if !slices.Equal(helm, want) {
 		t.Errorf("helm calls:\n got %q\nwant %q", helm, want)
 	}
-	// Each namespace's Policies are read once, the cluster's once per namespace.
-	var policies []string
+	// Each namespace's Policies are read once; the cluster-wide kinds and
+	// every namespace's exceptions once in all.
+	count := map[string]int{}
 	for _, line := range f.Lines() {
-		if strings.HasPrefix(line, "kubectl get policies.kyverno.io") {
-			policies = append(policies, line)
+		if strings.HasPrefix(line, "kubectl get") {
+			count[strings.Fields(line)[2]]++
 		}
 	}
-	if len(policies) != 4 || !slices.Contains(policies, "kubectl get policies.kyverno.io -o json -n kafka") {
-		t.Errorf("Policies read: %q", policies)
+	if count["policies.kyverno.io"] != 5 || count["clusterpolicies.kyverno.io"] != 1 || count["policyexceptions.kyverno.io"] != 1 {
+		t.Errorf("lists made: %v", count)
 	}
 }
 
@@ -490,5 +499,99 @@ func TestWriteKyvernoValuesKeepsAMessageInItsComment(t *testing.T) {
 	b, _ := os.ReadFile(path)
 	if err := yaml.Unmarshal(b, &values); err != nil || len(values) != 0 {
 		t.Errorf("values %v, err %v, from:\n%q", values, err, b)
+	}
+}
+
+// -f and --set entries reach the chart they name, or every chart.
+func TestForChartRoutesEntriesByChartPrefix(t *testing.T) {
+	entries := []string{"all.yaml", "kafka-cluster=kafka.yaml", "kates=image.tag=1.0", "podLabels.team=a", "out/a=b.yaml"}
+	for chart, want := range map[string][]string{
+		"kafka-cluster": {"all.yaml", "kafka.yaml", "podLabels.team=a", "out/a=b.yaml"},
+		"kates":         {"all.yaml", "image.tag=1.0", "podLabels.team=a", "out/a=b.yaml"},
+		"monitoring":    {"all.yaml", "podLabels.team=a", "out/a=b.yaml"},
+	} {
+		if got := forChart(entries, chart); !slices.Equal(got, want) {
+			t.Errorf("%s: %q, want %q", chart, got, want)
+		}
+	}
+}
+
+// --stack follows every flag deploy decides its charts and namespaces by.
+func TestKyvernoCheckTakesDeploysSelectionFlags(t *testing.T) {
+	for _, name := range []string{"with-strimzi", "with-monitoring", "with-kafka-connect", "with-mirror-maker2",
+		"with-schema-registry", "with-kafka-ui", "with-chaos", "topology",
+		"kafka-ns", "connect-ns", "db-ns", "app-ns", "chaos-ns", "monitoring-ns", "ui-ns", "mm2-ns", "kafka-name"} {
+		if kyvernoCheckCmd.Flags().Lookup(name) != deployCmd.Flags().Lookup(name) {
+			t.Errorf("--%s is not deploy's flag", name)
+		}
+	}
+}
+
+// With neither --chart nor --stack, the kates chart, wherever it is listed.
+func TestKyvernoCheckDefaultsToTheKatesChart(t *testing.T) {
+	origStack, origCharts := kyvernoCheckStack, kyvernoCheckCharts
+	t.Cleanup(func() { kyvernoCheckStack, kyvernoCheckCharts = origStack, origCharts })
+	kyvernoCheckStack, kyvernoCheckCharts = false, nil
+	charts, err := kyvernoCheckedCharts()
+	if err != nil || len(charts) != 1 || charts[0].name != "kates" {
+		t.Errorf("%+v, %v", charts, err)
+	}
+}
+
+func TestKyvernoCheckRefusesABadLabel(t *testing.T) {
+	stubKyvernoCheck(t, "")
+	orig, origTo := kyvernoCheckLabels, kyvernoCheckWriteTo
+	t.Cleanup(func() { kyvernoCheckLabels, kyvernoCheckWriteTo = orig, origTo })
+	for _, c := range []struct {
+		labels []string
+		to     string
+		want   string
+	}{
+		{[]string{"team=a b"}, t.TempDir(), "value"},
+		{[]string{"kubernetes.io/team=a"}, t.TempDir(), "reserved"},
+		{[]string{"team=a"}, "", "--write-values"},
+	} {
+		kyvernoCheckLabels, kyvernoCheckWriteTo = c.labels, c.to
+		err := kyvernoCheckCmd.RunE(kyvernoCheckCmd, nil)
+		if code := exitCode(err); code != couldNotTellExitCode || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: exit %d, %v; want %q", c.labels, code, err, c.want)
+		}
+	}
+}
+
+// A refused list of every namespace is asked once a run, then each
+// namespace falls back to its own.
+func TestKyvernoListsAreMadeOnce(t *testing.T) {
+	f := stubRunner(t).
+		Fail("kubectl get policyexceptions.kyverno.io -o json -A", `Error from server (Forbidden): forbidden`).
+		On("kubectl get", `{"items":[{"metadata":{"name":"e"}}]}`)
+	lists := kyvernoLists{}
+	for _, ns := range []string{"a", "b", "a"} {
+		items, unread, err := listKyvernoKind(context.Background(), "policyexceptions.kyverno.io", "all", ns, lists)
+		if err != nil || unread != "" || len(items) != 1 {
+			t.Fatalf("%s: %d items, %q, %v", ns, len(items), unread, err)
+		}
+	}
+	want := []string{
+		"kubectl get policyexceptions.kyverno.io -o json -A",
+		"kubectl get policyexceptions.kyverno.io -o json -n a",
+		"kubectl get policyexceptions.kyverno.io -o json -n b",
+	}
+	if got := f.Lines(); !slices.Equal(got, want) {
+		t.Errorf("calls %q, want %q", got, want)
+	}
+}
+
+func TestChartDepsMissing(t *testing.T) {
+	for out, want := range map[string]bool{
+		"NAME\tVERSION\tREPOSITORY\tSTATUS\na\t1\thttps://x\tok\nb\t1\tfile://../b\tunpacked\n":                      false,
+		"WARNING: no dependencies at charts/x/charts\nNAME\tVERSION\tREPOSITORY\tSTATUS\na\t1\thttps://x\tmissing\n": true,
+		"NAME\tVERSION\tREPOSITORY\tSTATUS\na\t1\thttps://x\twrong version\n":                                        true,
+		"": false,
+	} {
+		stubRunner(t).On("helm dependency list", out)
+		if got, err := chartDepsMissing(context.Background(), "charts/x"); err != nil || got != want {
+			t.Errorf("%q: %v, %v; want %v", out, got, err, want)
+		}
 	}
 }
