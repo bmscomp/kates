@@ -8,11 +8,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/bmscomp/kates/cli/output"
@@ -230,6 +233,11 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Before the window opens: clearing a stuck release asks first.
+	if err := recoverStuckReleases(commandContext(cmd), sharedEntries); err != nil {
+		return err
+	}
+
 	// Record each component's outcome BEFORE the pipeline runs, from the same
 	// predicate the skip logic uses: a release that already exists gets skipped
 	// ("already present"), one that does not gets deployed. Status was never
@@ -244,12 +252,47 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// 4. Execution Plan (Helm)
 	PrintPhaseHeader(nextDeployPhase(), "Executing Deployment Pipeline")
 
-	// Create context
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	newDC := func(ctx context.Context) *deployContext {
+		return newDeployContext(ctx, ns, valuesFile, report, vp, primary)
+	}
+	return runDeployAndReport(commandContext(cmd), newDC, target, ns, errorLog, sharedEntries, deployStartTime)
+}
 
-	dc := newDeployContext(ctx, ns, valuesFile, report, vp, primary)
+// runDeployAndReport runs the pipeline and reports its outcome: the error
+// (saved to errorLog), an interruption, or the summary of a success.
+func runDeployAndReport(base context.Context, newDC func(context.Context) *deployContext, target string, ns resolvedNamespaces, errorLog string, sharedEntries []DeploySummaryEntry, deployStartTime time.Time) error {
+	// From here on Ctrl-C stops the deploy instead of ending kates: helm gets
+	// SIGTERM and time to record its release state (deployCommand), and the
+	// cert-manager webhook is put back. Before the pipeline nothing is
+	// half-applied, so Go's default, ending kates at once, is kept there. The
+	// first signal restores that default, so a second one still ends kates.
+	ctx, stop := signal.NotifyContext(base, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+
+	// Whatever this run's flags: an earlier run may have installed it.
+	restoreFailOpenCertMgrWebhook(ctx)
+
+	dc := newDC(ctx)
 	res := runDeployPipeline(dc, sharedEntries, deployStartTime)
+	// A signal during the pipeline, read before stop(), which cancels ctx
+	// too. The summary and the port forwards after it run on the command's
+	// context, where Ctrl-C ends kates as it did.
+	interrupted := ctx.Err() != nil
+	stop()
+
+	if interrupted && (res.err != nil || res.dashboardErr != nil) {
+		// A failure before the Ctrl-C is still the deploy's error.
+		if res.err != nil && !errors.Is(res.err, context.Canceled) {
+			output.Error(res.err.Error())
+			saveDeployError(errorLog, res.err)
+		}
+		output.Warn("Deploy interrupted. Run kates deploy again to finish: it picks up the releases an interrupted run left pending.")
+		return errInterrupted
+	}
 	if res.dashboardErr != nil {
 		// The dashboard failed: the deploy's own error, when it has one, is
 		// the more consequential.
@@ -264,7 +307,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 
 	if res.err == nil && len(res.entries) > 0 {
-		finishDeploy(ctx, target, ns, res.entries, res.elapsed)
+		finishDeploy(base, target, ns, res.entries, res.elapsed)
 	}
 
 	return res.err
@@ -619,7 +662,7 @@ func runDeployPipeline(dc *deployContext, sharedEntries []DeploySummaryEntry, st
 		dl.closed.Store(true)
 		output.KeepHint()
 		if m, ok := final.(deployDashboardModel); ok && m.interrupted {
-			output.Warn("Deploy window closed; the deploy goes on and prints below. Ctrl-C again stops kates, which can leave a Helm release half-applied.")
+			output.Warn("Deploy window closed; the deploy goes on and prints below. Ctrl-C again stops the deploy.")
 		}
 		if err != nil {
 			// The dashboard is cosmetic; the deploy goroutine is real work.
@@ -678,8 +721,21 @@ var (
 
 var execMutex sync.Mutex
 
-func runExecDefault(ctx context.Context, name string, args ...string) error {
+// deployCommand is exec.CommandContext with a gentler end: a cancelled
+// context (Ctrl-C, a failed sibling) sends SIGTERM, and helm gets 30 s to
+// record its release state before it is killed. A SIGKILLed helm left the
+// release pending-install or pending-upgrade, locked against every re-run.
+func deployCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, name, args...)
+	if runtime.GOOS != "windows" { // Windows has no SIGTERM: kill, as before
+		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+		cmd.WaitDelay = 30 * time.Second
+	}
+	return cmd
+}
+
+func runExecDefault(ctx context.Context, name string, args ...string) error {
+	cmd := deployCommand(ctx, name, args...)
 
 	if deployVerbose {
 		// Verbose streams to the terminal, so commands take turns: the lock
@@ -719,17 +775,17 @@ func runExecDefault(ctx context.Context, name string, args ...string) error {
 
 // runExecOutputDefault captures stdout, like exec.Cmd.Output().
 func runExecOutputDefault(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).Output()
+	return deployCommand(ctx, name, args...).Output()
 }
 
 // runExecCombinedDefault captures stdout and stderr, like exec.Cmd.CombinedOutput().
 // Used where the caller inspects error text (e.g. "not found") rather than data.
 func runExecCombinedDefault(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	return deployCommand(ctx, name, args...).CombinedOutput()
 }
 
 func runExecStdinDefault(ctx context.Context, name string, args []string, stdinData string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := deployCommand(ctx, name, args...)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -788,14 +844,52 @@ func isHelmReleaseDeployedDefault(ctx context.Context, release, namespace string
 	// half-applied release is reinstalled, not skipped. helm list reads the
 	// status with the rest of the row; helm status exited 0 for a failed
 	// release too.
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	releases, err := helmReleases(checkCtx, runExecOutputFn, namespace)
-	if err != nil {
-		return false
+	//
+	// A slow API server used to read as "not installed" after one 5 s try,
+	// and the component reinstalled over its running release. Three tries,
+	// each with a longer budget, ride out a busy control plane.
+	budgets := []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second}
+	// A namespace whose read just failed every try gets one try for a
+	// minute: the entries' lookups run one after another, and each used to
+	// spend the full ~38 s on the same unanswering API server.
+	if until, ok := unreadableNamespaces.Load(namespace); ok && deployClock.Now().Before(until.(time.Time)) {
+		budgets = budgets[:1]
 	}
-	return slices.ContainsFunc(releases, func(r helmRelease) bool { return r.Name == release && r.Deployed() })
+	var err error
+	for i, budget := range budgets {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return false
+			case <-deployClock.After(time.Duration(i) * time.Second):
+			}
+		}
+		checkCtx, cancel := context.WithTimeout(ctx, budget)
+		var releases []helmRelease
+		releases, err = helmReleases(checkCtx, runExecOutputFn, namespace)
+		cancel()
+		if err == nil {
+			return slices.ContainsFunc(releases, func(r helmRelease) bool { return r.Name == release && r.Deployed() })
+		}
+		// A refused namespace (admin-less) answers the same every time.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && bytes.Contains(bytes.ToLower(exitErr.Stderr), []byte("forbidden")) {
+			return false
+		}
+	}
+	// shortcut: an unreadable release still reads as absent, so its install
+	// runs and reports the API error; return the error once the gates take
+	// (bool, error) instead of a bool.
+	if ctx.Err() == nil {
+		unreadableNamespaces.Store(namespace, deployClock.Now().Add(time.Minute))
+		dl.Printf("    ⚠ Could not read Helm release %s in %s (%v); taking it as not installed\n", release, namespace, err)
+	}
+	return false
 }
+
+// unreadableNamespaces holds, per namespace, until when a failed release
+// read is not retried.
+var unreadableNamespaces sync.Map
 
 // cleanupStaleClusterResource removes a cluster-scoped resource that a Helm
 // release in another namespace installed, once that release is gone: a

@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -272,5 +274,141 @@ func TestDeploy_FailedDependencyUpdateSurfacesStderr(t *testing.T) {
 		if strings.HasPrefix(c, "upgrade --install krafter") {
 			t.Errorf("Kafka was installed after its dependency update failed: %v", helmCalls)
 		}
+	}
+}
+
+// A failure stops the scheduling, not the work under way: a sibling's
+// install keeps a live context (killing helm mid-install left its release
+// pending), a sibling's readiness wait is cut short, and nothing new starts.
+func TestRunComponents_FailureLetsRunningInstallsFinish(t *testing.T) {
+	origDL := dl
+	t.Cleanup(func() { dl = origDL })
+	dl = &DashboardController{}
+	dc := &deployContext{ctx: context.Background(), advanceStep: func() {}}
+
+	installing := make(chan struct{})
+	failed := make(chan struct{})
+	var installCtxErr, waitErr error
+	started := false
+	err := runComponents(context.Background(), dc, []component{
+		{id: "a", name: "A", install: func(ctx context.Context) error {
+			close(installing)
+			<-failed
+			installCtxErr = ctx.Err()
+			return nil
+		}, wait: func(ctx context.Context) error {
+			<-ctx.Done() // a wait that would run for minutes
+			waitErr = ctx.Err()
+			return waitErr
+		}},
+		{id: "b", name: "B", install: func(context.Context) error {
+			<-installing
+			defer close(failed)
+			return errors.New("helm: timed out")
+		}},
+		{id: "c", name: "C", deps: []string{"b"}, install: func(context.Context) error { started = true; return nil }},
+	})
+	if err == nil || !strings.Contains(err.Error(), "B: helm: timed out") {
+		t.Errorf("err = %v, want B's failure", err)
+	}
+	if installCtxErr != nil {
+		t.Errorf("A's install context was cancelled by B's failure: %v", installCtxErr)
+	}
+	if waitErr == nil {
+		t.Error("A's wait was not cut short")
+	}
+	if started {
+		t.Error("C started after B failed")
+	}
+}
+
+// Ctrl-C with nothing failed is still not a successful deploy.
+func TestRunComponents_InterruptedIsAnError(t *testing.T) {
+	origDL := dl
+	t.Cleanup(func() { dl = origDL })
+	dl = &DashboardController{}
+	dc := &deployContext{ctx: context.Background(), advanceStep: func() {}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	err := runComponents(ctx, dc, []component{
+		{id: "a", name: "A", install: func(context.Context) error { cancel(); return nil }},
+		{id: "b", name: "B", deps: []string{"a"}, install: func(context.Context) error {
+			t.Error("B started after the interrupt")
+			return nil
+		}},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+// A skip check that a sibling's failure cut short reads "not installed";
+// the component must not go on to install over its release.
+func TestRunComponents_CutSkipCheckDoesNotInstall(t *testing.T) {
+	origDL := dl
+	t.Cleanup(func() { dl = origDL })
+	dl = &DashboardController{}
+	dc := &deployContext{ctx: context.Background(), advanceStep: func() {}}
+
+	checking := make(chan struct{})
+	installed := false
+	_ = runComponents(context.Background(), dc, []component{
+		{id: "a", name: "A", installed: func(ctx context.Context) (bool, error) {
+			close(checking)
+			<-ctx.Done()
+			return false, nil // what a cancelled helm list reads as
+		}, install: func(context.Context) error { installed = true; return nil }},
+		{id: "b", name: "B", install: func(context.Context) error {
+			<-checking
+			return errors.New("boom")
+		}},
+	})
+	if installed {
+		t.Error("A installed after B's failure cut its skip check short")
+	}
+}
+
+// Ctrl-C during an install: helm exits non-zero on SIGTERM, which is the
+// interruption, not a failure. The deploy ends as interrupted (exit 130)
+// without reporting helm's exit as an error or saving it to the error log.
+func TestDeploy_InterruptIsNotReportedAsAFailure(t *testing.T) {
+	origExec, origStdin, origHelm, origOutput, origCombined, origDeployed, origExecutor := runExecFn, runExecStdinFn, runHelmFn, runExecOutputFn, runExecCombinedFn, isHelmReleaseDeployedFn, defaultExecutor
+	t.Cleanup(func() {
+		runExecFn, runExecStdinFn, runHelmFn, runExecOutputFn, runExecCombinedFn, isHelmReleaseDeployedFn, defaultExecutor = origExec, origStdin, origHelm, origOutput, origCombined, origDeployed, origExecutor
+		deployCmd.SetContext(context.Background())
+	})
+	setDeployFlags(t, func() {
+		deployTopology, deployNamespace, deployWithSchemaRegistry = "single", "kates-test", "none"
+		deployWithChaos, deployWithMonitoring, deployWithCertManager = false, false, false
+		deployWithKyverno, deployWithStrimzi, deployWithKafkaConnect = false, false, false
+		deployWithKafkaUI, deployWithMirrorMaker2, deployDryRun = false, false, false
+	})
+	t.Chdir(t.TempDir())
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+
+	ctx, interrupt := context.WithCancel(context.Background())
+	deployCmd.SetContext(ctx)
+	runExecFn = func(context.Context, string, ...string) error { return nil }
+	runExecStdinFn = func(context.Context, string, []string, string) error { return nil }
+	runHelmFn = func(_ context.Context, args ...string) error {
+		if len(args) > 2 && args[2] == "kates" {
+			interrupt() // Ctrl-C while the backend installs
+			return errors.New("exit status 1: Error: UPGRADE FAILED: context canceled")
+		}
+		return nil
+	}
+	isHelmReleaseDeployedFn = func(context.Context, string, string) bool { return false }
+	defaultExecutor = &MockExecutor{}
+	runExecOutputFn = stubClusterRead
+	runExecCombinedFn = stubClusterRead
+
+	var err error
+	captureStdout(t, func() { err = runDeploy(deployCmd, nil) })
+	if !errors.Is(err, errInterrupted) {
+		t.Fatalf("err = %v, want errInterrupted", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(state, "kates", "deploy", "deploy-error.log")); statErr == nil {
+		t.Error("the interruption was saved to the error log as a failure")
 	}
 }

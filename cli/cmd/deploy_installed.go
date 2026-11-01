@@ -76,6 +76,12 @@ type deployedRelease = helmRelease
 // namespace, with one helm list -A. An account that may not list every
 // namespace (admin-less) has its entries' own namespaces read instead.
 func deployedReleases(ctx context.Context, entries []DeploySummaryEntry) []deployedRelease {
+	return entryReleases(ctx, entries, "--deployed")
+}
+
+// entryReleases reads the entries' releases that helm list's filter flag
+// keeps ("--deployed", "--pending"), the way deployedReleases describes.
+func entryReleases(ctx context.Context, entries []DeploySummaryEntry, filter string) []helmRelease {
 	var names, namespaces []string
 	for _, e := range entries {
 		names = append(names, e.Release)
@@ -86,7 +92,7 @@ func deployedReleases(ctx context.Context, entries []DeploySummaryEntry) []deplo
 	if len(names) == 0 {
 		return nil
 	}
-	// Helm keeps the deployed ones (--deployed); the names are ours to pick.
+	// Helm applies the filter; the names are ours to pick.
 	ours := func(rows []helmRelease) []deployedRelease {
 		var out []deployedRelease
 		for _, r := range rows {
@@ -100,12 +106,12 @@ func deployedReleases(ctx context.Context, entries []DeploySummaryEntry) []deplo
 	// and the namespaces still need their share of ctx.
 	allCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if rows, err := helmReleases(allCtx, runExecOutputFn, "", "--deployed"); err == nil {
+	if rows, err := helmReleases(allCtx, runExecOutputFn, "", filter); err == nil {
 		return ours(rows)
 	}
 	var rows []deployedRelease
 	for _, ns := range namespaces {
-		r, _ := helmReleases(ctx, runExecOutputFn, ns, "--deployed")
+		r, _ := helmReleases(ctx, runExecOutputFn, ns, filter)
 		rows = append(rows, ours(r)...)
 	}
 	return rows

@@ -65,6 +65,14 @@ func (c *DashboardController) StartComponent(id string, timeout time.Duration) {
 	}
 }
 
+// StopComponent puts a started component back to Pending: it never got to
+// its install.
+func (c *DashboardController) StopComponent(id string) {
+	if c.live() {
+		c.p.Send(compStatusMsg{id: id})
+	}
+}
+
 func (c *DashboardController) FinishComponent(id string, success bool) {
 	if c.live() {
 		c.p.Send(compStatusMsg{id: id, active: false, done: true, success: success})

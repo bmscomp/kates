@@ -437,15 +437,75 @@ func prometheusOperatorCRDsAvailable(ctx context.Context) bool {
 	return true
 }
 
-func isKafkaClusterReady(ctx context.Context, namespace, name string) bool {
+// kafkaReadiness is what the Kafka CR says about its readiness.
+type kafkaReadiness struct {
+	// ready: Ready=True for the current spec (observedGeneration ==
+	// generation). Right after an apply the CR still carries the Ready of
+	// the spec before it.
+	ready bool
+	// paused: strimzi.io/pause-reconciliation is set, so the operator will
+	// not reconcile the spec deploy applied.
+	paused bool
+	// why is the NotReady condition's reason and message, for a timeout:
+	// Strimzi swaps Ready for NotReady rather than setting it False.
+	why string
+}
+
+const kafkaReadyJSONPath = `jsonpath={.metadata.generation}|{.status.observedGeneration}|{.status.conditions[?(@.type=="Ready")].status}|{.status.conditions[?(@.type=="ReconciliationPaused")].status}|{.status.conditions[?(@.type=="NotReady")].reason}: {.status.conditions[?(@.type=="NotReady")].message}`
+
+func readKafkaReadiness(ctx context.Context, namespace, name string) kafkaReadiness {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	out, err := runExecOutputFn(checkCtx,
 		"kubectl", "get", "kafka", name, "-n", namespace,
-		"-o", `jsonpath={.status.conditions[?(@.type=="Ready")].status}`,
+		"-o", kafkaReadyJSONPath,
 	)
-	return err == nil && strings.Contains(string(out), "True")
+	f := strings.SplitN(strings.TrimSpace(string(out)), "|", 5)
+	if err != nil || len(f) < 4 {
+		return kafkaReadiness{}
+	}
+	r := kafkaReadiness{
+		ready:  f[0] != "" && f[0] == f[1] && f[2] == "True",
+		paused: f[3] == "True",
+	}
+	if len(f) == 5 {
+		r.why = strings.Trim(strings.TrimSpace(f[4]), ":")
+	}
+	return r
+}
+
+// isKafkaClusterReady says whether the Kafka CR is Ready for its current spec.
+func isKafkaClusterReady(ctx context.Context, namespace, name string) bool {
+	return readKafkaReadiness(ctx, namespace, name).ready
+}
+
+// waitKafkaReady polls the Kafka CR until it is Ready for its current spec,
+// or deadline. Running pods are not enough: the entity operator's carry the
+// cluster label too, and brokers run before they have joined. A paused
+// Kafka is not waited on: the operator will not reconcile it.
+func waitKafkaReady(ctx context.Context, namespace, name string, deadline time.Time) error {
+	for {
+		r := readKafkaReadiness(ctx, namespace, name)
+		switch {
+		case r.ready:
+			return nil
+		case r.paused:
+			dl.Printf("    ⚠ Kafka %s/%s has reconciliation paused (strimzi.io/pause-reconciliation): the operator applies this deploy's spec once it is unpaused\n", namespace, name)
+			return nil
+		case !deployClock.Now().Before(deadline):
+			why := ""
+			if r.why != "" {
+				why = " (" + r.why + ")"
+			}
+			return fmt.Errorf("timeout waiting for Kafka %s/%s to report Ready for its current spec%s; is its operator watching namespace %s?", namespace, name, why, namespace)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deployClock.After(silentPollInterval):
+		}
+	}
 }
 
 func kafkaConnectNeedsReconcile(ctx context.Context, namespace, name, expectedBootstrap, expectedKafkaSearch string) (bool, string) {
@@ -725,10 +785,6 @@ func applyCertMgrClusterIssuer(ctx context.Context) error {
 	const caTimeout = 180 * time.Second
 	const caPoll = 3 * time.Second
 	caDeadline := deployClock.Now().Add(caTimeout)
-	certMgrWebhookConfigs := []string{
-		"mutatingwebhookconfiguration",
-		"validatingwebhookconfiguration",
-	}
 	for {
 		injected := 0
 		for _, kind := range certMgrWebhookConfigs {
@@ -817,6 +873,31 @@ func restoreCertMgrWebhookPolicy(ctx context.Context, configs []string) {
 			`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Fail"}]`); err != nil {
 			dl.Printf("    ⚠ Could not restore failurePolicy: Fail on %s cert-manager-webhook: %v\n", kind, err)
 		}
+	}
+}
+
+// certMgrWebhookConfigs are the kinds of cert-manager's two webhook configs.
+var certMgrWebhookConfigs = []string{
+	"mutatingwebhookconfiguration",
+	"validatingwebhookconfiguration",
+}
+
+// restoreFailOpenCertMgrWebhook puts back a cert-manager webhook an earlier
+// run left at failurePolicy: Ignore. The deferred restore above does not run
+// when kates itself is killed, and a later deploy skips the installed
+// cert-manager, so the webhook used to stay fail-open for good.
+func restoreFailOpenCertMgrWebhook(ctx context.Context) {
+	var open []string
+	for _, kind := range certMgrWebhookConfigs {
+		out, err := runExecOutputFn(ctx, "kubectl", "get", kind, "cert-manager-webhook",
+			"-o", "jsonpath={.webhooks[0].failurePolicy}")
+		if err == nil && strings.TrimSpace(string(out)) == "Ignore" {
+			open = append(open, kind)
+		}
+	}
+	if len(open) > 0 {
+		dl.Println("    - An earlier deploy left the cert-manager webhook at failurePolicy: Ignore; restoring Fail")
+		restoreCertMgrWebhookPolicy(ctx, open)
 	}
 }
 
@@ -1125,7 +1206,11 @@ func (dc *deployContext) kafkaComponent() component {
 			return runHelmFn(ctx, kafkaArgs...)
 		},
 		wait: func(ctx context.Context) error {
+			deadline := deployClock.Now().Add(15 * time.Minute)
 			if err := dc.waitPods(ctx, kafkaNS, dc.primary.ReadySelector(), 15*time.Minute, ""); err != nil {
+				return fmt.Errorf("kafka readiness failed: %w", err)
+			}
+			if err := waitKafkaReady(ctx, kafkaNS, dc.primary.Name, deadline); err != nil {
 				return fmt.Errorf("kafka readiness failed: %w", err)
 			}
 			return nil
