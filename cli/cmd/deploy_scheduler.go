@@ -86,6 +86,11 @@ type secretCopy struct {
 // failing the deploy (PostgreSQL: the CDC demo degrades, the stack does not).
 var errNotReady = errors.New("not ready")
 
+// errNotStarted is runComponent's answer for a component it did not install
+// because a failure elsewhere stopped the scheduling. It is neither a
+// failure nor done.
+var errNotStarted = errors.New("not started")
+
 // deployNode is a component with the channels the scheduler orders on.
 type deployNode struct {
 	component
@@ -131,6 +136,11 @@ func runComponents(ctx context.Context, dc *deployContext, comps []component) er
 	)
 	fail := func(err error) {
 		failOnce.Do(func() {
+			// After Ctrl-C a failure is the interruption's doing: helm
+			// exits non-zero on SIGTERM, which is no failure to report.
+			if ctx.Err() != nil {
+				err = ctx.Err()
+			}
 			firstErr = err
 			stopScheduling()
 		})
@@ -165,7 +175,10 @@ func runComponents(ctx context.Context, dc *deployContext, comps []component) er
 			if schedCtx.Err() != nil {
 				return // the semaphore and a failure were both ready
 			}
-			if err := dc.runComponent(ctx, schedCtx, n); err != nil {
+			switch err := dc.runComponent(ctx, schedCtx, n); {
+			case errors.Is(err, errNotStarted):
+				return
+			case err != nil:
 				fail(err)
 				return
 			}
@@ -200,7 +213,7 @@ func (dc *deployContext) runComponent(ctx, schedCtx context.Context, n *deployNo
 	// A failure elsewhere during the skip check: its "not installed" may be
 	// the cancellation talking, and nothing new starts after a failure.
 	if schedCtx.Err() != nil {
-		return nil
+		return errNotStarted
 	}
 	if c.banner != nil {
 		dl.Println(c.banner(schedCtx))
@@ -214,8 +227,10 @@ func (dc *deployContext) runComponent(ctx, schedCtx context.Context, n *deployNo
 	}
 	if c.install != nil {
 		if schedCtx.Err() != nil {
-			dc.finish(c, false)
-			return nil
+			if c.id != "" {
+				dl.StopComponent(c.id)
+			}
+			return errNotStarted
 		}
 		if err := c.install(ctx); err != nil {
 			dc.finish(c, false)

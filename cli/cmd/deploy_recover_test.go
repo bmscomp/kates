@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"os/exec"
@@ -141,13 +142,20 @@ func TestDeployCommand_CancelSendsSIGTERM(t *testing.T) {
 		t.Skip("no SIGTERM on Windows")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	cmd := deployCommand(ctx, "sh", "-c", `trap 'exit 7' TERM; while :; do sleep 0.1; done`)
+	cmd := deployCommand(ctx, "sh", "-c", `trap 'exit 7' TERM; echo trapped; while :; do sleep 0.1; done`)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(200 * time.Millisecond) // let the trap install
+	// Cancel only once the trap is in place.
+	if line, err := bufio.NewReader(stdout).ReadString('\n'); err != nil || line != "trapped\n" {
+		t.Fatalf("read %q, %v", line, err)
+	}
 	cancel()
-	err := cmd.Wait()
+	err = cmd.Wait()
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) || exit.ExitCode() != 7 {
 		t.Errorf("wait = %v, want exit 7 from the TERM trap", err)
@@ -238,5 +246,22 @@ func TestRecoverStuckReleases_YesSparesAnUnknownAge(t *testing.T) {
 	err := recoverStuckReleases(context.Background(), []DeploySummaryEntry{{Release: "kafka-ui", Namespace: "kafka"}})
 	if err == nil || !strings.Contains(err.Error(), "may still be running") {
 		t.Errorf("err = %v, want a refusal", err)
+	}
+}
+
+// Once a namespace's read has failed every try, the next lookup there gets
+// one try, not three: the entries' lookups run one after another.
+func TestIsHelmReleaseDeployed_UnreadableNamespaceTriedOnce(t *testing.T) {
+	origOut := runExecOutputFn
+	t.Cleanup(func() { runExecOutputFn = origOut; unreadableNamespaces.Delete("slow") })
+	calls := 0
+	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) {
+		calls++
+		return nil, context.DeadlineExceeded
+	}
+	isHelmReleaseDeployedDefault(context.Background(), "kafka-ui", "slow")
+	isHelmReleaseDeployedDefault(context.Background(), "mm2", "slow")
+	if calls != 4 {
+		t.Errorf("helm list ran %d times, want 3 then 1", calls)
 	}
 }

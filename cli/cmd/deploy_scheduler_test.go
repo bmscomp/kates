@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -363,5 +365,50 @@ func TestRunComponents_CutSkipCheckDoesNotInstall(t *testing.T) {
 	})
 	if installed {
 		t.Error("A installed after B's failure cut its skip check short")
+	}
+}
+
+// Ctrl-C during an install: helm exits non-zero on SIGTERM, which is the
+// interruption, not a failure. The deploy ends as interrupted (exit 130)
+// without reporting helm's exit as an error or saving it to the error log.
+func TestDeploy_InterruptIsNotReportedAsAFailure(t *testing.T) {
+	origExec, origStdin, origHelm, origOutput, origCombined, origDeployed, origExecutor := runExecFn, runExecStdinFn, runHelmFn, runExecOutputFn, runExecCombinedFn, isHelmReleaseDeployedFn, defaultExecutor
+	t.Cleanup(func() {
+		runExecFn, runExecStdinFn, runHelmFn, runExecOutputFn, runExecCombinedFn, isHelmReleaseDeployedFn, defaultExecutor = origExec, origStdin, origHelm, origOutput, origCombined, origDeployed, origExecutor
+		deployCmd.SetContext(context.Background())
+	})
+	setDeployFlags(t, func() {
+		deployTopology, deployNamespace, deployWithSchemaRegistry = "single", "kates-test", "none"
+		deployWithChaos, deployWithMonitoring, deployWithCertManager = false, false, false
+		deployWithKyverno, deployWithStrimzi, deployWithKafkaConnect = false, false, false
+		deployWithKafkaUI, deployWithMirrorMaker2, deployDryRun = false, false, false
+	})
+	t.Chdir(t.TempDir())
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+
+	ctx, interrupt := context.WithCancel(context.Background())
+	deployCmd.SetContext(ctx)
+	runExecFn = func(context.Context, string, ...string) error { return nil }
+	runExecStdinFn = func(context.Context, string, []string, string) error { return nil }
+	runHelmFn = func(_ context.Context, args ...string) error {
+		if len(args) > 2 && args[2] == "kates" {
+			interrupt() // Ctrl-C while the backend installs
+			return errors.New("exit status 1: Error: UPGRADE FAILED: context canceled")
+		}
+		return nil
+	}
+	isHelmReleaseDeployedFn = func(context.Context, string, string) bool { return false }
+	defaultExecutor = &MockExecutor{}
+	runExecOutputFn = stubClusterRead
+	runExecCombinedFn = stubClusterRead
+
+	var err error
+	captureStdout(t, func() { err = runDeploy(deployCmd, nil) })
+	if !errors.Is(err, errInterrupted) {
+		t.Fatalf("err = %v, want errInterrupted", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(state, "kates", "deploy", "deploy-error.log")); statErr == nil {
+		t.Error("the interruption was saved to the error log as a failure")
 	}
 }

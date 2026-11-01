@@ -437,11 +437,22 @@ func prometheusOperatorCRDsAvailable(ctx context.Context) bool {
 	return true
 }
 
-// isKafkaClusterReady reads the Kafka CR's Ready condition, which counts only
-// once the operator has reconciled the current spec (observedGeneration ==
-// generation): right after an apply the CR still carries the Ready of the
-// spec before it.
-func isKafkaClusterReady(ctx context.Context, namespace, name string) bool {
+// kafkaReadiness is what the Kafka CR says about its readiness.
+type kafkaReadiness struct {
+	// ready: Ready=True for the current spec (observedGeneration ==
+	// generation). Right after an apply the CR still carries the Ready of
+	// the spec before it.
+	ready bool
+	// paused: strimzi.io/pause-reconciliation is set, so the operator will
+	// not reconcile the spec deploy applied.
+	paused bool
+	// why is the Ready condition's reason and message, for a timeout.
+	why string
+}
+
+const kafkaReadyJSONPath = `jsonpath={.metadata.generation}|{.status.observedGeneration}|{.status.conditions[?(@.type=="Ready")].status}|{.status.conditions[?(@.type=="ReconciliationPaused")].status}|{.status.conditions[?(@.type=="Ready")].reason}: {.status.conditions[?(@.type=="Ready")].message}`
+
+func readKafkaReadiness(ctx context.Context, namespace, name string) kafkaReadiness {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -449,19 +460,44 @@ func isKafkaClusterReady(ctx context.Context, namespace, name string) bool {
 		"kubectl", "get", "kafka", name, "-n", namespace,
 		"-o", kafkaReadyJSONPath,
 	)
-	f := strings.Fields(string(out))
-	return err == nil && len(f) == 3 && f[0] == f[1] && f[2] == "True"
+	f := strings.SplitN(strings.TrimSpace(string(out)), "|", 5)
+	if err != nil || len(f) < 4 {
+		return kafkaReadiness{}
+	}
+	r := kafkaReadiness{
+		ready:  f[0] != "" && f[0] == f[1] && f[2] == "True",
+		paused: f[3] == "True",
+	}
+	if len(f) == 5 {
+		r.why = strings.Trim(strings.TrimSpace(f[4]), ":")
+	}
+	return r
 }
 
-const kafkaReadyJSONPath = `jsonpath={.metadata.generation} {.status.observedGeneration} {.status.conditions[?(@.type=="Ready")].status}`
+// isKafkaClusterReady says whether the Kafka CR is Ready for its current spec.
+func isKafkaClusterReady(ctx context.Context, namespace, name string) bool {
+	return readKafkaReadiness(ctx, namespace, name).ready
+}
 
-// waitKafkaReady polls the Kafka CR until isKafkaClusterReady or deadline.
-// Running pods are not enough: the entity operator's carry the cluster label
-// too, and brokers run before they have joined.
+// waitKafkaReady polls the Kafka CR until it is Ready for its current spec,
+// or deadline. Running pods are not enough: the entity operator's carry the
+// cluster label too, and brokers run before they have joined. A paused
+// Kafka is not waited on: the operator will not reconcile it.
 func waitKafkaReady(ctx context.Context, namespace, name string, deadline time.Time) error {
-	for !isKafkaClusterReady(ctx, namespace, name) {
-		if !deployClock.Now().Before(deadline) {
-			return fmt.Errorf("timeout waiting for Kafka %s/%s to report Ready for its current spec", namespace, name)
+	for {
+		r := readKafkaReadiness(ctx, namespace, name)
+		switch {
+		case r.ready:
+			return nil
+		case r.paused:
+			dl.Printf("    ⚠ Kafka %s/%s has reconciliation paused (strimzi.io/pause-reconciliation): the operator applies this deploy's spec once it is unpaused\n", namespace, name)
+			return nil
+		case !deployClock.Now().Before(deadline):
+			why := ""
+			if r.why != "" {
+				why = " (" + r.why + ")"
+			}
+			return fmt.Errorf("timeout waiting for Kafka %s/%s to report Ready for its current spec%s; is its operator watching namespace %s?", namespace, name, why, namespace)
 		}
 		select {
 		case <-ctx.Done():
@@ -469,7 +505,6 @@ func waitKafkaReady(ctx context.Context, namespace, name string, deadline time.T
 		case <-deployClock.After(silentPollInterval):
 		}
 	}
-	return nil
 }
 
 func kafkaConnectNeedsReconcile(ctx context.Context, namespace, name, expectedBootstrap, expectedKafkaSearch string) (bool, string) {

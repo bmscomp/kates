@@ -132,7 +132,7 @@ func stubClusterRead(_ context.Context, name string, args ...string) ([]byte, er
 			"template":{"pod":{"dnsConfig":{"searches":["%s.svc.cluster.local"]}}}},
 			"status":{"conditions":[{"type":"Ready","status":"True"}]}}`, deployKafkaName, kafkaNS, kafkaNS)), nil
 	case strings.Contains(joined, "get kafka") && strings.Contains(joined, kafkaReadyJSONPath):
-		return []byte("1 1 True"), nil
+		return []byte("1|1|True||"), nil
 	case strings.Contains(joined, "get kafka") && strings.Contains(joined, "jsonpath={.status.conditions"):
 		return []byte("True"), nil
 	case strings.Contains(joined, "get kafkaconnect connect-cluster") && strings.Contains(joined, "jsonpath={.status.conditions"):

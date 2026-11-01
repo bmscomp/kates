@@ -138,11 +138,7 @@ func recoverStuckRelease(ctx context.Context, rec stuckRecovery, updated string)
 	what := fmt.Sprintf("Helm release %s (namespace %s) is %s%s: a helm run was interrupted, and helm refuses to touch the release until it is cleared.",
 		rec.release, rec.namespace, rec.status, age)
 	if rec.action == "refuse" {
-		how := "uninstall it, or roll it back with helm rollback " + rec.release + " <revision> -n " + rec.namespace
-		if rec.revision > 0 {
-			how = "if no other deploy is running, roll it back: " + cmd
-		}
-		return fmt.Errorf("%s Rolling it back downgrades what it runs, so deploy leaves that to you: %s", what, how)
+		return fmt.Errorf("%s Rolling it back downgrades what it runs, so deploy leaves that to you: if no other deploy is running, roll it back: %s", what, cmd)
 	}
 	output.Warn(what)
 	if deployYes && (!known || since < pendingGrace) {

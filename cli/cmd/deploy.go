@@ -273,9 +273,8 @@ func runDeployAndReport(base context.Context, newDC func(context.Context) *deplo
 		stop()
 	}()
 
-	if deployWithCertManager {
-		restoreFailOpenCertMgrWebhook(ctx)
-	}
+	// Whatever this run's flags: an earlier run may have installed it.
+	restoreFailOpenCertMgrWebhook(ctx)
 
 	dc := newDC(ctx)
 	res := runDeployPipeline(dc, sharedEntries, deployStartTime)
@@ -849,8 +848,15 @@ func isHelmReleaseDeployedDefault(ctx context.Context, release, namespace string
 	// A slow API server used to read as "not installed" after one 5 s try,
 	// and the component reinstalled over its running release. Three tries,
 	// each with a longer budget, ride out a busy control plane.
+	budgets := []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second}
+	// A namespace whose read just failed every try gets one try for a
+	// minute: the entries' lookups run one after another, and each used to
+	// spend the full ~38 s on the same unanswering API server.
+	if until, ok := unreadableNamespaces.Load(namespace); ok && deployClock.Now().Before(until.(time.Time)) {
+		budgets = budgets[:1]
+	}
 	var err error
-	for i, budget := range []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second} {
+	for i, budget := range budgets {
 		if i > 0 {
 			select {
 			case <-ctx.Done():
@@ -875,10 +881,15 @@ func isHelmReleaseDeployedDefault(ctx context.Context, release, namespace string
 	// runs and reports the API error; return the error once the gates take
 	// (bool, error) instead of a bool.
 	if ctx.Err() == nil {
+		unreadableNamespaces.Store(namespace, deployClock.Now().Add(time.Minute))
 		dl.Printf("    ⚠ Could not read Helm release %s in %s (%v); taking it as not installed\n", release, namespace, err)
 	}
 	return false
 }
+
+// unreadableNamespaces holds, per namespace, until when a failed release
+// read is not retried.
+var unreadableNamespaces sync.Map
 
 // cleanupStaleClusterResource removes a cluster-scoped resource that a Helm
 // release in another namespace installed, once that release is gone: a

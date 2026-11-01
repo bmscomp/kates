@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bmscomp/kates/cli/pkg/detect"
 	"github.com/bmscomp/kates/cli/pkg/strimzi"
@@ -527,7 +528,7 @@ func TestIsKafkaClusterReady(t *testing.T) {
 	var got string
 	runExecOutputFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
 		got = name + " " + strings.Join(args, " ")
-		return []byte("4 4 True"), nil
+		return []byte("4|4|True||"), nil
 	}
 
 	if !isKafkaClusterReady(context.Background(), "kafka", "krafter") {
@@ -539,7 +540,7 @@ func TestIsKafkaClusterReady(t *testing.T) {
 	}
 
 	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) {
-		return []byte("4 4 False"), nil
+		return []byte("4|4|False||"), nil
 	}
 	if isKafkaClusterReady(context.Background(), "kafka", "krafter") {
 		t.Fatal("expected Kafka CR without Ready=True to be not ready")
@@ -548,7 +549,7 @@ func TestIsKafkaClusterReady(t *testing.T) {
 	// Ready from the spec before this one: the operator has not reconciled
 	// the apply yet.
 	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) {
-		return []byte("5 4 True"), nil
+		return []byte("5|4|True||"), nil
 	}
 	if isKafkaClusterReady(context.Background(), "kafka", "krafter") {
 		t.Fatal("expected a Ready from an older generation to be not ready")
@@ -824,9 +825,9 @@ func TestDeployGroupBReconcilesKafkaWhenReleaseExistsButCRNotReady(t *testing.T)
 			// Not Ready at the skip check; Ready after the reconcile.
 			kafkaReads++
 			if kafkaReads == 1 {
-				return []byte("2 2 False"), nil
+				return []byte("2|2|False||"), nil
 			}
-			return []byte("3 3 True"), nil
+			return []byte("3|3|True||"), nil
 		case strings.HasPrefix(got, "kubectl get pods -n kafka"):
 			return []byte("Running,"), nil // the readiness wait after the reconcile
 		}
@@ -960,5 +961,24 @@ func TestRestoreCertMgrWebhookPolicyOutlivesCancel(t *testing.T) {
 		if !strings.HasPrefix(patched[i], "patch "+kind+" cert-manager-webhook") || !strings.Contains(patched[i], `"value":"Fail"`) {
 			t.Errorf("patch %d = %q, want failurePolicy Fail on %s", i, patched[i], kind)
 		}
+	}
+}
+
+// A Kafka with reconciliation paused is not waited on; a stuck one times out
+// naming its Ready reason.
+func TestWaitKafkaReady(t *testing.T) {
+	origOut := runExecOutputFn
+	t.Cleanup(func() { runExecOutputFn = origOut })
+	answer := "3|3|True|True|"
+	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) { return []byte(answer), nil }
+
+	answer = "4|3|True|True|"
+	if err := waitKafkaReady(context.Background(), "kafka", "krafter", deployClock.Now().Add(time.Minute)); err != nil {
+		t.Errorf("paused Kafka: %v, want no wait", err)
+	}
+	answer = "4|3|False||NotReady: brokers not up"
+	err := waitKafkaReady(context.Background(), "kafka", "krafter", deployClock.Now().Add(time.Minute))
+	if err == nil || !strings.Contains(err.Error(), "NotReady: brokers not up") {
+		t.Errorf("err = %v, want the Ready reason", err)
 	}
 }
