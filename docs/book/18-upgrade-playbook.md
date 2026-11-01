@@ -116,7 +116,7 @@ Read the `produce` row of `kates report diff` for the throughput and P99 against
 
 ## Strimzi Operator Upgrade
 
-The operator is the `strimzi-operator` release of the wrapper chart (`charts/strimzi-operator`) in its own `strimzi-operator` namespace, and it moves before Kafka. Run the [Pre-Upgrade Checks](#pre-upgrade-checks) first.
+The operator is the `strimzi-operator` release of the wrapper chart (`charts/strimzi-operator`) in its own `strimzi-operator` namespace, and it moves before Kafka. Use this procedure when the Kafka version you want is outside the running operator's window, which `kates versions` prints. Run the [Pre-Upgrade Checks](#pre-upgrade-checks) first. The CRDs are cluster-scoped, so this procedure needs the cluster-admin kubeconfig. When a step fails, roll back with Step 5, then work through [Common Upgrade Issues](#common-upgrade-issues).
 
 ### Step 1 — Save the Strimzi CRDs
 
@@ -206,7 +206,7 @@ Next, upgrade Kafka.
 
 ## Kafka Version Upgrade
 
-The Kafka version is a chart value, not a hand-edited CR: `kafkaVersion` renders `spec.kafka.version`, and `kafka.metadataVersion` renders `spec.kafka.metadataVersion`. The upgrade raises the first and pins the second, as [Two Versions, Two Steps](#two-versions-two-steps) explains.
+The Kafka version is a chart value, not a hand-edited CR: `kafkaVersion` renders `spec.kafka.version`, and `kafka.metadataVersion` renders `spec.kafka.metadataVersion`. The upgrade raises the first and pins the second, as [Two Versions, Two Steps](#two-versions-two-steps) explains. Use this procedure to move `krafter` to a Kafka version inside the running operator's window, after any operator upgrade it needs. It needs the Pre-Upgrade Checks, `<pre-id>` and rights to upgrade the Kafka release in the `kafka` namespace. When a broker crashes or the rolling restart stalls, roll back with Step 6, then work through [Common Upgrade Issues](#common-upgrade-issues).
 
 ### Step 1 — Run the Pre-Upgrade Checks
 
@@ -302,6 +302,8 @@ Next, upgrade the Kates API.
 
 The `kates` chart installs the Kates API, the service in the cluster that runs your tests ([Architecture & Design](02-architecture.md)). The chart pins its image: `values.yaml` sets `image.tag` to the release's version, the chart's `appVersion`. The generic, corporate and production overlays leave it alone, and only `values-native.yaml` pins the native tag. Building or pulling a newer image changes nothing the Deployment runs, and `kubectl rollout restart` only restarts the pinned tag.
 
+Use this procedure to move the Kates API to a new release, after Kafka. It needs the published chart of that release, or on Kind the repository's `charts/kates`, and rights to upgrade the `kates` release in the `kates` namespace. When the new pods don't become ready, read their log with `kubectl logs deployment/kates -n kates`, and roll back with Step 4.
+
 ### Step 1 — Find the Chart for the New Version
 
 A chart version and the Kates API version it ships differ, so read the pair from the chart itself. The [Version & Compatibility Matrix](appendix-d-versions.md) lists the pair for this release:
@@ -389,22 +391,42 @@ Next, upgrade the monitoring stack.
 
 ## Monitoring Stack Upgrade
 
-The `monitoring` release lives in the `kafka` namespace when `make monitoring` installed it, and in `monitoring` (the `--monitoring-ns` default) when `kates deploy` did. Upgrade it from the values it runs with, rather than with `--reuse-values`, which applies the release's values over the *old* chart's defaults and so ignores every default the new chart changes. Then check the release and its pods, and roll back by revision if either is wrong:
+The `monitoring` release lives in the `kafka` namespace when `make monitoring` installed it, and in `monitoring` (the `--monitoring-ns` default) when `kates deploy` did. Use this procedure to move it to a new `kates-monitoring` chart. It needs rights to upgrade the release in its namespace. When Grafana or Prometheus doesn't come back, roll back with Step 4.
+
+### Step 1 — Save the Release's Values
+
+Upgrade from the values the release runs with, rather than with `--reuse-values`, which applies the release's values over the *old* chart's defaults and so ignores every default the new chart changes. Set the namespace and save them:
 
 ```bash
 MON_NS=kafka   # or monitoring, for a release kates deploy installed
 
 helm get values monitoring -n "${MON_NS}" -o yaml > monitoring-current.yaml
+```
 
+### Step 2 — Upgrade the Monitoring Release
+
+The upgrade applies the saved values over the new chart's defaults:
+
+```bash
 helm upgrade monitoring oci://ghcr.io/bmscomp/charts/kates-monitoring \
   --namespace "${MON_NS}" \
   -f monitoring-current.yaml
+```
 
-# Verify: the release is deployed and its pods, Grafana's among them, are Ready
+### Step 3 — Verify the Release
+
+The release should report `deployed`, and its pods, Grafana's among them, should be Ready:
+
+```bash
 helm status monitoring -n "${MON_NS}"
 kubectl get pods -n "${MON_NS}"
+```
 
-# Roll back, if needed
+### Step 4 — Roll Back the Monitoring Stack
+
+The monitoring release rolls back by Helm revision:
+
+```bash
 helm history monitoring -n "${MON_NS}"
 helm rollback monitoring <previous-revision> -n "${MON_NS}"
 ```
@@ -413,7 +435,7 @@ Next, upgrade Kyverno.
 
 ## Kyverno Upgrade
 
-Kyverno's admission webhooks sit in the Kubernetes API server's request path, so a broken controller blocks admissions or lets them through unchecked. `kates deploy --with-kyverno` installs it as the `kyverno` release in the `kyverno` namespace, from the `kyverno/kyverno` chart of `https://kyverno.github.io/kyverno/` at the version the CLI pins. A later `kates deploy` leaves an existing release alone, so the upgrade is yours.
+Kyverno's admission webhooks sit in the Kubernetes API server's request path, so a broken controller blocks admissions or lets them through unchecked. `kates deploy --with-kyverno` installs it as the `kyverno` release in the `kyverno` namespace, from the `kyverno/kyverno` chart of `https://kyverno.github.io/kyverno/` at the version the CLI pins. A later `kates deploy` leaves an existing release alone, so the upgrade is yours. Use this procedure to move Kyverno to a new chart release, after the Kates API. Its webhooks and CRDs are cluster-scoped, so it needs the cluster-admin kubeconfig. When the controller pods don't come back, roll back with Step 4 at once: while they are down, admissions are blocked or pass unchecked.
 
 ### Step 1 — Check the PolicyExceptions
 
@@ -486,5 +508,7 @@ Find the behavior you see in the Symptom column. The first row is what you get w
 | Brokers stuck in CrashLoopBackOff | Read `kubectl logs -n kafka <broker-pod> --previous`, then roll back as in [Step 6 — Roll Back the Brokers](#kafka-version-rollback) |
 | Topics not reconciling after an operator upgrade | Check the stored versions as in [Check the Stored API Versions](#check-the-stored-api-versions) |
 | The rollout moves one broker at a time | Expected: `kubectl get pdb -n kafka` shows the budget Strimzi honors |
+
+When the table doesn't cover what you see, the [Upgrades](appendix-b-troubleshooting.md#upgrades) entries in the Troubleshooting Index come next. The logs to read are the operator's (`kubectl logs deployment/strimzi-cluster-operator -n strimzi-operator`), the failing broker's (`kubectl logs -n kafka <broker-pod> --previous`) and the Kates API's (`kubectl logs deployment/kates -n kates`). If none of them explains the failure, open an issue at <https://github.com/bmscomp/kates/issues> with the step that failed, the release's `helm history` and the output of `kates doctor`.
 
 The brokers now move forward and back on your schedule, but the payments data still has to get into them. [Kafka Connect & CDC Pipelines](21-kafka-connect.md) deploys Connect as its own release beside `krafter` and builds the Debezium pipeline that feeds it.

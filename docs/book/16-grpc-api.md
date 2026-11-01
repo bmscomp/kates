@@ -4,7 +4,25 @@ Kates serves a [gRPC](appendix-a-glossary.md#gl-grpc) API beside the REST API, f
 
 ## How to Read an Entry {#introduction}
 
-Each service has an H3 with a table of its RPCs, and each RPC an H4 entry. An entry gives the `grpcurl` call, using the `GRPC` array that [Schema From `kates.proto` or Reflection](#schema-from-katesproto-or-reflection) sets up, then the response, introduced by "Output:", then what to notice in it. It ends with the places the RPC differs from its REST counterpart. Responses are shortened and their numbers illustrative; field names and shapes are exact.
+Each service has an H3 with a table of its RPCs, and each RPC an H4 entry. An entry gives the `grpcurl` call, using the `GRPC` array that [Schema From `kates.proto` or Reflection](#schema-from-katesproto-or-reflection) sets up, then the response, introduced by "Output:", then what to notice in it. It ends with the places the RPC differs from its REST counterpart. Responses are shortened and their numbers illustrative; field names and shapes are exact. Authentication, pagination, rate limits and error codes each have one section, which the entries link to.
+
+## RPC Index
+
+Each RPC links to its entry, and the REST column names the endpoint in the [REST API Reference](11-api-reference.md) that does the same work. Every RPC has a REST endpoint, not the reverse:
+
+| RPC | Service | REST endpoint | What it does |
+|:---------------------|:----------------|:-------------------------------|:------------------------|
+| [CreateTest](#createtest) | `TestService` | `POST /api/tests` | Start a test run |
+| [GetTest](#gettest) | `TestService` | `GET /api/tests/{id}` | Read one run and its results |
+| [ListTests](#listtests) | `TestService` | `GET /api/tests` | Page through runs, by type |
+| [CancelTest](#canceltest) | `TestService` | `POST /api/tests/{id}/cancel` | Stop a pending or running run |
+| [DeleteTest](#deletetest) | `TestService` | `DELETE /api/tests/{id}` | Delete a run and its results |
+| [GetClusterInfo](#getclusterinfo) | `ClusterService` | `GET /api/cluster/info` | Cluster ID and brokers |
+| [GetClusterTopology](#getclustertopology) | `ClusterService` | `GET /api/cluster/topology` | Node pools and nodes |
+| [ListTopics](#listtopics) | `ClusterService` | `GET /api/cluster/topics` | Page through topic names |
+| [GetTopicDetail](#gettopicdetail) | `ClusterService` | `GET /api/cluster/topics/{name}` | One topic's partitions and configs |
+| [ListConsumerGroups](#listconsumergroups) | `ClusterService` | `GET /api/cluster/groups` | Page through consumer groups |
+| [Check](#check) | `HealthService` | `GET /api/health` | Kates API and Kafka status |
 
 ## Choosing gRPC or REST {#grpc-vs-rest}
 
@@ -20,7 +38,7 @@ The Helm chart declares a `grpc` container and Service port 9000 (`charts/kates/
 
 ### Authentication
 
-The API key guards gRPC as it guards REST. A call must carry a key the Kates API knows, from `kates.api.key` or the keys file, and the key's principal must hold the scope the RPC needs. A missing or unknown key gets `UNAUTHENTICATED`, and a known key without the scope gets `PERMISSION_DENIED`. `HealthService/Check` is no exception, unlike the public REST `/api/health`. Each RPC needs the same scope as its REST counterpart, as [Scopes and Named Keys](11-api-reference.md#scopes-and-named-keys) describes:
+The API key guards gRPC as it guards REST. A call must carry a key the Kates API knows, from `kates.api.key` or the keys file, and the key's principal must hold the scope the RPC needs. A missing or unknown key gets `UNAUTHENTICATED`, and a known key without the scope gets `PERMISSION_DENIED`, with the descriptions [Error Handling](#error-handling) lists. `HealthService/Check` is no exception, unlike the public REST `/api/health`. Each RPC needs the same scope as its REST counterpart, as [Scopes and Named Keys](11-api-reference.md#scopes-and-named-keys) describes:
 
 | RPC | Scope |
 |:--------------------------------------------|:----------|
@@ -65,6 +83,22 @@ In the dev profile (`./mvnw quarkus:dev` in `kates/`), reflection is on and API 
 1. A field at its zero value (`0`, `""`, `false`, an empty list) is left out, so a missing `id` or `page` means zero, not an error.
 2. 64-bit integers, such as `numRecords` and `total`, come as strings.
 3. Names are camelCase, `numRecords` for `num_records`. This reference uses the proto name in prose and the JSON name in output.
+
+### Pagination
+
+`ListTests`, `ListTopics` and `ListConsumerGroups` page the same way. The request takes `page` and `size`, and the response returns both as applied, beside `total`:
+
+| Field | Rule |
+|:----------|:----------------------------------------------|
+| `page` (request) | Zero-based; a negative page reads as 0 |
+| `size` (request) | 1 to 200; 0 or a negative size means 50, and a larger one reads as 200 |
+| `total` (response) | Items across every page, an int64, so `grpcurl` prints it as a string |
+
+A page past the end comes back with no items and the same `total`, so the last page is the one where `page` plus one, times `size`, reaches `total`.
+
+### Rate Limits
+
+The Kates API puts no rate limit on gRPC calls: there is no per-key or per-client quota, and no call is refused for coming too often. The one limit is on runs at once. `CreateTest` gets `RESOURCE_EXHAUSTED` while `kates.engine.max-concurrent-tests` runs are already running, and [Error Handling](#error-handling) says how to retry.
 
 ## Service Definitions
 
@@ -254,8 +288,7 @@ Output, each item cut to four of its `TestRun` fields:
 |:----------|:----------------------------------------------|
 | `type` | Filters by `TestType` name, in any case; an unknown name gets `INVALID_ARGUMENT` |
 | `status` | Ignored: `ListTests` filters by `type` only |
-| `page` | Zero-based; a negative page reads as 0 |
-| `size` | 1 to 200; 0 means 50 |
+| `page`, `size` | As [Pagination](#pagination) describes |
 
 #### CancelTest
 
@@ -266,7 +299,31 @@ grpcurl "${GRPC[@]}" -d '{"id": "3f8a2c1e"}' \
   localhost:30083 kates.TestService/CancelTest
 ```
 
-The response is the `TestRun` with status `FAILED`, as the run is stored, and each task it stopped has the error `Cancelled by user`. A client polling `GetTest` for the end of a run stops at `COMPLETED` or `FAILED`; [TestStatus](#teststatus) says why no run reads `CANCELLED`.
+Output, for a run cancelled while `RUNNING`, with `spec` left out and each result cut to three fields:
+
+```json
+{
+  "id": "3f8a2c1e",
+  "testType": "LOAD",
+  "status": "FAILED",
+  "results": [
+    {
+      "taskId": "3f8a2c1e-produce-0",
+      "status": "FAILED",
+      "error": "Cancelled by user"
+    },
+    {
+      "taskId": "3f8a2c1e-consume-0",
+      "status": "FAILED",
+      "error": "Cancelled by user"
+    }
+  ],
+  "createdAt": "2026-02-15T20:00:00.412587Z",
+  "backend": "native"
+}
+```
+
+The response is the `TestRun` with status `FAILED`, as the run is stored, and each task that hadn't finished is `FAILED` with the error `Cancelled by user`. A client polling `GetTest` for the end of a run stops at `COMPLETED` or `FAILED`; [TestStatus](#teststatus) says why no run reads `CANCELLED`.
 
 #### DeleteTest
 
@@ -277,7 +334,13 @@ grpcurl "${GRPC[@]}" -d '{"id": "3f8a2c1e"}' \
   localhost:30083 kates.TestService/DeleteTest
 ```
 
-The response is empty, `{}`. `DeleteTest` deletes a run and its results as `DELETE /api/tests/{id}` does. A run that is still `PENDING` or `RUNNING` is stopped first: its tasks stop, and it gives back its place among the runs the Kates API allows at once. Webhooks then hear that the run ended `FAILED`, as they do for a cancelled run.
+Output:
+
+```json
+{}
+```
+
+The response is the empty message. `DeleteTest` deletes a run and its results as `DELETE /api/tests/{id}` does. A run that is still `PENDING` or `RUNNING` is stopped first: its tasks stop, and it gives back its place among the runs the Kates API allows at once. Webhooks then hear that the run ended `FAILED`, as they do for a cancelled run.
 
 ### ClusterService
 
@@ -352,7 +415,21 @@ Only `nodePools` and `nodes` carry data: each pool's name, role, replica count, 
 grpcurl "${GRPC[@]}" -d '{"size": 100}' localhost:30083 kates.ClusterService/ListTopics
 ```
 
-Each item carries only a topic `name`, sorted by name; call `GetTopicDetail` for a topic's partitions, replication factor, and configuration.
+Output, cut to one item:
+
+```json
+{
+  "items": [
+    {
+      "name": "kates-results"
+    }
+  ],
+  "size": 100,
+  "total": "12"
+}
+```
+
+Each item carries only a topic `name`, sorted by name, and Kafka's internal topics are left out; call `GetTopicDetail` for a topic's partitions, replication factor, and configuration. The list pages as [Pagination](#pagination) describes.
 
 #### GetTopicDetail
 
@@ -406,7 +483,7 @@ Output, with one item:
 }
 ```
 
-Each item carries the group ID, its state as Kafka reports it and its member count. Lag isn't here: `GET /api/cluster/groups/{id}` carries it. `ListConsumerGroups` and `ListTopics` page as `ListTests` does, with `page` from 0 and `size` from 1 to 200, 50 when unset.
+Each item carries the group ID, its state as Kafka reports it and its member count. Lag isn't here: `GET /api/cluster/groups/{id}` carries it. The list pages as [Pagination](#pagination) describes.
 
 ### HealthService
 
@@ -441,7 +518,7 @@ Output:
 }
 ```
 
-Unlike the REST `/api/health`, this RPC requires the API key.
+Unlike the REST `/api/health`, this RPC needs a key with the `read` scope, as [Authentication](#authentication) says.
 
 When Kafka is unreachable, `status` becomes `DEGRADED`, `kafka.status` becomes `DOWN`, and the message reads `Cannot connect to Kafka cluster`.
 
@@ -582,24 +659,6 @@ ERROR:
   Code: NotFound
   Message: Test not found: 0badc0de
 ```
-
-## REST Endpoints and Their RPCs {#rest-vs-grpc-equivalence}
-
-Use this table to translate a REST call from the previous chapter; every RPC has a REST endpoint, not the reverse:
-
-| REST Endpoint | gRPC RPC |
-|--------------|----------|
-| `POST /api/tests` | [CreateTest](#createtest) |
-| `GET /api/tests/{id}` | [GetTest](#gettest) |
-| `GET /api/tests` | [ListTests](#listtests) |
-| `POST /api/tests/{id}/cancel` | [CancelTest](#canceltest) |
-| `DELETE /api/tests/{id}` | [DeleteTest](#deletetest) |
-| `GET /api/cluster/info` | [GetClusterInfo](#getclusterinfo) |
-| `GET /api/cluster/topology` | [GetClusterTopology](#getclustertopology) |
-| `GET /api/cluster/topics` | [ListTopics](#listtopics) |
-| `GET /api/cluster/topics/{name}` | [GetTopicDetail](#gettopicdetail) |
-| `GET /api/cluster/groups` | [ListConsumerGroups](#listconsumergroups) |
-| `GET /api/health` | [Check](#check) |
 
 ## Client Code Generation
 

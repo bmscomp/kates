@@ -1,5 +1,5 @@
 -- PDF only: a long path, setting or flag in inline code may break after
--- / . - _ : = (and at its spaces), so justified text never pushes it into the
+-- / . - _ : = | , (and at its spaces), so justified text never pushes it into the
 -- margin. Code shorter than 18 characters stays whole. Runs after
 -- theme/pdf-tables.lua, which measures the Code inlines this turns into LaTeX.
 if not quarto.doc.is_format("pdf") then
@@ -10,7 +10,7 @@ local ESC = {
   ["\\"] = "\\textbackslash{}", ["{"] = "\\{", ["}"] = "\\}", ["$"] = "\\$", ["&"] = "\\&",
   ["#"] = "\\#", ["^"] = "\\^{}", ["_"] = "\\_", ["%"] = "\\%", ["~"] = "\\~{}",
 }
-local BREAK_AFTER = { ["/"] = true, ["."] = true, ["-"] = true, ["_"] = true, [":"] = true, ["="] = true, ["|"] = true }
+local BREAK_AFTER = { ["/"] = true, ["."] = true, ["-"] = true, ["_"] = true, [":"] = true, ["="] = true, ["|"] = true, [","] = true }
 
 function Code(el)
   if #el.text < 18 then

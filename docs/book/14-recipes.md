@@ -27,7 +27,7 @@ graph LR
 
 ## Recipe 1: Validate a Kafka Upgrade {#recipe-1-validate-a-kafka-upgrade}
 
-This recipe proves that a Kafka version upgrade didn't change performance, by running one [scenario file](appendix-a-glossary.md#gl-scenario-file) before and after the upgrade and diffing the two runs. The suite is the Part II file, `payments-scenarios.yaml`, so the diff is against a [baseline](appendix-a-glossary.md#gl-baseline) whose [gates](appendix-a-glossary.md#gl-gate) you already trust; [The Payments Question](part-performance-testing.md#the-payments-question) describes it. Any scenario file works, as long as both runs use the same one. You need the [Upgrade Playbook](18-upgrade-playbook.md) procedure, and the time is two runs of the file plus the rolling upgrade.
+This recipe proves that a Kafka version upgrade didn't change performance, by running one [scenario file](appendix-a-glossary.md#gl-scenario-file) before and after the upgrade and diffing the two runs. The suite is the Part II file, `payments-scenarios.yaml`, so the diff is against a [baseline](appendix-a-glossary.md#gl-baseline) whose [gates](appendix-a-glossary.md#gl-gate) you already trust; [The Payments Question](part-performance-testing.md#the-payments-question) describes it. Any scenario file works, as long as both runs use the same one. You need the [Upgrade Playbook](18-upgrade-playbook.md) procedure and the access it asks for, and the time is two runs of the file plus the rolling upgrade.
 
 ### Step 1 — Capture the Baseline
 
@@ -99,11 +99,11 @@ Both runs finished `DONE` within their gates, and the diff shows no `▼` row be
 
 ### Roll Back
 
-If the diff shows a regression you can't accept, roll the brokers back with [Kafka Version Rollback](18-upgrade-playbook.md#kafka-version-rollback), then run the suite once more to confirm the old numbers return.
+If the diff shows a regression you can't accept, roll the brokers back with [Kafka Version Rollback](18-upgrade-playbook.md#kafka-version-rollback), then run the suite once more to confirm the old numbers return. When the upgrade itself fails, [Common Upgrade Issues](18-upgrade-playbook.md#common-upgrade-issues) and the [Upgrades](appendix-b-troubleshooting.md#upgrades) entries in the Troubleshooting Index say where to look.
 
 ## Recipe 2: Nightly Regression Suite {#recipe-2-nightly-regression-suite}
 
-This recipe catches a performance regression the night it lands: a schedule runs one LOAD test every night, and a weekly look at `kates trend` finds the run that moved. You need a running Kates API, where the scheduler runs, and the cost is one LOAD run of 100,000 records a night.
+This recipe catches a performance regression the night it lands: a schedule runs one LOAD test every night, and a weekly look at `kates trend` finds the run that moved. You need a running Kates API, where the scheduler runs, and the `kates` CLI pointed at it; the cost is one LOAD run of 100,000 records a night.
 
 ### Step 1 — Write the Request
 
@@ -186,7 +186,7 @@ Create a second schedule with `--cron` set a few minutes ahead in UTC, and wait 
 
 ### Verify the Schedule Fires
 
-`kates schedule list` shows the schedule as `enabled`, and the morning after it fires, its Last Run column names the night's run. If nothing fires, check that the Kates API pod is running with `kubectl get pods -n kates -l app.kubernetes.io/name=kates`: the scheduler runs inside the Kates API, not as a separate pod.
+`kates schedule list` shows the schedule as `enabled`, and the morning after it fires, its Last Run column names the night's run. If nothing fires, check that the Kates API pod is running with `kubectl get pods -n kates -l app.kubernetes.io/name=kates`: the scheduler runs inside the Kates API, not as a separate pod. When runs fire but `kates trend` shows nothing, Common Issues (Additional), in the [Troubleshooting Index](appendix-b-troubleshooting.md), explains which runs a trend reads.
 
 ### Stop It
 
@@ -194,7 +194,7 @@ Create a second schedule with `--cron` set a few minutes ahead in UTC, and wait 
 
 ## Recipe 3: Pre-Production Chaos Certification {#recipe-3-pre-production-chaos-certification}
 
-This recipe checks that a Kafka cluster meets its resilience targets before it takes production traffic. It runs a LOAD baseline and an INTEGRITY run, three [playbooks](appendix-a-glossary.md#gl-playbook), and a [resilience run](appendix-a-glossary.md#gl-resilience-run) that kills a broker during a 360 s LOAD test. You need a cluster nothing else depends on, with a Kafka pool pinned to zone `alpha` for `az-failure`.
+This recipe checks that a Kafka cluster meets its resilience targets before it takes production traffic. It runs a LOAD baseline and an INTEGRITY run, three [playbooks](appendix-a-glossary.md#gl-playbook), and a [resilience run](appendix-a-glossary.md#gl-resilience-run) that kills a broker during a 360 s LOAD test. You need a cluster nothing else depends on, with a Kafka pool pinned to zone `alpha` for `az-failure`, and a cluster-wide install with a chaos provider: a namespace-only install runs the `noop` provider, which injects nothing, unless `chaos.provider` names another.
 
 ::: {.callout-caution title="This recipe breaks the cluster"}
 `leader-cascade` kills the brokers leading `__consumer_offsets` partitions 0 and 1, one after the other. `split-brain` cuts broker 0 off the network for 60 s, `az-failure` kills every Kafka pod in zone `alpha`, and Step 4 kills a broker during a LOAD test. Anything else using the cluster goes through the same failures, so run the recipe before the cluster takes production traffic.
@@ -334,7 +334,7 @@ Output, with illustrative numbers:
 
 ### Verify Each Stage
 
-Check each stage against the table above. `kates test get <id>` shows the LOAD and INTEGRITY runs as `DONE`, and `kates disruption status <id>` shows each playbook's disruption as `COMPLETED`, with the IDs the playbook runs printed.
+Check each stage against the table above. `kates test get <id>` shows the LOAD and INTEGRITY runs as `DONE`, and `kates disruption status <id>` shows each playbook's disruption as `COMPLETED`, with the IDs the playbook runs printed. A stage that fails ends the recipe there: [Chaos Engineering](appendix-b-troubleshooting.md#chaos-engineering) in the Troubleshooting Index lists the usual causes, a `Skipped` verdict from the `noop` provider among them.
 
 ### Clean Up
 
@@ -342,7 +342,7 @@ The runs leave their topics on the cluster. List them with `kates kafka topics`,
 
 ## Recipe 4: Investigate a Latency Regression {#recipe-4-investigate-a-latency-regression}
 
-This recipe works out why P99 latency rose between two runs. It starts no new runs, so it doesn't disrupt the cluster: it reads two finished runs, a good one and a bad one, and the cluster as it is now.
+This recipe works out why P99 latency rose between two runs. It starts no new runs, so it doesn't disrupt the cluster: it reads two finished runs, a good one and a bad one, and the cluster as it is now, so there is nothing to roll back. You need the IDs of both runs, and for Step 3 both must be among the Kates API's 50 most recent `native` runs since its pod last restarted.
 
 ### Step 1 — Find the Metric That Moved
 
@@ -426,7 +426,7 @@ If throughput dropped but the heatmap shows no pattern, look for long GC pauses 
 
 ### Next
 
-Each diagnosis leads somewhere else. A hotspot broker needs its partitions moved, which [Cruise Control](15-kafka-deployment.md#cruise-control) does. Saturation means the load is past the cluster's ceiling, which [Recipe 5: Capacity Planning](#recipe-5-capacity-planning) finds. A GC pause points at the broker's JVM, whose heap and pause time the Strimzi Kafka board in [The Dashboard Set](09-observability.md#the-dashboard-set) shows.
+Each diagnosis leads somewhere else. A hotspot broker needs its partitions moved, which [Cruise Control](15-kafka-deployment.md#cruise-control) does. Saturation means the load is past the cluster's ceiling, which [Recipe 5: Capacity Planning](#recipe-5-capacity-planning) finds. A GC pause points at the broker's JVM, whose heap and pause time the Strimzi Kafka board in [The Dashboard Set](09-observability.md#the-dashboard-set) shows. When none of the three fits, [Performance Issues](appendix-b-troubleshooting.md#performance-issues) in the Troubleshooting Index lists other causes.
 
 ## Recipe 5: Capacity Planning {#recipe-5-capacity-planning}
 
@@ -550,7 +550,7 @@ The trend plots every `DONE` CAPACITY run's per-producer mean, whatever its prod
 
 ## Recipe 6: Producer Tuning {#recipe-6-producer-tuning}
 
-This recipe finds the producer settings that suit your workload, by running one LOAD scenario per setting and comparing the runs. It needs no extra prerequisites and doesn't disrupt the cluster: the cost is four LOAD runs of 100,000 records each.
+This recipe finds the producer settings that suit your workload, by running one LOAD scenario per setting and comparing the runs. It needs no extra prerequisites, doesn't disrupt the cluster and changes no setting, so there is nothing to roll back: the cost is four LOAD runs of 100,000 records each.
 
 ### Step 1 — Write the Suite
 
@@ -618,7 +618,7 @@ If the four runs show nearly the same throughput, the producer configuration isn
 
 ### Verify the Winner
 
-Rerun the scenario you picked on its own, a few times, and check that its numbers hold before you adopt the setting in your clients.
+Rerun the scenario you picked on its own, a few times, and check that its numbers hold before you adopt the setting in your clients. If they vary widely from run to run, [Performance Issues](appendix-b-troubleshooting.md#performance-issues) in the Troubleshooting Index lists the usual causes.
 
 ## Recipe 7: Gate a CI Pipeline on Kafka {#recipe-7-gate-a-ci-pipeline-on-kafka}
 
@@ -767,6 +767,14 @@ Read the workflow from the top:
 3. `exec` makes `kates test apply` the step's own process, so cancelling the job signals it directly and it cancels the run it waits for.
 4. Each gate is its own step, so the job's page shows which one failed. The upload step runs even after a failure, so the reports still upload.
 
+### Verify the Pipeline
+
+Open a pull request to run the workflow once. The job's page shows one step per gate, and its `kafka-gates` artifact holds `gates.xml` and `compliance.xml`, plus `chaos.xml` where `KATES_CHAOS` is `true`. A failure in the Reach the Kates API step prints the port-forward's log. A gate that fails with `[401] Missing API key` or a refused connection is covered under [CLI Issues](appendix-b-troubleshooting.md#cli-issues) in the Troubleshooting Index.
+
+### Remove the Gate
+
+The workflow installs nothing on the cluster. To take the gate out, delete its workflow file and the two repository secrets. The runs it started stay in the Kates API, and their topics stay on the cluster.
+
 ### Limits
 
 The recipe leans on the install's own limits:
@@ -820,8 +828,10 @@ Wait for that LOAD run to finish, then repeat both commands with `payments-zone-
 
 The third check reads the status and the grade as well as the exit code, because `--fail-on-sla-breach` exits 1 only on a violated constraint. A PARTIAL plan with no violation exits 0, and so does a grade of `-`, which means nothing was graded.
 
+When a check fails, the recipe that isolates it comes next: [Recipe 4: Investigate a Latency Regression](#recipe-4-investigate-a-latency-regression) for a broken P99 gate, and [Chaos Engineering](appendix-b-troubleshooting.md#chaos-engineering) in the Troubleshooting Index for a plan or a resilience run that doesn't complete. If neither explains it, open an issue at <https://github.com/bmscomp/kates/issues> with the output of `kates doctor`.
+
 ## What the Recipes Share
 
-Every recipe is the same loop: a baseline, a change or a fault, a re-measure, and a comparison the pipeline can read as an exit code. The sign-off recipe is that loop run once for one workload.
+Every recipe is the same loop: a baseline, a change or a fault, a re-measure, and a comparison the pipeline can read as an exit code. The sign-off recipe is that loop run once for one workload. When a recipe fails in a way its own section doesn't cover, the [Troubleshooting Index](appendix-b-troubleshooting.md) comes next.
 
 Every command these recipes lean on has more flags and output formats than shown here. The [CLI Reference](10-cli-reference.md) documents them all.
