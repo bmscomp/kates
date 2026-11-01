@@ -446,11 +446,12 @@ type kafkaReadiness struct {
 	// paused: strimzi.io/pause-reconciliation is set, so the operator will
 	// not reconcile the spec deploy applied.
 	paused bool
-	// why is the Ready condition's reason and message, for a timeout.
+	// why is the NotReady condition's reason and message, for a timeout:
+	// Strimzi swaps Ready for NotReady rather than setting it False.
 	why string
 }
 
-const kafkaReadyJSONPath = `jsonpath={.metadata.generation}|{.status.observedGeneration}|{.status.conditions[?(@.type=="Ready")].status}|{.status.conditions[?(@.type=="ReconciliationPaused")].status}|{.status.conditions[?(@.type=="Ready")].reason}: {.status.conditions[?(@.type=="Ready")].message}`
+const kafkaReadyJSONPath = `jsonpath={.metadata.generation}|{.status.observedGeneration}|{.status.conditions[?(@.type=="Ready")].status}|{.status.conditions[?(@.type=="ReconciliationPaused")].status}|{.status.conditions[?(@.type=="NotReady")].reason}: {.status.conditions[?(@.type=="NotReady")].message}`
 
 func readKafkaReadiness(ctx context.Context, namespace, name string) kafkaReadiness {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
