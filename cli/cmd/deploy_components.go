@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -110,11 +112,23 @@ func ensureDeployNamespace(ctx context.Context, namespace string, labels map[str
 	}
 	out, err := runExecOutputFn(ctx, "kubectl", "get", "namespace", namespace, "--ignore-not-found", "-o", "json")
 	if err != nil {
+		// Output keeps kubectl's words in the ExitError, not in its message.
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
+			err = fmt.Errorf("%w: %s", err, strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		if rbacRefused(err, "get") {
+			// An account that may not read namespaces may still have this one:
+			// use it as it is, and let the install say so if it is missing.
+			return nil
+		}
 		return fmt.Errorf("check namespace %s: %w", namespace, err)
 	}
 	if strings.TrimSpace(string(out)) == "" {
 		manifest := deployNamespaceManifest(namespace, labels)
 		if err := runExecStdinFn(ctx, "kubectl", []string{"create", "-f", "-"}, manifest); err != nil {
+			if strings.Contains(err.Error(), "AlreadyExists") || strings.Contains(err.Error(), "already exists") {
+				return nil // made meanwhile by a component installing in parallel
+			}
 			if rbacRefused(err, "create") {
 				return fmt.Errorf("create namespace %s: %w\n\nThis account may not create namespaces. Ask a cluster admin to apply this manifest (kubectl create -f <file>), then run again:\n\n%s", namespace, err, manifest)
 			}

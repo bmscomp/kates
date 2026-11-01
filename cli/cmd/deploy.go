@@ -182,9 +182,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if err := resolveDeployProfile(cmd, target, wizard); err != nil {
 		return err
 	}
-	if deployAdminless {
-		defer dropCreateNamespace()()
-	}
+	// Deploy makes each namespace itself, or uses the one already there.
+	defer dropCreateNamespace()()
 	if err := configureDeploySelection(cmd, wizard); err != nil {
 		return err
 	}

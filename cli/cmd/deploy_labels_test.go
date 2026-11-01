@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -466,6 +467,66 @@ func TestLabelsFileFlagOnEveryNamespaceCreator(t *testing.T) {
 	} {
 		if cmd.Flags().Lookup("labels-file") == nil {
 			t.Errorf("kates %s has no --labels-file", name)
+		}
+	}
+}
+
+// An account that may not read namespaces may still have this one: deploy
+// uses it as it is instead of stopping.
+func TestEnsureDeployNamespaceUnreadableIsUsedAsItIs(t *testing.T) {
+	k := fakeNamespaceKubectl(t, "")
+	k.getErr = errors.New(`exit status 1: Error from server (Forbidden): namespaces "kafka" is forbidden: User "dev" cannot get resource "namespaces"`)
+	if err := ensureDeployNamespace(context.Background(), "kafka", kafkaLabels); err != nil {
+		t.Fatalf("unreadable namespace = %v, want it used", err)
+	}
+	if want := []string{getKafkaNamespace}; !reflect.DeepEqual(k.calls, want) {
+		t.Fatalf("calls = %q, want only the lookup", k.calls)
+	}
+}
+
+// Components install in parallel: a namespace made between the lookup and
+// the create is there to use.
+func TestEnsureDeployNamespaceCreatedMeanwhileIsUsed(t *testing.T) {
+	k := fakeNamespaceKubectl(t, "")
+	k.createErr = errors.New(`exit status 1: Error from server (AlreadyExists): namespaces "kafka" already exists`)
+	if err := ensureDeployNamespace(context.Background(), "kafka", kafkaLabels); err != nil {
+		t.Fatalf("namespace created meanwhile = %v, want it used", err)
+	}
+}
+
+// Helm 4 server-side applies the Namespace for --create-namespace even when
+// it exists, which needs patch on namespaces. Deploy makes its namespaces
+// itself, so no helm call it runs carries the flag.
+func TestDeployNeverPassesCreateNamespaceToHelm(t *testing.T) {
+	saveComponentFlags(t)
+	deployTopology, deployNamespace = "single", "kates-test"
+	deployWithSchemaRegistry = "none"
+	deployWithChaos, deployWithMonitoring, deployWithCertManager, deployWithKyverno = false, false, false, false
+	deployWithStrimzi, deployWithKafkaConnect, deployWithKates = true, false, true
+
+	var helmCalls []string
+	var mu sync.Mutex
+	runExecFn = func(ctx context.Context, name string, args ...string) error { return nil }
+	runExecStdinFn = func(ctx context.Context, name string, args []string, stdinData string) error { return nil }
+	runHelmFn = func(ctx context.Context, args ...string) error {
+		mu.Lock()
+		helmCalls = append(helmCalls, strings.Join(args, " "))
+		mu.Unlock()
+		return nil
+	}
+	isHelmReleaseDeployedFn = func(ctx context.Context, release, namespace string) bool { return false }
+	defaultExecutor = &MockExecutor{}
+
+	_ = deployCmd.Flags().Set("topology", deployTopology)
+	if err := runDeploy(deployCmd, []string{}); err != nil {
+		t.Fatalf("runDeploy failed: %v", err)
+	}
+	if len(helmCalls) == 0 {
+		t.Fatal("no helm call ran")
+	}
+	for _, c := range helmCalls {
+		if strings.Contains(c, "--create-namespace") {
+			t.Errorf("helm %s", c)
 		}
 	}
 }
