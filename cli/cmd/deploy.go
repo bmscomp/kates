@@ -160,8 +160,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	dl = &DashboardController{}
 
 	// A bad namespace label fails before anything asks the cluster.
-	namespaceLabels, namespaceLabelSources, err := namespaceUserLabels()
-	if err != nil {
+	if _, _, err := namespaceUserLabels(); err != nil {
 		return err
 	}
 	target, err := prepareDeployTarget()
@@ -171,7 +170,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	defer pinKubeContext(target)()
 	// Again, now that the target is the current context: .policies' namespace
 	// labels are the target's.
-	if namespaceLabels, namespaceLabelSources, err = namespaceUserLabels(); err != nil {
+	namespaceLabels, namespaceLabelSources, err := namespaceUserLabels()
+	if err != nil {
 		return err
 	}
 	policies, err := readDeployPolicies(target)

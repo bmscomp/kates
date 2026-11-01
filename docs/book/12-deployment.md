@@ -852,7 +852,7 @@ Kates trims the spaces around each key and value, skips blank lines and lines wh
 
 A missing `.labels` in the current directory means no labels from a file. `--labels-file <path>` reads another file instead, and that one must exist.
 
-### Step 2 — Check the Labels
+### Step 2 — Check the Labels {#step-2--check-the-labels}
 
 Labels come from three sources. For a key that more than one sets, the later source in this table wins:
 
