@@ -1,1 +1,1 @@
-{{- include "kafka-common.netpol.jobs" (dict "name" "h-jobs" "namespace" "connect" "labels" "app: harness" "instance" .Release.Name "components" (list "preflight" "secret-sync") "kafkaPorts" (list 9092 "9093") "api" (dict "ports" (list 6443))) }}
+{{- include "kafka-common.netpol.jobs" (dict "name" "h-jobs" "namespace" "connect" "labels" "app: harness" "instance" .Release.Name "components" (list "preflight" "secret-sync") "kafkaPorts" (ternary list (list 9092 "9093") (.Values.noKafkaPorts | default false)) "api" (dict "ports" (list 6443))) }}

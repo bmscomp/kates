@@ -262,9 +262,9 @@ renders:
         name: brokers-alpha
         path: spec/resources/requests/memory
         equals: 2Gi
-      - why: "the kind overlay's networkPolicy.enabled=false beats the detected networkPolicies.enabled=true"
+      - why: "the kind overlay keeps the policies on, for kind clusters whose namespaces deny all traffic"
         kind: NetworkPolicy
-        count: 0
+        count: 5
       - why: "the kind overlay replaces the detected NodePort listener"
         kind: Kafka
         path: spec/kafka/listeners/*/type

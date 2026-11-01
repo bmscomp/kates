@@ -152,9 +152,12 @@ spec:
   egress:
     {{- include "kafka-common.netpol.dnsEgress" (dict) | nindent 4 }}
     {{- include "kafka-common.netpol.apiServerEgress" (dict "ports" (.api).ports "ipBlock" (.api).ipBlock) | nindent 4 }}
+    {{- /* No ports, no rule: a rule with no ports and no peers admits everything. */}}
+    {{- with .kafkaPorts }}
     - ports:
-        {{- range .kafkaPorts }}
+        {{- range . }}
         - port: {{ int . }}
           protocol: TCP
         {{- end }}
+    {{- end }}
 {{- end }}
