@@ -77,4 +77,34 @@ spec:
     {{- with $np.extraEgress }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+{{- /* Not `| default true`: that turns an explicit false back into true. */}}
+{{- if ne (toString ($np.targets).enabled) "false" }}
+{{- /* Litmus starts the runner, the experiment Job and its helpers in the
+       ChaosEngine's namespace, not this one, and each of them talks to the
+       API server first: where that namespace denies all traffic they hang at
+       the first call. Their egress is left open rather than narrowed, since
+       an experiment's probes may dial anything (Kafka, HTTP endpoints), and a
+       narrower rule would cut them where nothing was denied before. */}}
+{{- range $t := $targets }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kates-chaos.fullname" $ }}-experiments
+  namespace: {{ $t.name }}
+  labels:
+    {{- include "kates-chaos.labels" $ | nindent 4 }}
+spec:
+  # Every pod Litmus starts for an engine carries its chaosUID; the
+  # experiment's own labels come from its ChaosExperiment definition.
+  podSelector:
+    matchExpressions:
+      - key: chaosUID
+        operator: Exists
+  policyTypes:
+    - Egress
+  egress:
+    - {}
+{{- end }}
+{{- end }}
 {{- end }}

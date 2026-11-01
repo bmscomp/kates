@@ -5,7 +5,7 @@ name: kates-monitoring
 # be OOM-killed; Grafana's root chown init container is off.
 # Patch: the package ships the environment overlays (values-*.yaml), which
 # kates deploy passes with -f when it installs the published chart.
-version: 1.7.1
+version: 1.8.0
 appVersion: "82.4.3"
 description: Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration
 home: https://github.com/bmscomp/kates
@@ -24,6 +24,12 @@ annotations:
   artifacthub.io/category: monitoring-logging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "DNS egress goes to port 53 at any address, not only to pods: a node-local DNS cache (GKE, AKS, EKS NodeLocal DNSCache) answers from a node address, which a pod selector never matches"
+    - kind: added
+      description: "networkPolicy.enabled (default true): NetworkPolicies that let the whole stack run where the namespace denies all traffic. DNS, the API server and the namespace for every component; open egress for Prometheus and Alertmanager, whose scrape and notification targets can be anywhere; the query ports (9090, 9093) from networkPolicy.clientNamespaces (empty: every namespace); the Grafana UI on 3000 and HTTPS out for Grafana; the Helm test. Without them the operator and kube-state-metrics crash-looped, unable to reach the API server"
+    - kind: changed
+      description: "kube-prometheus-stack.prometheusOperator.networkPolicy.enabled is true: the subchart's policies for the operator's webhook and for the admission create and patch Jobs, which are hooks and run before any ordinary policy exists"
     - kind: changed
       description: "The package ships the environment overlays (values-*.yaml), which .helmignore used to leave out, so kates deploy installs the published chart with the same -f overlays as a checkout, and helm pull --untar hands them to anyone else"
     - kind: changed

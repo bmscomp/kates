@@ -16,24 +16,35 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: ingress-nginx
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace | default "ingress-nginx" }}
+      ports:
+        - port: {{ .Values.containerPort }}
+          protocol: TCP
+    # The Helm test, which asks Headlamp for its page
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "headlamp.selectorLabels" . | nindent 14 }}
       ports:
         - port: {{ .Values.containerPort }}
           protocol: TCP
   egress:
-    - to:
-        - namespaceSelector: {}
-      ports:
+    - ports:
         - port: 53
           protocol: UDP
         - port: 53
           protocol: TCP
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-      ports:
+    # Any address, IPv4 or IPv6: where the API server listens depends on the cluster.
+    - ports:
         - port: 443
           protocol: TCP
         - port: {{ .Values.networkPolicy.apiServer.port | default 6443 }}
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "headlamp.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: {{ .Values.containerPort }}
           protocol: TCP
 {{- end }}

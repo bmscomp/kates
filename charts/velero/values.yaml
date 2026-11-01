@@ -273,6 +273,22 @@ tests:
       memory: 64Mi
       cpu: 100m
 
+# NetworkPolicy for the server, the node agent, the CRD Jobs and the Helm
+# test, for namespaces that deny all traffic by default: DNS, the API server
+# and the object store out, the metrics port (8085) in.
+networkPolicy:
+  enabled: true
+  # API server ports: 443 for the Service, 6443 for the address it forwards to.
+  apiServerPorts:
+    - 443
+    - 6443
+  # Ports the backup storage locations listen on, at any address: 443 for a
+  # cloud store, 8333 for SeaweedFS, 9000 for MinIO.
+  objectStorePorts:
+    - 443
+    - 8333
+    - 9000
+
 # Settings for Velero's prometheus metrics. Enabled by default.
 metrics:
   enabled: true

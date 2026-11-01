@@ -511,6 +511,15 @@
         "dns": {
           "type": "object"
         },
+        "apiServer": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "ports": { "type": "array", "items": { "type": "integer" } },
+            "ipBlock": { "type": "object" }
+          }
+        },
         "kafka": {
           "type": "object",
           "properties": {

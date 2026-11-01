@@ -853,7 +853,7 @@ The blocks this chart adds on top of the `connect-cluster` worker surface:
 | `autoscaling` | HPA on the CR's scale subresource | `maxReplicas` (checked against `sum(tasksMax)`), **`targetMemoryUtilizationPercentage`**, **`allowIdleWorkers`** |
 | `kafkaUser` | Optional target-side user | `create`, `authorization.mode: auto\|custom`, `topicGrants`, `groupGrants` |
 | `secretSync` | Copy credentials across namespaces (post-install) | `secrets[]` (`name`, `fromNamespace`, optional `as`), **`watch`**, **`schedule`** |
-| `networkPolicy` | Default-deny for the workers with explicit flows | `kafka.ports`, **`kafka.perSource`**, `strimziOperatorNamespace`, `operator.enabled`, `dns` |
+| `networkPolicy` | Default-deny for the workers with explicit flows | `kafka.ports`, **`kafka.perSource`**, `strimziOperatorNamespace`, `operator.enabled`, `dns`, `apiServer` (the workers read their Secrets through it) |
 | `metrics` / `podMonitors` / `alerts` / `dashboard` | Observability | **`metrics.type`**, **`metrics.allowList`**, **`podMonitors.scrape.<type>.{port,path}`**, `alerts.thresholds.*` (incl. **`checkpointStaleMinutes`**, **`offsetSyncStaleMinutes`**, **`rebalancesPerSecond`**), **`alerts.runbookBaseUrl`**, **`alerts.allowReporterMetrics`** |
 | `rack` | Zone awareness | `enabled`, `topologyKey`, **`clientRackInitImage`**, **`clientRack`** |
 | `jmxOptions` / `connectContainer` / `templateExtra` | The rest of the v1 surface | authenticated JMX; env + securityContext on the worker container (merged over a hardened default: no privilege escalation, read-only root filesystem, all capabilities dropped); a raw passthrough **deep-merged** into `spec.template` — `templateExtra.pod.hostUsers` adds one field to the chart's pod template rather than replacing it |

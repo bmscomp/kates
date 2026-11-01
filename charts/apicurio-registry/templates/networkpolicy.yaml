@@ -45,13 +45,16 @@ spec:
     {{- end }}
   egress:
     # DNS resolution
-    - to:
-        - namespaceSelector: {}
-      ports:
+    - ports:
         - port: 53
           protocol: UDP
         - port: 53
           protocol: TCP
+    # The release's own pods: the Helm test asks the registry for its health
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "apicurio-registry.selectorLabels" . | nindent 14 }}
     # Kafka brokers (KafkaSQL journal)
     - to:
         - namespaceSelector:

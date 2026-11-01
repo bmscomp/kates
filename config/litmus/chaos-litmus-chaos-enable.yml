@@ -49,9 +49,7 @@ spec:
             matchLabels:
               kubernetes.io/metadata.name: kates
     # DNS resolution
-    - to:
-        - namespaceSelector: {}
-      ports:
+    - ports:
         - port: 53
           protocol: UDP
         - port: 53

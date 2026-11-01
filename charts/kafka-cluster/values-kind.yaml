@@ -31,9 +31,6 @@ kafkaExporter:
 cruiseControl:
   enabled: false
 
-networkPolicy:
-  enabled: false
-
 tieredStorage:
   enabled: false
 

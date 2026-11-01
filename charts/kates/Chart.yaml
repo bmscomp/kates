@@ -4,7 +4,7 @@ description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
 # Patch: appVersion and the image tag move to 1.34.1, the tag the v1.34.1
 # release publishes.
-version: 0.15.4
+version: 0.15.5
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -28,6 +28,12 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "The generated allow-dns-egress policy for app namespaces: dNS egress goes to port 53 at any address, not only to pods: a node-local DNS cache (GKE, AKS, EKS NodeLocal DNSCache) answers from a node address, which a pod selector never matches"
+    - kind: added
+      description: "A NetworkPolicy for the release's pods that are not the API (the Helm tests and the cleanup Job): DNS and the API on 8080 and 9000. They carry no `app` label, so the API's policy never selected them and a namespace that denies all traffic left them with none"
+    - kind: changed
+      description: "values-kind.yaml no longer switches networkPolicy off"
     - kind: changed
       description: "appVersion 1.34.1 and the image tag move to 1.34.1. Nothing under kates/ moved since 1.34.0; the release ships the CLI fix #575 (kates deploy can be re-run after an interrupted or failed run). Templates are unchanged."
     - kind: changed

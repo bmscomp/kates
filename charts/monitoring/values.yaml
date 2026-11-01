@@ -163,6 +163,12 @@ kube-prometheus-stack:
     imagePullPolicy: IfNotPresent
 
   prometheusOperator:
+    # The subchart's own policies for the operator (webhook ingress, open
+    # egress) and for the admission create/patch Jobs, which are pre-install
+    # hooks: they run before networkPolicy's ordinary resources exist, so only
+    # a hook policy reaches them where the namespace denies all traffic
+    networkPolicy:
+      enabled: true
     image:
       tag: v0.79.2
       pullPolicy: IfNotPresent
@@ -310,6 +316,20 @@ kafkaNamespace: kafka
 
 # NetworkPolicy exceptions for clusters with namespace default-deny
 networkPolicy:
+  # -- Policies that let every pod of the stack run where the namespace
+  # denies all ingress and egress by default: DNS, the API server and the
+  # namespace for all of them, open egress for Prometheus and Alertmanager
+  # (scrape and notification targets can be anywhere), the Grafana UI on 3000
+  # and the operator's webhook on 10250 from anywhere
+  enabled: true
+  # -- Namespaces that may query Prometheus (9090) and Alertmanager (9093);
+  # empty admits every namespace. Each entry is templated
+  clientNamespaces: []
+  # -- API server ports the stack's controllers dial: 443 for the Service,
+  # 6443 for the address it forwards to
+  apiServerPorts:
+    - 443
+    - 6443
   prometheusKafkaEgress:
     enabled: true
     # Namespace containing Strimzi Kafka pods exposing tcp-prometheus on 9404

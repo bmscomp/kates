@@ -2,7 +2,7 @@ apiVersion: v2
 name: headlamp
 description: Headlamp — Kubernetes Dashboard for cluster visualization and management
 type: application
-version: 0.2.1
+version: 0.2.2
 appVersion: "0.40.1"
 keywords:
   - kubernetes
@@ -19,6 +19,12 @@ annotations:
   artifacthub.io/category: monitoring-logging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "DNS egress goes to port 53 at any address, not only to pods: a node-local DNS cache (GKE, AKS, EKS NodeLocal DNSCache) answers from a node address, which a pod selector never matches"
+    - kind: changed
+      description: "networkPolicy.ingressNamespace (default ingress-nginx) names the ingress controller namespace, which was hardcoded; API server egress goes to any address instead of 0.0.0.0/0, so IPv6 clusters reach it"
+    - kind: fixed
+      description: "The NetworkPolicy lets the Helm test reach Headlamp. The test pod is selected by the same policy, which admitted only the ingress controller's namespace and allowed no egress to Headlamp, so `helm test` failed wherever policies are enforced"
     - kind: fixed
       description: "The Helm test pod passes Pod Security Standards restricted: it sets seccompProfile RuntimeDefault. Its security context and resources, hardcoded before with the same settings, are values now: test.podSecurityContext, test.securityContext and test.resources"
     - kind: added

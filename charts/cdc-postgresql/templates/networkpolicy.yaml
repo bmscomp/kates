@@ -18,6 +18,9 @@ spec:
             matchLabels:
               app.kubernetes.io/instance: {{ .Release.Name }}
               app.kubernetes.io/component: test
+        {{- if not (or .Values.networkPolicy.allowNamespaces .Values.networkPolicy.allowPods) }}
+        - namespaceSelector: {}
+        {{- end }}
         {{- range .Values.networkPolicy.allowNamespaces }}
         - namespaceSelector:
             matchLabels:
@@ -28,6 +31,33 @@ spec:
             matchLabels:
               {{- toYaml . | nindent 14 }}
         {{- end }}
+      ports:
+        - port: postgres
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cdc-postgresql.fullname" . }}-test
+  labels:
+    {{- include "cdc-postgresql.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: test
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "cdc-postgresql.selectorLabels" . | nindent 14 }}
       ports:
         - port: postgres
           protocol: TCP

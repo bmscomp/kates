@@ -1,4 +1,2 @@
-# Generic cluster overlay for kafka-ui
-# Disables components that require extra operators (like Prometheus CRDs)
-networkPolicy:
-  enabled: false
+# Generic cluster overlay for kafka-ui. Nothing to override: the chart's
+# defaults, its NetworkPolicy included, suit any cluster.

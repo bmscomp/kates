@@ -1,0 +1,17 @@
+{{- /* DNS, the API server and Kafka for the preflight and secret-sync Jobs,
+       where the namespace denies all traffic (kafka-common.netpol.jobs). */}}
+{{- if .Values.networkPolicy.enabled }}
+{{- $r := include "connect-cluster.resolve" . | fromJson }}
+{{- $sync := $r.secretSync }}
+{{- $syncOn := and (include "kafka-common.enabled" (list $sync.enabled true)) (eq ($sync.method | default "job") "job") $sync.resolvedSecrets }}
+{{- if or (.Values.preflight).enabled $syncOn }}
+{{- include "kafka-common.netpol.jobs" (dict
+      "name" (printf "%s-jobs" (include "connect-cluster.fullname" .))
+      "namespace" (include "connect-cluster.namespace" .)
+      "labels" (include "connect-cluster.componentLabels" (dict "ctx" . "component" "jobs"))
+      "instance" .Release.Name
+      "components" (list "preflight" "secret-sync")
+      "kafkaPorts" $r.kafkaPorts
+      "api" .Values.networkPolicy.apiServer) }}
+{{- end }}
+{{- end }}

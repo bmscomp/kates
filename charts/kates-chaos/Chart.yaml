@@ -6,7 +6,7 @@ name: kates-chaos
 # kates-tester, which has the shell they need.
 # Patch: images.tester moves to kates-tester 1.34.1, the tag the v1.34.1
 # release publishes; every chart that runs it pins the same one.
-version: 2.3.12
+version: 2.4.0
 # Tracks the LitmusChaos execution-plane version this chart deploys.
 appVersion: "3.28.0"
 description: Kates Chaos Engineering — wraps the LitmusChaos execution plane (operator, exporter, CRDs) with Kafka-specific RBAC, experiment/engine templating, and monitoring
@@ -30,6 +30,10 @@ annotations:
   artifacthub.io/category: skip-prediction
   artifacthub.io/prerelease: "false"
   artifacthub.io/changes: |
+    - kind: changed
+      description: "networkPolicy.enabled is true by default (values-kind.yaml no longer switches it off), so the chaos operator gets DNS, the API server and the target namespaces where its namespace denies all traffic"
+    - kind: added
+      description: "With networkPolicy (and networkPolicy.targets) on, a policy in each target namespace gives the pods Litmus starts there for an engine (runner, experiment Job, helpers: every pod carrying a chaosUID) open egress, so probes can still dial anything. Where that namespace denies all traffic the runner hung at its first API call and no experiment ever ran; a pod-delete now completes with a Pass verdict"
     - kind: changed
       description: "images.tester moves to kates-tester 1.34.1, the tag the v1.34.1 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.30.1 (nothing under tester/ moved), so this is the pin, not the tooling."
     - kind: changed

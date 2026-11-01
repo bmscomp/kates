@@ -95,6 +95,7 @@ renders:
       - kind: ValidatingWebhookConfiguration
         count: 0
       - kind: NetworkPolicy
+        name: strimzi-operator
         path: metadata/annotations/kates.io~1watch-scope
         equals: kafka-2
   - name: kind

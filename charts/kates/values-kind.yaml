@@ -34,10 +34,6 @@ tolerations:
     operator: "Exists"
     effect: "NoSchedule"
 
-# Disable production features not needed locally
-networkPolicy:
-  enabled: false
-
 metrics:
   serviceMonitor:
     enabled: false

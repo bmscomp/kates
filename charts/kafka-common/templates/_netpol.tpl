@@ -5,11 +5,14 @@ place it under `ingress:` or `egress:` with nindent.
 
 {{/*
 DNS egress. Call with (dict "namespaceSelector" <map> "podSelector" <map>).
-Empty selectors allow any destination; pin kube-dns on strict clusters.
+Empty selectors allow any destination, which a node-local DNS cache on a
+node address (GKE, AKS, EKS NodeLocal DNSCache) needs; pin kube-dns on strict
+clusters without one.
 */}}
 {{- define "kafka-common.netpol.dnsEgress" -}}
-- to:
-    {{- if or .namespaceSelector .podSelector }}
+-
+  {{- if or .namespaceSelector .podSelector }}
+  to:
     - {{- if .namespaceSelector }}
       namespaceSelector:
         matchLabels:
@@ -20,9 +23,7 @@ Empty selectors allow any destination; pin kube-dns on strict clusters.
         matchLabels:
           {{- toYaml .podSelector | nindent 10 }}
       {{- end }}
-    {{- else }}
-    - namespaceSelector: {}
-    {{- end }}
+  {{- end }}
   ports:
     - port: 53
       protocol: UDP
@@ -115,4 +116,52 @@ reports Running. Call with (dict "chart" … "bootstrap" … "ports" <list>
 {{- fail (printf "%s: the Kafka bootstrap %q dials port %s, but %s allows only %s — the workers would be dropped at the network layer. Add %s to %s, or point the bootstrap at an allowed listener." $.chart $.bootstrap . $.field (join ", " $allowed) . $.field) -}}
 {{- end -}}
 {{- end -}}
+{{- end }}
+
+{{/*
+Egress for a release's hook Jobs (preflight, secret sync) where the namespace
+denies all traffic: DNS, the API server, and Kafka on the given ports at any
+address. A pre-install hook ahead of them, since a pre-install Job runs
+before any ordinary resource exists; never deleted after it succeeds, so the
+post-install Jobs and the CronJob have it too. Call with (dict "name" …
+"namespace" … "labels" <YAML> "instance" <release> "components" <list>
+"kafkaPorts" <list> "api" <dict ports ipBlock>).
+*/}}
+{{- define "kafka-common.netpol.jobs" -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .name }}
+  namespace: {{ .namespace }}
+  labels:
+    {{- .labels | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .instance }}
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          {{- toYaml .components | nindent 10 }}
+      # Never the Strimzi workers, whose egress their own policy narrows.
+      - key: strimzi.io/kind
+        operator: DoesNotExist
+  policyTypes:
+    - Egress
+  egress:
+    {{- include "kafka-common.netpol.dnsEgress" (dict) | nindent 4 }}
+    {{- include "kafka-common.netpol.apiServerEgress" (dict "ports" (.api).ports "ipBlock" (.api).ipBlock) | nindent 4 }}
+    {{- /* No ports, no rule: a rule with no ports and no peers admits everything. */}}
+    {{- with .kafkaPorts }}
+    - ports:
+        {{- range . }}
+        - port: {{ int . }}
+          protocol: TCP
+        {{- end }}
+    {{- end }}
 {{- end }}
