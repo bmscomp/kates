@@ -38,9 +38,7 @@ spec:
     - from:
         - podSelector: {}
   egress:
-    - to:
-        - namespaceSelector: {}
-      ports:
+    - ports:
         - port: 53
           protocol: UDP
         - port: 53
@@ -131,9 +129,7 @@ spec:
   policyTypes:
     - Egress
   egress:
-    - to:
-        - namespaceSelector: {}
-      ports:
+    - ports:
         - port: 53
           protocol: UDP
         - port: 53

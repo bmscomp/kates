@@ -5,11 +5,14 @@ place it under `ingress:` or `egress:` with nindent.
 
 {{/*
 DNS egress. Call with (dict "namespaceSelector" <map> "podSelector" <map>).
-Empty selectors allow any destination; pin kube-dns on strict clusters.
+Empty selectors allow any destination, which a node-local DNS cache on a
+node address (GKE, AKS, EKS NodeLocal DNSCache) needs; pin kube-dns on strict
+clusters without one.
 */}}
 {{- define "kafka-common.netpol.dnsEgress" -}}
-- to:
-    {{- if or .namespaceSelector .podSelector }}
+-
+  {{- if or .namespaceSelector .podSelector }}
+  to:
     - {{- if .namespaceSelector }}
       namespaceSelector:
         matchLabels:
@@ -20,9 +23,7 @@ Empty selectors allow any destination; pin kube-dns on strict clusters.
         matchLabels:
           {{- toYaml .podSelector | nindent 10 }}
       {{- end }}
-    {{- else }}
-    - namespaceSelector: {}
-    {{- end }}
+  {{- end }}
   ports:
     - port: 53
       protocol: UDP

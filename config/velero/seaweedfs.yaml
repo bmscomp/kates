@@ -267,9 +267,7 @@ spec:
             matchLabels:
               app.kubernetes.io/name: seaweedfs
   egress:
-    - to:
-        - namespaceSelector: {}
-      ports:
+    - ports:
         - port: 53
           protocol: UDP
         - port: 53

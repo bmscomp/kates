@@ -17,6 +17,8 @@ sources:
 version: 11.3.5
 annotations:
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "DNS egress goes to port 53 at any address, not only to pods: a node-local DNS cache (GKE, AKS, EKS NodeLocal DNSCache) answers from a node address, which a pod selector never matches"
     - kind: added
       description: "networkPolicy (enabled by default): DNS, the API server and the object store (networkPolicy.objectStorePorts: 443, 8333, 9000) out, metrics (8085) in, for the server, the node agent, the CRD Jobs and the Helm test. A pre-install hook, so the CRD upgrade Job has it; Helm leaves it behind on uninstall"
     - kind: changed

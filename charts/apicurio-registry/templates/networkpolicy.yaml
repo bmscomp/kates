@@ -45,9 +45,7 @@ spec:
     {{- end }}
   egress:
     # DNS resolution
-    - to:
-        - namespaceSelector: {}
-      ports:
+    - ports:
         - port: 53
           protocol: UDP
         - port: 53

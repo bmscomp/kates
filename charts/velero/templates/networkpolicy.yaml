@@ -33,9 +33,7 @@ spec:
         - port: 8085
           protocol: TCP
   egress:
-    - to:
-        - namespaceSelector: {}
-      ports:
+    - ports:
         - port: 53
           protocol: UDP
         - port: 53

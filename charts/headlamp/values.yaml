@@ -152,6 +152,8 @@ probes:
 
 networkPolicy:
   enabled: true
+  # -- Namespace of the ingress controller that serves Headlamp's UI
+  ingressNamespace: ingress-nginx
   apiServer:
     port: 6443
 

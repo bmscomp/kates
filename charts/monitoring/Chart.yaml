@@ -24,6 +24,8 @@ annotations:
   artifacthub.io/category: monitoring-logging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "DNS egress goes to port 53 at any address, not only to pods: a node-local DNS cache (GKE, AKS, EKS NodeLocal DNSCache) answers from a node address, which a pod selector never matches"
     - kind: added
       description: "networkPolicy.enabled (default true): NetworkPolicies that let the whole stack run where the namespace denies all traffic. DNS, the API server and the namespace for every component; open egress for Prometheus and Alertmanager, whose scrape and notification targets can be anywhere; the query ports (9090, 9093) from networkPolicy.clientNamespaces (empty: every namespace); the Grafana UI on 3000 and HTTPS out for Grafana; the Helm test. Without them the operator and kube-state-metrics crash-looped, unable to reach the API server"
     - kind: changed

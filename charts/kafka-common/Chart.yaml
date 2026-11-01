@@ -19,6 +19,8 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "kafka-common.netpol.dnsEgress without selectors allows port 53 at any address, not only to pods: a node-local DNS cache (GKE, AKS, EKS NodeLocal DNSCache) answers from a node address"
     - kind: added
       description: "kafka-common.netpol.jobs: a pre-install hook NetworkPolicy giving a release's hook Jobs DNS, the API server and Kafka, for namespaces that deny all traffic"
     - kind: added

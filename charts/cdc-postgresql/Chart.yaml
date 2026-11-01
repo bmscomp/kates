@@ -24,6 +24,8 @@ annotations:
   artifacthub.io/category: database
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "DNS egress goes to port 53 at any address, not only to pods: a node-local DNS cache (GKE, AKS, EKS NodeLocal DNSCache) answers from a node address, which a pod selector never matches"
     - kind: changed
       description: "networkPolicy.enabled is true by default. With allowNamespaces and allowPods both empty it admits 5432 from every namespace, since kates deploy puts Kafka Connect and the Kates API in namespaces of their own; list either to narrow it"
     - kind: added
