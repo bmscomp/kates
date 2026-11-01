@@ -69,7 +69,7 @@ func TestRecoverStuckReleases(t *testing.T) {
 		switch got {
 		case "helm list -A --pending -o json":
 			return []byte(`[
-				{"name":"kafka-ui","namespace":"kafka","status":"pending-upgrade","chart":"kafka-ui-0.3.2"},
+				{"name":"kafka-ui","namespace":"kafka","status":"pending-upgrade","chart":"kafka-ui-0.3.2","updated":"2026-01-01T10:00:00Z"},
 				{"name":"kafka-ui","namespace":"other-team","status":"pending-upgrade","chart":"kafka-ui-0.3.2"}]`), nil
 		case "helm history kafka-ui -n kafka -o json":
 			return []byte(`[{"revision":4,"status":"deployed","chart":"kafka-ui-0.3.1"},{"revision":5,"status":"pending-upgrade","chart":"kafka-ui-0.3.2"}]`), nil
@@ -212,6 +212,27 @@ func TestRecoverStuckReleases_YesSparesARecentOne(t *testing.T) {
 	}
 	runExecFn = func(context.Context, string, ...string) error {
 		t.Fatal("cleared a release another deploy may hold")
+		return nil
+	}
+	err := recoverStuckReleases(context.Background(), []DeploySummaryEntry{{Release: "kafka-ui", Namespace: "kafka"}})
+	if err == nil || !strings.Contains(err.Error(), "may still be running") {
+		t.Errorf("err = %v, want a refusal", err)
+	}
+}
+
+// Under --yes, a pending release whose age helm does not give is spared too.
+func TestRecoverStuckReleases_YesSparesAnUnknownAge(t *testing.T) {
+	origOut, origExec, origYes := runExecOutputFn, runExecFn, deployYes
+	t.Cleanup(func() { runExecOutputFn, runExecFn, deployYes = origOut, origExec, origYes })
+	deployYes = true
+	runExecOutputFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if args[0] == "list" {
+			return []byte(`[{"name":"kafka-ui","namespace":"kafka","status":"pending-install","chart":"kafka-ui-0.3.2","updated":"yesterday"}]`), nil
+		}
+		return []byte(`[{"revision":1,"status":"pending-install","chart":"kafka-ui-0.3.2"}]`), nil
+	}
+	runExecFn = func(context.Context, string, ...string) error {
+		t.Fatal("cleared a release of unknown age")
 		return nil
 	}
 	err := recoverStuckReleases(context.Background(), []DeploySummaryEntry{{Release: "kafka-ui", Namespace: "kafka"}})

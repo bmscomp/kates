@@ -145,10 +145,14 @@ func recoverStuckRelease(ctx context.Context, rec stuckRecovery, updated string)
 		return fmt.Errorf("%s Rolling it back downgrades what it runs, so deploy leaves that to you: %s", what, how)
 	}
 	output.Warn(what)
-	if deployYes && known && since < pendingGrace {
+	if deployYes && (!known || since < pendingGrace) {
 		// Unattended, nobody can say whether that run is still going.
-		return fmt.Errorf("release %s turned %s %s ago, so another deploy may still be running; wait, or run: %s",
-			rec.release, rec.status, humanDuration(since), cmd)
+		when := "at a time helm did not say"
+		if known {
+			when = humanDuration(since) + " ago"
+		}
+		return fmt.Errorf("release %s turned %s %s, so another deploy may still be running; wait, or run: %s",
+			rec.release, rec.status, when, cmd)
 	}
 	if !deployYes {
 		if !IsInteractive() {
@@ -170,11 +174,12 @@ func recoverStuckRelease(ctx context.Context, rec stuckRecovery, updated string)
 }
 
 // releaseSince is how long ago helm list's updated time was, and whether it
-// parsed.
+// parsed: helm prints Go's time.String layout; RFC 3339 is accepted too.
 func releaseSince(updated string) (time.Duration, bool) {
-	t, err := time.Parse("2006-01-02 15:04:05.999999999 -0700 MST", updated)
-	if err != nil {
-		return 0, false
+	for _, layout := range []string{"2006-01-02 15:04:05.999999999 -0700 MST", time.RFC3339Nano} {
+		if t, err := time.Parse(layout, updated); err == nil {
+			return time.Since(t), true
+		}
 	}
-	return time.Since(t), true
+	return 0, false
 }
