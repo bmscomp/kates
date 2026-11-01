@@ -274,3 +274,94 @@ func TestDeploy_FailedDependencyUpdateSurfacesStderr(t *testing.T) {
 		}
 	}
 }
+
+// A failure stops the scheduling, not the work under way: a sibling's
+// install keeps a live context (killing helm mid-install left its release
+// pending), a sibling's readiness wait is cut short, and nothing new starts.
+func TestRunComponents_FailureLetsRunningInstallsFinish(t *testing.T) {
+	origDL := dl
+	t.Cleanup(func() { dl = origDL })
+	dl = &DashboardController{}
+	dc := &deployContext{ctx: context.Background(), advanceStep: func() {}}
+
+	installing := make(chan struct{})
+	failed := make(chan struct{})
+	var installCtxErr, waitErr error
+	started := false
+	err := runComponents(context.Background(), dc, []component{
+		{id: "a", name: "A", install: func(ctx context.Context) error {
+			close(installing)
+			<-failed
+			installCtxErr = ctx.Err()
+			return nil
+		}, wait: func(ctx context.Context) error {
+			<-ctx.Done() // a wait that would run for minutes
+			waitErr = ctx.Err()
+			return waitErr
+		}},
+		{id: "b", name: "B", install: func(context.Context) error {
+			<-installing
+			defer close(failed)
+			return errors.New("helm: timed out")
+		}},
+		{id: "c", name: "C", deps: []string{"b"}, install: func(context.Context) error { started = true; return nil }},
+	})
+	if err == nil || !strings.Contains(err.Error(), "B: helm: timed out") {
+		t.Errorf("err = %v, want B's failure", err)
+	}
+	if installCtxErr != nil {
+		t.Errorf("A's install context was cancelled by B's failure: %v", installCtxErr)
+	}
+	if waitErr == nil {
+		t.Error("A's wait was not cut short")
+	}
+	if started {
+		t.Error("C started after B failed")
+	}
+}
+
+// Ctrl-C with nothing failed is still not a successful deploy.
+func TestRunComponents_InterruptedIsAnError(t *testing.T) {
+	origDL := dl
+	t.Cleanup(func() { dl = origDL })
+	dl = &DashboardController{}
+	dc := &deployContext{ctx: context.Background(), advanceStep: func() {}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	err := runComponents(ctx, dc, []component{
+		{id: "a", name: "A", install: func(context.Context) error { cancel(); return nil }},
+		{id: "b", name: "B", deps: []string{"a"}, install: func(context.Context) error {
+			t.Error("B started after the interrupt")
+			return nil
+		}},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+// A skip check that a sibling's failure cut short reads "not installed";
+// the component must not go on to install over its release.
+func TestRunComponents_CutSkipCheckDoesNotInstall(t *testing.T) {
+	origDL := dl
+	t.Cleanup(func() { dl = origDL })
+	dl = &DashboardController{}
+	dc := &deployContext{ctx: context.Background(), advanceStep: func() {}}
+
+	checking := make(chan struct{})
+	installed := false
+	_ = runComponents(context.Background(), dc, []component{
+		{id: "a", name: "A", installed: func(ctx context.Context) (bool, error) {
+			close(checking)
+			<-ctx.Done()
+			return false, nil // what a cancelled helm list reads as
+		}, install: func(context.Context) error { installed = true; return nil }},
+		{id: "b", name: "B", install: func(context.Context) error {
+			<-checking
+			return errors.New("boom")
+		}},
+	})
+	if installed {
+		t.Error("A installed after B's failure cut its skip check short")
+	}
+}

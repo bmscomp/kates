@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/bmscomp/kates/cli/output"
-	"golang.org/x/sync/errgroup"
 )
 
 // The deploy pipeline is a list of components run by one scheduler. Each
@@ -101,8 +100,12 @@ func (n *deployNode) markInstalled() {
 
 // runComponents runs the enabled components under their dependencies, at
 // most deployParallelism at a time, and returns the first failure. A failure
-// cancels the context the others run on; a component waiting on a failed one
-// never starts. A dependency on a component the flags left out is ignored.
+// stops the scheduling: nothing new starts, a component waiting on the failed
+// one never starts, and running readiness waits are cut short. Installs
+// already running finish, on ctx: killing helm mid-install left the release
+// pending, locked against the next deploy. Ctrl-C cancels ctx itself, which
+// stops those too (deployCommand sends helm SIGTERM). A dependency on a
+// component the flags left out is ignored.
 func runComponents(ctx context.Context, dc *deployContext, comps []component) error {
 	nodes := map[string]*deployNode{}
 	var order []*deployNode
@@ -119,16 +122,28 @@ func runComponents(ctx context.Context, dc *deployContext, comps []component) er
 		}
 	}
 
-	g, gCtx := errgroup.WithContext(ctx)
+	schedCtx, stopScheduling := context.WithCancel(ctx)
+	defer stopScheduling()
+	var (
+		firstErr error
+		failOnce sync.Once
+		wg       sync.WaitGroup
+	)
+	fail := func(err error) {
+		failOnce.Do(func() {
+			firstErr = err
+			stopScheduling()
+		})
+	}
 	sem := make(chan struct{}, deployParallelism)
 	for _, n := range order {
-		g.Go(func() error {
+		wg.Go(func() {
 			for _, dep := range n.deps {
 				if d, ok := nodes[dep]; ok {
 					select {
 					case <-d.done:
-					case <-gCtx.Done():
-						return gCtx.Err()
+					case <-schedCtx.Done():
+						return
 					}
 				}
 			}
@@ -136,34 +151,43 @@ func runComponents(ctx context.Context, dc *deployContext, comps []component) er
 				if d, ok := nodes[dep]; ok {
 					select {
 					case <-d.installed:
-					case <-gCtx.Done():
-						return gCtx.Err()
+					case <-schedCtx.Done():
+						return
 					}
 				}
 			}
 			select {
 			case sem <- struct{}{}:
-			case <-gCtx.Done():
-				return gCtx.Err()
+			case <-schedCtx.Done():
+				return
 			}
 			defer func() { <-sem }()
-			if err := dc.runComponent(gCtx, n); err != nil {
-				return err
+			if schedCtx.Err() != nil {
+				return // the semaphore and a failure were both ready
+			}
+			if err := dc.runComponent(ctx, schedCtx, n); err != nil {
+				fail(err)
+				return
 			}
 			n.markInstalled()
 			close(n.done)
-			return nil
 		})
 	}
-	return g.Wait()
+	wg.Wait()
+	if firstErr == nil {
+		return ctx.Err() // interrupted with nothing failed: still not a success
+	}
+	return firstErr
 }
 
 // runComponent is one component's life: the skip check, the dashboard start,
-// the credential copies, the install, the wait, the dashboard finish.
-func (dc *deployContext) runComponent(ctx context.Context, n *deployNode) error {
+// the credential copies, the install, the wait, the dashboard finish. The
+// install runs on ctx; everything else on schedCtx, which a failure elsewhere
+// cancels.
+func (dc *deployContext) runComponent(ctx, schedCtx context.Context, n *deployNode) error {
 	c := n.component
 	if c.installed != nil {
-		skip, err := c.installed(ctx)
+		skip, err := c.installed(schedCtx)
 		if err != nil {
 			return fmt.Errorf("%s: %w", c.name, err)
 		}
@@ -173,17 +197,26 @@ func (dc *deployContext) runComponent(ctx context.Context, n *deployNode) error 
 			return nil
 		}
 	}
+	// A failure elsewhere during the skip check: its "not installed" may be
+	// the cancellation talking, and nothing new starts after a failure.
+	if schedCtx.Err() != nil {
+		return nil
+	}
 	if c.banner != nil {
-		dl.Println(c.banner(ctx))
+		dl.Println(c.banner(schedCtx))
 	}
 	if c.id != "" {
 		dl.StartComponent(c.id, c.timeout)
 	}
-	if err := dc.copyCredentials(ctx, c); err != nil {
+	if err := dc.copyCredentials(schedCtx, c); err != nil {
 		dc.finish(c, false)
 		return fmt.Errorf("%s: %w", c.name, err)
 	}
 	if c.install != nil {
+		if schedCtx.Err() != nil {
+			dc.finish(c, false)
+			return nil
+		}
 		if err := c.install(ctx); err != nil {
 			dc.finish(c, false)
 			return fmt.Errorf("%s: %w", c.name, err)
@@ -192,7 +225,7 @@ func (dc *deployContext) runComponent(ctx context.Context, n *deployNode) error 
 	}
 	n.markInstalled()
 	if c.wait != nil {
-		switch err := c.wait(ctx); {
+		switch err := c.wait(schedCtx); {
 		case errors.Is(err, errNotReady):
 			dc.finish(c, false)
 			return nil

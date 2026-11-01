@@ -81,7 +81,7 @@ func TestInstalledRows(t *testing.T) {
 	t.Chdir(t.TempDir())
 	orig := runExecOutputFn
 	t.Cleanup(func() { runExecOutputFn = orig; deployUpgradeReleases = map[string]bool{} })
-	kafkaReady := "True"
+	kafkaReady := "1 1 True"
 	runExecOutputFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
 		if name == "kubectl" && strings.HasPrefix(strings.Join(args, " "), "get kafka "+deployKafkaName+" -n kafka") {
 			return []byte(kafkaReady), nil
@@ -136,7 +136,7 @@ func TestInstalledRows(t *testing.T) {
 		t.Errorf("an unticked upgradable release: got %q, want it kept", got)
 	}
 
-	kafkaReady = "False"
+	kafkaReady = "1 1 False"
 	want = []string{"Kafka (krafter) kafka-cluster-1.0.17 in kafka: its Kafka is not Ready, so this deploy reapplies kafka-cluster-1.0.18"}
 	if got := installedSummary(installedRows(context.Background(), entries[2:3], deployed)); strings.Join(got, "\n") != want[0] {
 		t.Errorf("a Kafka that is not Ready: got %q, want %q", got, want)

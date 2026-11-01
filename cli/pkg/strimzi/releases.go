@@ -14,6 +14,7 @@ type Release struct {
 	Chart      string `json:"chart"`       // "kafka-ui-0.3.1"
 	AppVersion string `json:"app_version"` // the chart's appVersion
 	Status     string `json:"status"`      // "deployed", "failed", "pending-upgrade", …
+	Updated    string `json:"updated"`     // "2026-11-01 10:00:00.123 +0000 UTC"
 }
 
 // Deployed says whether the release is in the deployed state. helm status

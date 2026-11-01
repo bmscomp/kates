@@ -527,22 +527,31 @@ func TestIsKafkaClusterReady(t *testing.T) {
 	var got string
 	runExecOutputFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
 		got = name + " " + strings.Join(args, " ")
-		return []byte("True"), nil
+		return []byte("4 4 True"), nil
 	}
 
 	if !isKafkaClusterReady(context.Background(), "kafka", "krafter") {
 		t.Fatal("expected Kafka CR to be ready")
 	}
-	want := `kubectl get kafka krafter -n kafka -o jsonpath={.status.conditions[?(@.type=="Ready")].status}`
+	want := `kubectl get kafka krafter -n kafka -o ` + kafkaReadyJSONPath
 	if got != want {
 		t.Fatalf("command = %q, want %q", got, want)
 	}
 
 	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) {
-		return []byte("False"), nil
+		return []byte("4 4 False"), nil
 	}
 	if isKafkaClusterReady(context.Background(), "kafka", "krafter") {
 		t.Fatal("expected Kafka CR without Ready=True to be not ready")
+	}
+
+	// Ready from the spec before this one: the operator has not reconciled
+	// the apply yet.
+	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("5 4 True"), nil
+	}
+	if isKafkaClusterReady(context.Background(), "kafka", "krafter") {
+		t.Fatal("expected a Ready from an older generation to be not ready")
 	}
 
 	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) {
@@ -807,11 +816,17 @@ func TestDeployGroupBReconcilesKafkaWhenReleaseExistsButCRNotReady(t *testing.T)
 	isHelmReleaseDeployedFn = func(context.Context, string, string) bool {
 		return true
 	}
+	kafkaReads := 0
 	runExecOutputFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
 		got := name + " " + strings.Join(args, " ")
 		switch {
-		case got == `kubectl get kafka krafter -n kafka -o jsonpath={.status.conditions[?(@.type=="Ready")].status}`:
-			return []byte("False"), nil
+		case got == `kubectl get kafka krafter -n kafka -o `+kafkaReadyJSONPath:
+			// Not Ready at the skip check; Ready after the reconcile.
+			kafkaReads++
+			if kafkaReads == 1 {
+				return []byte("2 2 False"), nil
+			}
+			return []byte("3 3 True"), nil
 		case strings.HasPrefix(got, "kubectl get pods -n kafka"):
 			return []byte("Running,"), nil // the readiness wait after the reconcile
 		}

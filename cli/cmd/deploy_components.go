@@ -437,15 +437,39 @@ func prometheusOperatorCRDsAvailable(ctx context.Context) bool {
 	return true
 }
 
+// isKafkaClusterReady reads the Kafka CR's Ready condition, which counts only
+// once the operator has reconciled the current spec (observedGeneration ==
+// generation): right after an apply the CR still carries the Ready of the
+// spec before it.
 func isKafkaClusterReady(ctx context.Context, namespace, name string) bool {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	out, err := runExecOutputFn(checkCtx,
 		"kubectl", "get", "kafka", name, "-n", namespace,
-		"-o", `jsonpath={.status.conditions[?(@.type=="Ready")].status}`,
+		"-o", kafkaReadyJSONPath,
 	)
-	return err == nil && strings.Contains(string(out), "True")
+	f := strings.Fields(string(out))
+	return err == nil && len(f) == 3 && f[0] == f[1] && f[2] == "True"
+}
+
+const kafkaReadyJSONPath = `jsonpath={.metadata.generation} {.status.observedGeneration} {.status.conditions[?(@.type=="Ready")].status}`
+
+// waitKafkaReady polls the Kafka CR until isKafkaClusterReady or deadline.
+// Running pods are not enough: the entity operator's carry the cluster label
+// too, and brokers run before they have joined.
+func waitKafkaReady(ctx context.Context, namespace, name string, deadline time.Time) error {
+	for !isKafkaClusterReady(ctx, namespace, name) {
+		if !deployClock.Now().Before(deadline) {
+			return fmt.Errorf("timeout waiting for Kafka %s/%s to report Ready for its current spec", namespace, name)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deployClock.After(silentPollInterval):
+		}
+	}
+	return nil
 }
 
 func kafkaConnectNeedsReconcile(ctx context.Context, namespace, name, expectedBootstrap, expectedKafkaSearch string) (bool, string) {
@@ -725,10 +749,6 @@ func applyCertMgrClusterIssuer(ctx context.Context) error {
 	const caTimeout = 180 * time.Second
 	const caPoll = 3 * time.Second
 	caDeadline := deployClock.Now().Add(caTimeout)
-	certMgrWebhookConfigs := []string{
-		"mutatingwebhookconfiguration",
-		"validatingwebhookconfiguration",
-	}
 	for {
 		injected := 0
 		for _, kind := range certMgrWebhookConfigs {
@@ -817,6 +837,31 @@ func restoreCertMgrWebhookPolicy(ctx context.Context, configs []string) {
 			`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Fail"}]`); err != nil {
 			dl.Printf("    ⚠ Could not restore failurePolicy: Fail on %s cert-manager-webhook: %v\n", kind, err)
 		}
+	}
+}
+
+// certMgrWebhookConfigs are the kinds of cert-manager's two webhook configs.
+var certMgrWebhookConfigs = []string{
+	"mutatingwebhookconfiguration",
+	"validatingwebhookconfiguration",
+}
+
+// restoreFailOpenCertMgrWebhook puts back a cert-manager webhook an earlier
+// run left at failurePolicy: Ignore. The deferred restore above does not run
+// when kates itself is killed, and a later deploy skips the installed
+// cert-manager, so the webhook used to stay fail-open for good.
+func restoreFailOpenCertMgrWebhook(ctx context.Context) {
+	var open []string
+	for _, kind := range certMgrWebhookConfigs {
+		out, err := runExecOutputFn(ctx, "kubectl", "get", kind, "cert-manager-webhook",
+			"-o", "jsonpath={.webhooks[0].failurePolicy}")
+		if err == nil && strings.TrimSpace(string(out)) == "Ignore" {
+			open = append(open, kind)
+		}
+	}
+	if len(open) > 0 {
+		dl.Println("    - An earlier deploy left the cert-manager webhook at failurePolicy: Ignore; restoring Fail")
+		restoreCertMgrWebhookPolicy(ctx, open)
 	}
 }
 
@@ -1125,7 +1170,11 @@ func (dc *deployContext) kafkaComponent() component {
 			return runHelmFn(ctx, kafkaArgs...)
 		},
 		wait: func(ctx context.Context) error {
+			deadline := deployClock.Now().Add(15 * time.Minute)
 			if err := dc.waitPods(ctx, kafkaNS, dc.primary.ReadySelector(), 15*time.Minute, ""); err != nil {
+				return fmt.Errorf("kafka readiness failed: %w", err)
+			}
+			if err := waitKafkaReady(ctx, kafkaNS, dc.primary.Name, deadline); err != nil {
 				return fmt.Errorf("kafka readiness failed: %w", err)
 			}
 			return nil
