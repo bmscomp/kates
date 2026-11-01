@@ -131,6 +131,8 @@ With `kyvernoPolicy.enabled=true`, the kafka-cluster chart renders one `ClusterP
 
 ## Installation
 
+Use this procedure on a cluster that runs no `kafka-cluster` release yet; to change one that runs, go to [Upgrading](#upgrading). Steps 1 and 2 create cluster-scoped objects, StorageClasses and the operator's CRDs and ClusterRoles, so they need cluster-admin. So does `kates deploy` in its full profile, which installs the operator and, on Kind, the StorageClasses; an account without cluster-admin uses [Deploying Without Cluster Admin](12-deployment.md#deploying-without-cluster-admin) instead. The chart itself needs rights to create every namespaced resource it renders in `kafka`, among them Strimzi resources, a Role, a RoleBinding and NetworkPolicies, which the `helm template` count in [Step 5 — Install the Chart](#step-5--install-the-chart) lists. It also creates a Velero `Schedule` and `Backup` in `backup.veleroNamespace` (default `velero`) when `backup.enabled` is set, and a cluster-scoped `ClusterPolicy` when `kyvernoPolicy.enabled` is set. Check the result with [Verification](#verification), and start from [Troubleshooting](#troubleshooting) when a step fails. A failed first install has no earlier revision to roll back to: remove it as [Full Removal (Including Data)](#full-removal-including-data) does and install again.
+
 The `helm` commands in this book install the published charts, which every release pushes to `oci://ghcr.io/bmscomp/charts` under their `Chart.yaml` names (`monitoring` is published as `kates-monitoring`), so they need no checkout of the repository. They name no `--version`, so Helm takes the latest release. Add `--version` to take another, as a version (`1.0.19`) or a range (`'^1'`); the [Version & Compatibility Matrix](appendix-d-versions.md) lists the chart versions this edition describes. An upgrade moves a release to the latest chart in the same way, so to change only its values, pass the version it runs, which `helm list` shows under `CHART`. A command that layers a chart's own `values-*.yaml` overlays first unpacks the chart with `helm pull … --untar`, which refuses a directory that already exists: remove an older copy first, or keep it when it is the version you want.
 
 ### Choosing the Operator Scope and Versions
@@ -357,7 +359,7 @@ helm history kafka-cluster -n kafka
 helm rollback kafka-cluster <revision> -n kafka
 ```
 
-Helm re-applies that revision's custom resources, and the operator rolls the brokers to match them, as it does for any change. A `KafkaTopic`, `KafkaUser` or `KafkaNodePool` that the failed revision added stays, because the chart marks them `helm.sh/resource-policy: keep`; delete it yourself if you mean it gone. A Kafka version upgrade has a rollback of its own, with a KRaft metadata caveat, in [Upgrade Playbook](18-upgrade-playbook.md#kafka-version-rollback).
+Helm re-applies that revision's custom resources, and the operator rolls the brokers to match them, as it does for any change. A `KafkaTopic`, `KafkaUser` or `KafkaNodePool` that the failed revision added stays, because the chart marks them `helm.sh/resource-policy: keep`; delete it yourself if you mean it gone. A first install has no earlier revision to return to: remove it as [Full Removal (Including Data)](#full-removal-including-data) does. A Kafka version upgrade has a rollback of its own, with a KRaft metadata caveat, in [Upgrade Playbook](18-upgrade-playbook.md#kafka-version-rollback).
 
 ## Verification
 
@@ -432,6 +434,8 @@ helm test kafka-cluster -n kafka --timeout 5m
 ```
 
 The suite runs a profiler and then up to eleven tiers in hook-weight order, from connectivity through to tiered storage; [Helm Test Suite (Profiler Plus 11 Tiers)](#helm-test-suite-profiler-plus-11-tiers) has the full tier table. Raise the timeout to `--timeout 15m` when tiered storage is enabled, because tier 11 waits for a local-retention sweep.
+
+When a check fails, find its symptom under [Troubleshooting](#troubleshooting) before you change anything.
 
 ## Connecting to Your Cluster
 
@@ -1512,7 +1516,7 @@ If tier 2 fails but tier 1 passes, the cause is usually authentication: check th
 
 ## Upgrading
 
-Every change to a running cluster is a Helm upgrade over the values its release already has.
+Every change to a running cluster is a Helm upgrade over the values its release already has. You need the same rights in `kafka` as the install, and a release that reports `deployed` in `helm list -n kafka`. A failed upgrade goes back as [Roll Back a Failed Upgrade](#roll-back-a-failed-upgrade) describes, and [Troubleshooting](#troubleshooting) covers the errors Helm prints.
 
 ### Upgrading Chart Values
 
@@ -1544,7 +1548,7 @@ kubectl get kafka krafter -n kafka \
   -o jsonpath='{.spec.kafka.version} {.status.kafkaMetadataVersion}{"\n"}'
 ```
 
-The operator applies the change with a rolling restart, one broker at a time, and the cluster stays available throughout.
+The operator applies the change with a rolling restart, one broker at a time, and the cluster stays available throughout. Verify it as after an install: the `Ready` condition of [Check Kafka CR Status](#check-kafka-cr-status), then `helm test kafka-cluster -n kafka`.
 
 ### Upgrading Kafka Version
 
@@ -1578,6 +1582,15 @@ kubectl get pods -n kafka -w
 
 The operator upgrades brokers one at a time, waiting for the ISR to heal before moving to the next broker. Test a Kafka version upgrade in a staging environment first: some versions change log format or protocol versions, which can affect client compatibility.
 
+When the roll ends, read the versions back from the resource's status. The first should be `<new-version>` and the second the metadata version you pinned:
+
+```bash
+kubectl get kafka krafter -n kafka \
+  -o jsonpath='{.status.kafkaVersion} {.status.kafkaMetadataVersion}{"\n"}'
+```
+
+Then check the `Ready` condition as in [Check Kafka CR Status](#check-kafka-cr-status). A cluster that stays `NotReady` after `kafkaVersion` changed usually asked for a version outside the operator's window, as [Kafka CR Stuck on `NotReady`](#kafka-cr-stuck-on-notready) explains.
+
 ## Uninstalling
 
 Removing the release does not remove the cluster, by design; removing the data is a separate, explicit teardown.
@@ -1596,7 +1609,7 @@ The chart sets `helm.sh/resource-policy: keep` on the `Kafka`, `KafkaNodePool`, 
 
 ### Full Removal (Including Data)
 
-To remove everything, PVCs included, delete what the release kept, in this order. The topics and users go first, while the Entity Operator still runs to clear their finalizers:
+Use this only to destroy the cluster and its data: Helm can't roll it back, because it deletes the release and the claims on the broker volumes. You need rights to delete the Strimzi resources, the PVCs and the `kafka` namespace. Delete what the release kept, in this order. The topics and users go first, while the Entity Operator still runs to clear their finalizers:
 
 ```bash
 # Remove the Helm release (skips protected resources)
@@ -1618,11 +1631,15 @@ kubectl delete pvc -l strimzi.io/cluster=krafter -n kafka
 kubectl delete namespace kafka
 ```
 
+The removal is done when `kubectl get namespace kafka` reports `NotFound`. The StorageClasses of [Step 1 — Storage Classes (Local/Kind Only)](#step-1--storage-classes-localkind-only) set `reclaimPolicy: Retain`, so their PersistentVolumes outlive the claims as `Released`. `kubectl get pv` lists them; delete them yourself to free the disk. The classes `kates deploy` creates on Kind set `Delete`, so their volumes go with the claims.
+
 ## Troubleshooting
 
-Four symptoms cover most failed installs.
+Four symptoms cover most failed installs and upgrades. Each entry names what you see, why, and the fix.
 
 ### Pods Stuck in `Pending`
+
+**Symptom:** broker or controller pods stay `Pending` in `kubectl get pods -n kafka`.
 
 **Cause:** no nodes match the `nodeAffinity` rules, or no StorageClass can provision PVCs. The pod's events say which:
 
@@ -1636,27 +1653,36 @@ Look for `FailedScheduling`: its message names the constraint that failed.
 
 ### Kafka CR Stuck on `NotReady`
 
-The `Kafka` resource's conditions name what the operator is waiting for:
+**Symptom:** the `Ready` condition of [Check Kafka CR Status](#check-kafka-cr-status) never turns `True`. The resource's conditions name what the operator is waiting for:
 
 ```bash
 kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions}' \
   | python3 -m json.tool
 ```
 
-The usual causes are three. The operator may not reach the controllers' admin API on port 9090, so check the NetworkPolicies; [Kafka Deployment Engineering](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) diagnoses this case step by step. The Strimzi CRDs may be missing, which `kubectl get crd kafkas.kafka.strimzi.io` shows. Or the cluster lacks resources, which the pod events from `kubectl describe pod` show.
+**Cause:** the usual causes are four. The operator may not reach the controllers' admin API on port 9090. The Strimzi CRDs may be missing. The cluster may lack resources. Or, after an upgrade, `kafkaVersion` asks for a version outside the running operator's window.
+
+**Fix:** for port 9090, check the NetworkPolicies; [Kafka Deployment Engineering](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) diagnoses this case step by step. `kubectl get crd kafkas.kafka.strimzi.io` shows whether the CRDs exist, and [Step 2 — Install the Strimzi Operator](#step-2--install-the-strimzi-operator) installs them. The pod events from `kubectl describe pod` show missing resources. For the version window, `kates versions` lists the Kafka versions each installed operator supports, and [Strimzi Operator Upgrade](18-upgrade-playbook.md#strimzi-operator-upgrade) moves the operator first.
 
 ### Helm Upgrade Fails With "another operation in progress"
 
-A previous upgrade or install was interrupted, and Helm reports `another operation (install/upgrade/rollback) is in progress`. Roll back first:
+**Symptom:** Helm reports `another operation (install/upgrade/rollback) is in progress`.
+
+**Cause:** a previous upgrade or install was interrupted, and the release is still marked as in progress.
+
+**Fix:** roll back first, then retry the upgrade:
 
 ```bash
 helm rollback kafka-cluster -n kafka
-# Then retry your upgrade
 ```
 
 ### User Secrets Not Appearing
 
-Secrets are created by the User Operator, which is part of the Entity Operator. The Entity Operator starts only after the `Kafka` resource reaches `Ready`, so until the cluster is ready no Secret appears.
+**Symptom:** `kubectl get secrets -n kafka` shows no Secret for a `KafkaUser`.
+
+**Cause:** Secrets are created by the User Operator, which is part of the Entity Operator. The Entity Operator starts only after the `Kafka` resource reaches `Ready`, so until the cluster is ready no Secret appears.
+
+**Fix:** check that the Entity Operator runs, and read its User Operator log:
 
 ```bash
 # Check if the entity operator is running
@@ -1669,7 +1695,9 @@ kubectl logs -n kafka -l strimzi.io/name=krafter-entity-operator \
 
 The same dependency chain, and the race it creates for consumers of those Secrets, is diagnosed in [Kafka Deployment Engineering](15-kafka-deployment.md#kafka-ui-createcontainerconfigerror).
 
-For the symptom-by-symptom index across the whole book, see the [Troubleshooting Index](appendix-b-troubleshooting.md).
+### When None of These Matches
+
+A symptom not listed here is often in the [Troubleshooting Index](appendix-b-troubleshooting.md#deployment-issues), under Deployment Issues and Upgrades. The operator's log says what it is doing with the resources: `kubectl logs deployment/strimzi-cluster-operator -n strimzi-operator --tail=50`. If the chart renders something wrong or refuses valid values, open an issue at <https://github.com/bmscomp/kates/issues> with the command you ran and its output.
 
 ## Quick Reference
 

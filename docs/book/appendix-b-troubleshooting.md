@@ -1,6 +1,12 @@
 # Troubleshooting Index
 
-This index gathers the troubleshooting procedures from across the book. Find your symptom, then follow its chapter link for the diagnosis and the fix.
+Find your symptom in the tables, then follow its chapter link for the diagnosis and the fix. When no row matches, the runbooks after the tables take you from a first snapshot of the cluster to an issue report.
+
+## How to Read an Entry
+
+Each symptom section opens with a sentence on when to look there, then a table: the symptom as you see it, with literal error strings in backticks; its likely cause; and the chapter section that diagnoses and fixes it. [Kates Commands and Results](#kates-commands-and-results) gives the fix itself in its third column, since each is a command or two.
+
+[Quick Diagnostic Commands](#quick-diagnostic-commands), the [Connectivity Debugging Flowchart](#connectivity-debugging-flowchart) and [Kafka Tools Inside a Broker Pod](#kafka-tools-inside-a-broker-pod) are runbooks. Each says when to use it and the access it needs, then gives numbered steps, how to verify the result, how to roll back and where to go when it fails. [When to Escalate](#when-to-escalate) says which layer a symptom points at, and how to open an issue.
 
 ## Kafka Cluster
 
@@ -101,9 +107,79 @@ Something that worked before an operator or Kafka upgrade fails or slows down af
 | Topics not reconciling after CRD API change | CRDs still using deprecated `v1beta2` | [Upgrade Playbook](18-upgrade-playbook.md#strimzi-operator-upgrade) |
 | Performance regression after Kafka upgrade | New version defaults changed — compare baseline tests | [Upgrade Playbook](18-upgrade-playbook.md#post-upgrade-checks) |
 
+## Kates Commands and Results
+
+The stack is up and the Kates API answers, but a command or a test result isn't what you expect.
+
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| `kates cluster topology` fails with "The Kates API's service account may not list pods in" the Kafka namespace | The Kates API may not read the Kafka namespace: a cluster-scoped install is missing its `ClusterRoleBinding`, or an admin-less one (`rbac.scope=namespace`) went in without the chart's Kafka-reader Role, because the installer lacked its reads | Cluster scope: verify RBAC with `kubectl get clusterrolebinding kates`, and if it's missing, redeploy with `helm upgrade --install kates oci://ghcr.io/bmscomp/charts/kates -n kates`. Admin-less: an account that holds those reads in the Kafka namespace applies the Role, with the command `kates deploy` printed |
+| `kates cluster topology` warns "Kubernetes refused some reads" and some sections are empty | The Kates API may read only part of the cluster. An admin-less install's Role grants what a compliance check reads, and nodes are cluster-scoped, so topics, users, Connect, services and the node list stay unread | Expected in admin-less mode. Each line names the refused read; to see that section, grant the read with a Role in the Kafka namespace |
+| Test results show 0 records consumed even though producers succeeded | Consumer group hasn't started consuming, or topic has no committed offsets for the group | Check consumer lag: `kates kafka group <group-name>`. If lag equals total records, the consumer never started — check the Kates API's logs for consumer errors |
+| `kates trend` shows no data even after running tests | A trend reads only the type's `DONE` runs created within `--days`; `FAILED` runs and runs still in flight are left out | Check the runs' status with `kates test list --type <TYPE>`, and widen `--days` for older runs |
+
+## Quick Diagnostic Commands
+
+Use this first, when something is wrong and you don't yet know which layer. It takes a snapshot of the Strimzi resources and pods, the operator and broker logs, the Kafka conditions, partition health through the Kates API, and Kyverno's policies and violations. It assumes the chart defaults: cluster `krafter` in namespace `kafka`, and the operator in `strimzi-operator`. You need `kubectl` read access (get, logs) in both namespaces, and a [CLI context](appendix-a-glossary.md#gl-cli-context) that reaches the Kates API with its API key. Every step only reads, so there's nothing to roll back.
+
+1. List the Strimzi resources.
+
+   ```bash
+   kubectl get kafka,kafkanodepool,kafkatopic,kafkauser -n kafka
+   ```
+
+   The `Kafka` resource's `READY` column should read `True`.
+
+2. List the pods and the nodes they run on.
+
+   ```bash
+   kubectl get pods -n kafka -o wide
+   ```
+
+   A pod that isn't `Running`, or whose restart count climbs, is the one whose logs steps 3 and 4 read.
+
+3. Read the last 50 lines of the Strimzi operator's log. The operator is its own release, in its own namespace.
+
+   ```bash
+   kubectl logs deployment/strimzi-cluster-operator -n strimzi-operator --tail=50
+   ```
+
+4. Read the log of a broker's last crash.
+
+   ```bash
+   kubectl logs <broker-pod> -n kafka --previous --tail=30
+   ```
+
+5. Print the `Kafka` resource's status conditions.
+
+   ```bash
+   kubectl get kafka krafter -n kafka \
+     -o jsonpath='{range .status.conditions[*]}{.type}: {.status} - {.message}{"\n"}{end}'
+   ```
+
+   Each line prints a condition's type, status and message; a healthy cluster shows `Ready: True`.
+
+6. Check for under-replicated and offline partitions, through the Kates API.
+
+   ```bash
+   kates cluster check
+   ```
+
+7. Show Kyverno's policy status, then its violations, in every namespace or in one.
+
+   ```bash
+   kates kyverno status
+   kates kyverno violations
+   kates kyverno violations --namespace kafka
+   ```
+
+The snapshot is complete when every command has answered. Match what it shows against the tables above; a cluster that looks healthy while a client still can't connect goes on to the [Connectivity Debugging Flowchart](#connectivity-debugging-flowchart). When `kates cluster check` or the Kyverno commands can't reach the Kates API, see [CLI Issues](#cli-issues).
+
 ## Connectivity Debugging Flowchart
 
-When you can't connect to Kafka, work through this decision tree. The commands here and in [Quick Diagnostic Commands](#quick-diagnostic-commands) assume the chart defaults: cluster name `krafter` in namespace `kafka` (set in `charts/kafka-cluster/values.yaml`); adjust them if your deployment overrides these values.
+Use this when a client can't connect to `krafter`, the Kafka cluster under test: `kates health` reports the Kafka Cluster status `DOWN`, or your own client times out. The commands assume the chart defaults: cluster name `krafter` in namespace `kafka` (set in `charts/kafka-cluster/values.yaml`); adjust them if your deployment overrides these values. You need `kubectl` read access in `kafka` and `kube-system`, Secrets in `kafka` included for the authentication check.
+
+The decision tree shows the order of the checks, and the steps after it give each check's command:
 
 ```mermaid
 %%| label: fig-troubleshooting-connectivity-tree
@@ -131,6 +207,121 @@ flowchart TD
     D -->|Yes| E["Connection works!<br/>Check application config"]
 ```
 
+1. Check that the Kafka pods are running.
+
+   ```bash
+   kubectl get pods -n kafka
+   ```
+
+   When every pod is `Running` and ready, go to step 4. A pod in `Pending` goes to step 2, and one that restarts goes to step 3.
+
+2. For a `Pending` pod, check its storage claims.
+
+   ```bash
+   kubectl get pvc -n kafka
+   ```
+
+   A claim that stays `Pending` means the StorageClass can't provision it: see [Kafka Pods Not Starting](12-deployment.md#kafka-pods-not-starting).
+
+3. For a restarting pod, read the log of its last crash.
+
+   ```bash
+   kubectl logs <pod> -n kafka --previous
+   ```
+
+   Look the error up in [Kafka Cluster](#kafka-cluster) above.
+
+4. When the client can't reach the bootstrap service, check whether a NetworkPolicy blocks its namespace.
+
+   ```bash
+   kubectl get networkpolicy -n kafka
+   ```
+
+   When one blocks it, add an ingress rule from your namespace to port 9092, as [Network Policies](17-security.md#network-policies) in Security & Compliance explains. When none does, go on to step 5.
+
+5. Check that the bootstrap service's name resolves, from a pod in the client's namespace.
+
+   ```bash
+   nslookup krafter-kafka-bootstrap.kafka
+   ```
+
+   When it doesn't resolve, check that the CoreDNS pods are running with `kubectl get pods -n kube-system`. When it resolves, go on to step 6.
+
+6. Check the port-forward or NodePort the client connects through. A forward from your machine looks like this:
+
+   ```bash
+   kubectl port-forward svc/krafter-kafka-bootstrap 9092:9092 -n kafka
+   ```
+
+7. When the client reaches the service but authentication fails, check its SCRAM credentials and that its `KafkaUser` is reconciled.
+
+   ```bash
+   kubectl get secret <user> -n kafka
+   kubectl get kafkauser -n kafka
+   ```
+
+   A missing Secret means the User Operator hasn't reconciled the `KafkaUser`: see [User Secrets Not Appearing](20-installation-guide.md#user-secrets-not-appearing).
+
+The fix worked when the client connects, or when `kates health` shows the Kafka Cluster status `UP`. The checks only read; the port-forward from step 6 stops with Ctrl+C. When every check passes and the client still fails, check its own configuration, then [When to Escalate](#when-to-escalate).
+
+## Kafka Tools Inside a Broker Pod
+
+Use this when a question needs Kafka's own tools, such as `kafka-topics.sh` or `kafka-consumer-groups.sh`, rather than `kates cluster check` or `kates kafka groups`. The tools under `/opt/kafka/bin` need credentials. Both internal listeners authenticate (SCRAM-SHA-512 on 9092, mutual TLS on 9093), and the brokers enforce ACLs. Without credentials `kafka-topics.sh` retries until it times out, prints an `Error while executing topic command` line to standard output and exits 1, so a filter after it shows nothing and a broken command reads like a healthy cluster.
+
+The platform profile makes the `kates-backend` KafkaUser a super user, so it can describe every topic, its configuration and every consumer group. You need `kubectl` access in `kafka` to read that user's Secret and to exec into a broker pod.
+
+1. Pick a broker pod.
+
+   ```bash
+   BROKER=$(kubectl get pods -n kafka -o name \
+     -l strimzi.io/cluster=krafter,strimzi.io/broker-role=true | head -1)
+   ```
+
+2. Read the `kates-backend` user's JAAS configuration from its Secret.
+
+   ```bash
+   JAAS=$(kubectl get secret kates-backend -n kafka \
+     -o jsonpath='{.data.sasl\.jaas\.config}' | base64 -d)
+   ```
+
+3. Write a client configuration into the pod. It goes to the pod's memory-backed `/tmp`, so it's gone when the pod restarts.
+
+   ```bash
+   kubectl exec -i -n kafka "${BROKER}" -- sh -c 'cat > /tmp/client.properties' <<EOF
+   security.protocol=SASL_PLAINTEXT
+   sasl.mechanism=SCRAM-SHA-512
+   sasl.jaas.config=${JAAS}
+   EOF
+   ```
+
+4. Prove the credentials work by listing the topics.
+
+   ```bash
+   kubectl exec -n kafka "${BROKER}" -- /opt/kafka/bin/kafka-topics.sh \
+     --bootstrap-server localhost:9092 --command-config /tmp/client.properties --list
+   ```
+
+   The list includes `__consumer_offsets`. A timeout followed by `Error while executing topic command` means the configuration is wrong: repeat steps 2 and 3.
+
+5. Run the tool you need with the same two flags: here the under-replicated partitions, where no output means none, and the consumer lag.
+
+   ```bash
+   kubectl exec -n kafka "${BROKER}" -- /opt/kafka/bin/kafka-topics.sh \
+     --bootstrap-server localhost:9092 --command-config /tmp/client.properties \
+     --describe --under-replicated-partitions
+   kubectl exec -n kafka "${BROKER}" -- /opt/kafka/bin/kafka-consumer-groups.sh \
+     --bootstrap-server localhost:9092 --command-config /tmp/client.properties \
+     --all-groups --describe
+   ```
+
+6. Remove the client configuration, which carries a super user's password.
+
+   ```bash
+   kubectl exec -n kafka "${BROKER}" -- rm /tmp/client.properties
+   ```
+
+Step 4's topic list verifies the setup, and step 6 rolls it back; nothing else changes. When step 4 still fails, check that the Secret exists with `kubectl get secret kates-backend -n kafka`, then see [When to Escalate](#when-to-escalate). `kates kafka groups` and `kates kafka group <group-name>` answer the lag question through the Kates API without a broker pod.
+
 ## When to Escalate
 
 Not every problem is a Kates problem. This table maps each symptom pattern to the layer to check first:
@@ -144,88 +335,9 @@ Not every problem is a Kates problem. This table maps each symptom pattern to th
 | Latency numbers are unreasonably high for all tests | **Infrastructure** | Check node CPU/memory pressure, disk I/O, network bandwidth |
 | Everything works locally but fails in CI | **CI environment** | Check resource limits, network access, Docker-in-Docker configuration |
 
-::: {.callout-tip}
-When filing an issue, include the output of `kates doctor`, which runs its diagnostic checks and prints one summary of the system's health.
-:::
-
-## Common Issues (Additional)
-
-The stack is up and the Kates API answers, but a command or a test result isn't what you expect.
-
-| Symptom | Likely Cause | Fix |
-|---------|-------------|-----|
-| `kates cluster topology` fails with "The Kates API's service account may not list pods in" the Kafka namespace | The Kates API may not read the Kafka namespace: a cluster-scoped install is missing its `ClusterRoleBinding`, or an admin-less one (`rbac.scope=namespace`) went in without the chart's Kafka-reader Role, because the installer lacked its reads | Cluster scope: verify RBAC with `kubectl get clusterrolebinding kates`, and if it's missing, redeploy with `helm upgrade --install kates oci://ghcr.io/bmscomp/charts/kates -n kates`. Admin-less: an account that holds those reads in the Kafka namespace applies the Role, with the command `kates deploy` printed |
-| `kates cluster topology` warns "Kubernetes refused some reads" and some sections are empty | The Kates API may read only part of the cluster. An admin-less install's Role grants what a compliance check reads, and nodes are cluster-scoped, so topics, users, Connect, services and the node list stay unread | Expected in admin-less mode. Each line names the refused read; to see that section, grant the read with a Role in the Kafka namespace |
-| Test results show 0 records consumed even though producers succeeded | Consumer group hasn't started consuming, or topic has no committed offsets for the group | Check consumer lag: `kates kafka group <group-name>`. If lag equals total records, the consumer never started — check the Kates API's logs for consumer errors |
-| `kates trend` shows no data even after running tests | A trend reads only the type's `DONE` runs created within `--days`; `FAILED` runs and runs still in flight are left out | Check the runs' status with `kates test list --type <TYPE>`, and widen `--days` for older runs |
-
-## Quick Diagnostic Commands
-
-Run these for a first snapshot: the Strimzi resources and pods, the operator and broker logs, the Kafka conditions, partition health through the Kates API, and Kyverno's policies and violations.
+When the layer is Kates itself, or no runbook here settles it, open an issue at [github.com/bmscomp/kates/issues](https://github.com/bmscomp/kates/issues). Include the step that failed and its error, the output of `kates doctor`, which runs its diagnostic checks and prints one summary of the system's health, and the Kates API's logs:
 
 ```bash
-# Cluster overview
-kubectl get kafka,kafkanodepool,kafkatopic,kafkauser -n kafka
-
-# Pod health
-kubectl get pods -n kafka -o wide
-
-# Strimzi operator logs (last 50 lines) — the operator is its own release,
-# in its own namespace
-kubectl logs deployment/strimzi-cluster-operator -n strimzi-operator --tail=50
-
-# Broker logs (last crash)
-kubectl logs <broker-pod> -n kafka --previous --tail=30
-
-# Kafka status conditions
-kubectl get kafka krafter -n kafka -o jsonpath='{range .status.conditions[*]}{.type}: {.status} - {.message}{"\n"}{end}'
-
-# Under-replicated and offline partitions, through the Kates API
-kates cluster check
-
-# Kyverno policy status
-kates kyverno status
-
-# Kyverno violations (all namespaces)
-kates kyverno violations
-
-# Kyverno violations (specific namespace)
-kates kyverno violations --namespace kafka
+kates doctor
+kubectl logs -n kates -l app=kates --tail=200
 ```
-
-### Kafka Tools Inside a Broker Pod
-
-The tools under `/opt/kafka/bin` need credentials. Both internal listeners authenticate (SCRAM-SHA-512 on 9092, mutual TLS on 9093), and the brokers enforce ACLs. Without credentials `kafka-topics.sh` retries until it times out, prints an `Error while executing topic command` line to standard output and exits 1, so a filter after it shows nothing and a broken command reads like a healthy cluster. The platform profile makes the `kates-backend` KafkaUser a super user, so it can describe every topic, its configuration and every consumer group. Build one client configuration from that user's Secret and pass it to each tool with `--command-config`:
-
-```bash
-BROKER=$(kubectl get pods -n kafka -l strimzi.io/cluster=krafter,strimzi.io/broker-role=true -o name | head -1)
-JAAS=$(kubectl get secret kates-backend -n kafka -o jsonpath='{.data.sasl\.jaas\.config}' | base64 -d)
-
-# Written to the pod's memory-backed /tmp, so it is gone when the pod restarts
-kubectl exec -i -n kafka "${BROKER}" -- sh -c 'cat > /tmp/client.properties' <<EOF
-security.protocol=SASL_PLAINTEXT
-sasl.mechanism=SCRAM-SHA-512
-sasl.jaas.config=${JAAS}
-EOF
-
-# Prove the credentials work: this lists the topics, __consumer_offsets included
-kubectl exec -n kafka "${BROKER}" -- /opt/kafka/bin/kafka-topics.sh \
-  --bootstrap-server localhost:9092 --command-config /tmp/client.properties --list
-```
-
-Then every tool takes the same two flags:
-
-```bash
-# Under-replicated partitions — no output means none, once --list above succeeded
-kubectl exec -n kafka "${BROKER}" -- /opt/kafka/bin/kafka-topics.sh \
-  --bootstrap-server localhost:9092 --command-config /tmp/client.properties \
-  --describe --under-replicated-partitions
-
-# Consumer lag
-kubectl exec -n kafka "${BROKER}" -- /opt/kafka/bin/kafka-consumer-groups.sh \
-  --bootstrap-server localhost:9092 --command-config /tmp/client.properties \
-  --all-groups --describe
-```
-
-`kates kafka groups` and `kates kafka group <group-name>` answer the lag question through the Kates API without a broker pod. The client configuration carries a super user's password: it stays in the broker pod, and `kubectl exec -n kafka "${BROKER}" -- rm /tmp/client.properties` removes it when you are done.
-

@@ -122,7 +122,7 @@ helm upgrade --install strimzi-operator oci://ghcr.io/bmscomp/charts/strimzi-ope
 
 That is the whole install. No `--set` flags: the defaults already reproduce what the platform runs. Without `--version` Helm takes the latest published chart, whose `Chart.yaml` pins the Strimzi version. The repository's deploy scripts run this same command on every run, because the CRD hook is a `pre-upgrade` gate, and skipping the upgrade when the operator already exists is what freezes the CRDs.
 
-On a scratch cluster, install the operator with the Kind overlay and read three facts back, without deploying a single Kafka broker:
+On a scratch Kind cluster, install from the pulled chart with the Kind overlay instead, which fits a laptop:
 
 ```bash
 helm pull oci://ghcr.io/bmscomp/charts/strimzi-operator --untar
@@ -130,7 +130,11 @@ helm upgrade --install strimzi-operator ./strimzi-operator \
   --namespace strimzi-operator --create-namespace \
   -f strimzi-operator/values-kind.yaml \
   --timeout 5m --wait
+```
 
+Whichever way you installed, verify it by reading three facts back, without deploying a single Kafka broker:
+
+```bash
 SCOPE='{.spec.template.spec.containers[0].env[?(@.name=="STRIMZI_NAMESPACE")].value}'
 IMAGES='{.spec.template.spec.containers[0].env[?(@.name=="STRIMZI_KAFKA_IMAGES")].value}'
 EST='{range .items[*]}{.metadata.name}: '
@@ -152,6 +156,8 @@ helm test strimzi-operator -n strimzi-operator
 ::: {.callout-tip title="Try it: does the install match what the chart claims?"}
 The watch scope should print `*`, all ten CRDs should report `True`, and the image map should show each supported Kafka version pointing at an operand image tagged with the operator's own version. That coupling is what makes every operator upgrade a data-plane roll. The hook's own log isn't part of the check: Helm deletes a hook Job once it succeeds, so the CRDs are the evidence that it ran.
 :::
+
+A fresh install that fails has no Kafka resource to protect yet. Once `kubectl get kafka,kafkaconnect,kafkamirrormaker2,kafkabridge -A` lists none, roll it back with steps 3 and 4 of [Decommissioning](#decommissioning), then install again. When the install or `helm test` fails, find the error under [Troubleshooting](#troubleshooting).
 
 ### Environment Overlays
 
@@ -234,6 +240,8 @@ The drain cleaner takes its certificate from cert-manager (`drainCleaner.tls.cer
 ## Adopting an Operator Installed from the Upstream Chart {#migrating-from-the-ad-hoc-install}
 
 If Strimzi already runs from `oci://quay.io/strimzi-helm/strimzi-kafka-operator`, installed under the release name `strimzi-operator` in the `strimzi-operator` namespace, this chart adopts that release in place. The release name, the namespace and every resource name are the same in both charts, so Helm patches fields in place. Nothing is recreated, and nothing is deleted.
+
+You need cluster-admin, as for a fresh install. Step 0's replication gate also execs into a broker pod and reads the `kates-backend` Secret in `kafka`. Steps 0 to 2 change nothing, so a failed gate or dry run ends the procedure there. Step 3a only pauses reconciliation, and the unpause loop of Step 3c releases it. From Step 3b on, [Rollback](#rollback) returns the release, and [Troubleshooting](#troubleshooting) lists the errors each step can print.
 
 ### Step 0 — Pre-Flight
 
@@ -599,7 +607,7 @@ Rolling back at [Step 3b](#step-3b--upgrade-the-control-plane-only), while every
 
 ## Decommissioning
 
-Retiring Strimzi from a cluster is the one time the CRDs go, and the order is what keeps the retirement from destroying something you meant to keep. Remove the workloads while the operator still runs, so it can clear what it created, then the operator, then the CRDs:
+Retiring Strimzi from a cluster is the one time the CRDs go, and the order is what keeps the retirement from destroying something you meant to keep. It needs cluster-admin, and nothing rolls it back: a CRD backup such as Step 0's restores schemas, not the resources deleted with them. Remove the workloads while the operator still runs, so it can clear what it created, then the operator, then the CRDs:
 
 1. Uninstall each Kafka cluster's release and delete the resources its chart keeps; [Full Removal (Including Data)](20-installation-guide.md#full-removal-including-data) has the commands. Delete a cluster's `KafkaTopic` and `KafkaUser` resources before its `Kafka` resource, while the Entity Operator still runs to clear their finalizers.
 2. Delete every remaining `KafkaConnect`, `KafkaMirrorMaker2`, `KafkaBridge` and `Kafka` resource, and wait until `kubectl get kafka,kafkaconnect,kafkamirrormaker2,kafkabridge -A` lists none and none of their pods remain.
@@ -613,7 +621,7 @@ kubectl get crd -l strimzi.io/crd-install=true
 kubectl delete crd -l strimzi.io/crd-install=true
 ```
 
-A persistent volume claim whose storage sets `deleteClaim: false` survives all of this. Delete those claims yourself when you mean to destroy the data.
+The retirement is done when `kubectl get crd -l strimzi.io/crd-install=true` lists none. A persistent volume claim whose storage sets `deleteClaim: false` survives all of this. Delete those claims yourself when you mean to destroy the data.
 
 ## Troubleshooting
 
@@ -699,7 +707,7 @@ helm get values strimzi-operator -n strimzi-operator
 
 `helm test strimzi-operator -n strimzi-operator` asserts this automatically; it is the reason the watch-scope test exists.
 
-For the symptom-by-symptom index across the whole book, see the [Troubleshooting Index](appendix-b-troubleshooting.md).
+When none of these entries matches, read the operator's log, `kubectl logs deployment/strimzi-cluster-operator -n strimzi-operator --tail=50`, and the conditions of the resource that stopped. The [Troubleshooting Index](appendix-b-troubleshooting.md#upgrades) lists more symptoms across the whole book. If the chart or its hook misbehaves, open an issue at <https://github.com/bmscomp/kates/issues> with the command you ran and its output.
 
 ## Summary
 

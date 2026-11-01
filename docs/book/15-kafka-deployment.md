@@ -13,54 +13,16 @@ After this chapter, you can:
 - Trace how [listeners](appendix-a-glossary.md#gl-listener), [`KafkaUser`](appendix-a-glossary.md#gl-kafkauser) credentials, and [NetworkPolicies](appendix-a-glossary.md#gl-networkpolicy) compose the cluster's security posture, and which ports the shipped policies leave open
 - Diagnose the common Strimzi failure modes, from empty-egress NetworkPolicies to missing user Secrets
 
-## Strimzi Operator
+## Design Goals
 
-Kafka on Kubernetes is managed by the [Strimzi](appendix-a-glossary.md#gl-strimzi) Cluster Operator, installed into its own `strimzi-operator` namespace from the repository's wrapper chart, `charts/strimzi-operator`. The [Version & Compatibility Matrix](appendix-d-versions.md) gives the operator and chart versions. Both install scripts, `scripts/deploy-kafka.sh` and the `scripts/deploy-kafka-generic.sh` that `make kafka` runs, install the operator this way on every deploy:
+Every number in `krafter`'s definition serves one of four goals:
 
-```bash
-helm dependency build charts/strimzi-operator
-helm upgrade --install strimzi-operator charts/strimzi-operator \
-  --namespace strimzi-operator \
-  --reset-values \
-  --timeout 10m --wait
-```
+- Keep accepting acknowledged writes through the loss of one controller or one broker, with one broker per zone
+- Keep latency predictable, so a slow run points at Kafka rather than at a heap resize or an eviction
+- Keep the data recoverable when a pod, a volume or an upgrade goes wrong
+- Confine the cluster's traffic to the clients that need it, and know where the shipped policies leave it open
 
-The wrapper declares the upstream `strimzi-kafka-operator` chart as a subchart, which is why `helm dependency build` comes first. Its CRD-upgrade hook owns the Strimzi CRDs across upgrades, and pinned defaults cover `watchAnyNamespace`, replicas, resources and reconciliation timeouts. A strict values schema nests every operator setting under `strimzi-kafka-operator:`. It also ships the optional Drain Cleaner and the operator's PodMonitor, alerts and dashboards. The install is unconditional on purpose: the hook keeps the CRDs current, and skipping the upgrade would freeze them at the version that first installed them. The full lifecycle — adoption, upgrade, rollback, namespace scope — is [Deploying the Strimzi Operator](deploying-strimzi-operator.md).
-
-Strimzi watches for `Kafka`, `KafkaNodePool`, [`KafkaTopic`](appendix-a-glossary.md#gl-kafkatopic) and `KafkaUser` custom resources. It reconciles the desired state into [StrimziPodSets](appendix-a-glossary.md#gl-strimzipodset), which manage each Kafka node's pod on its own so the operator can roll one broker at a time, and into ConfigMaps, Secrets and Services.
-
-### Reconciliation Loop
-
-When you apply or update a `Kafka` custom resource, the Strimzi Cluster Operator diffs the desired spec against the live cluster state and orchestrates rolling updates until every pod reports ready:
-
-```mermaid
-%%| label: fig-kde-reconciliation-loop
-%%| fig-cap: "Strimzi Cluster Operator reconciliation loop from custom resource apply through rolling pod restart to Ready status."
-%%| fig-alt: "Sequence diagram showing kubectl or GitOps applying a Kafka CR to the Kubernetes API, which sends a watch event to the Strimzi Operator. The operator diffs current versus desired state, updates ConfigMaps, Secrets, and StrimziPodSets, triggers a rolling restart on Kafka Pods if configuration changed, waits for the Ready signal, and updates the Kafka status to Ready: True."
-sequenceDiagram
-    participant User as kubectl / GitOps
-    participant Operator as Strimzi Operator
-    participant K8s as Kubernetes API
-    participant Pods as Kafka Pods
-
-    User->>K8s: Apply Kafka CR
-    K8s->>Operator: Watch event
-    Operator->>Operator: Diff current vs desired state
-    Operator->>K8s: Update ConfigMaps, Secrets, StrimziPodSets
-    K8s->>Pods: Rolling restart (if config changed)
-    Pods-->>Operator: Ready signal
-    Operator->>K8s: Update Kafka status → Ready: True
-```
-
-What a change costs depends on the key:
-
-| Change | What Strimzi does |
-|--------------------------|--------------------------------------------------|
-| A dynamic broker setting, such as `num.io.threads` or `log.retention.bytes` | Applies it to the running brokers, with no restart |
-| A static setting, a listener, JVM options, the image or the Kafka version | Rolls the pods, one at a time |
-| Storage | Grows a PVC where the StorageClass allows expansion, and never shrinks one |
-
-The operator also re-checks the cluster every 120 seconds by default, whether or not a resource changed.
+[Prometheus Alerts](#prometheus-alerts) maps each decision to the alerts that fire when it fails.
 
 ## Cluster Architecture
 
@@ -127,6 +89,55 @@ Three brokers, one per zone, is what four other settings need:
 | Satisfies [`min.insync.replicas`](appendix-a-glossary.md#gl-min-insync-replicas)`: 2` | Survives 1 broker failure while accepting writes |
 | Enables rack awareness | Each broker pinned to a different zone (alpha, sigma, gamma) |
 | Balanced partition leadership | Each broker leads a third of the partitions |
+
+## Strimzi Operator
+
+Kafka on Kubernetes is managed by the [Strimzi](appendix-a-glossary.md#gl-strimzi) Cluster Operator, installed into its own `strimzi-operator` namespace from the repository's wrapper chart, `charts/strimzi-operator`. The [Version & Compatibility Matrix](appendix-d-versions.md) gives the operator and chart versions. Both install scripts, `scripts/deploy-kafka.sh` and the `scripts/deploy-kafka-generic.sh` that `make kafka` runs, install the operator this way on every deploy:
+
+```bash
+helm dependency build charts/strimzi-operator
+helm upgrade --install strimzi-operator charts/strimzi-operator \
+  --namespace strimzi-operator \
+  --reset-values \
+  --timeout 10m --wait
+```
+
+The wrapper declares the upstream `strimzi-kafka-operator` chart as a subchart, which is why `helm dependency build` comes first. Its CRD-upgrade hook owns the Strimzi CRDs across upgrades, and pinned defaults cover `watchAnyNamespace`, replicas, resources and reconciliation timeouts. A strict values schema nests every operator setting under `strimzi-kafka-operator:`. It also ships the optional Drain Cleaner and the operator's PodMonitor, alerts and dashboards. The install is unconditional on purpose: the hook keeps the CRDs current, and skipping the upgrade would freeze them at the version that first installed them. The full lifecycle — adoption, upgrade, rollback, namespace scope — is [Deploying the Strimzi Operator](deploying-strimzi-operator.md).
+
+Strimzi watches for `Kafka`, `KafkaNodePool`, [`KafkaTopic`](appendix-a-glossary.md#gl-kafkatopic) and `KafkaUser` custom resources. It reconciles the desired state into [StrimziPodSets](appendix-a-glossary.md#gl-strimzipodset), which manage each Kafka node's pod on its own so the operator can roll one broker at a time, and into ConfigMaps, Secrets and Services.
+
+### Reconciliation Loop
+
+When you apply or update a `Kafka` custom resource, the Strimzi Cluster Operator diffs the desired spec against the live cluster state and orchestrates rolling updates until every pod reports ready:
+
+```mermaid
+%%| label: fig-kde-reconciliation-loop
+%%| fig-cap: "Strimzi Cluster Operator reconciliation loop from custom resource apply through rolling pod restart to Ready status."
+%%| fig-alt: "Sequence diagram showing kubectl or GitOps applying a Kafka CR to the Kubernetes API, which sends a watch event to the Strimzi Operator. The operator diffs current versus desired state, updates ConfigMaps, Secrets, and StrimziPodSets, triggers a rolling restart on Kafka Pods if configuration changed, waits for the Ready signal, and updates the Kafka status to Ready: True."
+sequenceDiagram
+    participant User as kubectl / GitOps
+    participant Operator as Strimzi Operator
+    participant K8s as Kubernetes API
+    participant Pods as Kafka Pods
+
+    User->>K8s: Apply Kafka CR
+    K8s->>Operator: Watch event
+    Operator->>Operator: Diff current vs desired state
+    Operator->>K8s: Update ConfigMaps, Secrets, StrimziPodSets
+    K8s->>Pods: Rolling restart (if config changed)
+    Pods-->>Operator: Ready signal
+    Operator->>K8s: Update Kafka status → Ready: True
+```
+
+What a change costs depends on the key:
+
+| Change | What Strimzi does |
+|--------------------------|--------------------------------------------------|
+| A dynamic broker setting, such as `num.io.threads` or `log.retention.bytes` | Applies it to the running brokers, with no restart |
+| A static setting, a listener, JVM options, the image or the Kafka version | Rolls the pods, one at a time |
+| Storage | Grows a PVC where the StorageClass allows expansion, and never shrinks one |
+
+The operator also re-checks the cluster every 120 seconds by default, whether or not a resource changed.
 
 ## KafkaNodePool Configuration
 
@@ -539,11 +550,7 @@ If `helm get values` shows a `strimziVersion`, `kates deploy` installed the oper
 
 **Cause:** The Entity Operator's User Operator creates the `kafka-ui` Secret when it reconciles the `KafkaUser` CR, and the Entity Operator deploys only once the `Kafka` resource is Ready. If the Kafka CR hasn't reached `Ready`, for example because a NetworkPolicy blocks the operator, no user Secrets are created ([Troubleshooting Index](appendix-b-troubleshooting.md)).
 
-**Fix:**
-
-1. Wait for the Kafka CR to reach `Ready` before deploying Kafka UI
-2. `deploy-kafka-ui.sh` already waits up to 180s for the `kafka-ui` Secret
-3. If the secret never appears, check Kafka CR status and operator logs:
+**Fix:** Wait for the Kafka CR to reach `Ready` before deploying Kafka UI; `deploy-kafka-ui.sh` already waits up to 180s for the `kafka-ui` Secret. If the Secret never appears, read the Kafka CR's conditions and check the Entity Operator pod:
 
 ```bash
 kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions}'
@@ -560,7 +567,7 @@ kubectl get pods -n kafka -l strimzi.io/name=krafter-entity-operator
 - A watch scope that does not cover the Kafka namespace, which leaves the wrapper's own `strimzi-operator` policy with no egress rule for those pods (its `kates.io/watch-scope` annotation is the fastest way to see what it admits)
 - Resource pressure on the active controller pod causing admin API timeouts
 
-**Diagnosis:**
+These commands show which cause applies:
 
 ```bash
 # The two policies that can select the operator pod

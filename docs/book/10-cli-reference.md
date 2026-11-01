@@ -4,7 +4,7 @@ toc-depth: 4
 
 # CLI Reference
 
-Every `kates` command has an entry here: what it does, its flags and their defaults, what it prints, and how it exits. The [Commands](#commands) table maps a question to a command family. For how the commands fit a task, read the chapter an entry links.
+Every `kates` command has an entry here: what it does, its flags and their defaults, what it prints, and how it exits. The [Commands](#commands) table maps a question to a command family and links each command to its entry. For how the commands fit a task, read the chapter an entry links.
 
 ## How to Read an Entry
 
@@ -81,11 +81,9 @@ kates --url http://other-server:8080 health
 kates --context staging test list
 ```
 
-The `kates` chart turns API-key authentication on by default and generates the key into the `kates-api-key` Secret; the command above reads it from the `kates` namespace of the default install. The URL answers only while something forwards the API to it: `make ports` forwards it to `localhost:30083`, `kates ports` to `localhost:8080`, and when only one of those two ports answers, the CLI uses that one. `kates health` reads a public endpoint and succeeds without a key, so check a new context with `kates test list` instead. `kates ctx set` switches to the context it stores only when that is the only context, and on a fresh machine the configuration starts with a built-in `default` context pointing at `http://localhost:8080`, so follow it with `kates ctx use`.
+The command above reads the key from the `kates-api-key` Secret in the `kates` namespace of the default install; [Authentication](#authentication) says when the CLI sends it. The URL answers only while something forwards the API to it: `make ports` forwards it to `localhost:30083`, `kates ports` to `localhost:8080`, and when only one of those two ports answers, the CLI uses that one. `kates ctx set` switches to the context it stores only when that is the only context, and on a fresh machine the configuration starts with a built-in `default` context pointing at `http://localhost:8080`, so follow it with `kates ctx use`.
 
 On a context that already exists, `kates ctx set` changes only the settings whose flags you pass and keeps the rest, so `kates ctx set local --url http://localhost:8080` keeps its API key, proxy and `insecure` setting. `--replace` rebuilds the context from the flags alone. `kates ctx delete` of the current context makes the alphabetically first remaining context current.
-
-`--url` and `KATES_URL` take the context's API key, proxy and `insecure` setting only to the context's own host. The port may differ, `localhost` and `127.0.0.1` count as one host, and plain HTTP never gets what the context sends over HTTPS. For another server, pass `--api-key` or set `KATES_API_KEY`; without either, the CLI says on stderr that it is not sending the context's key, and the request goes without one.
 
 The context stores the key in plain text in `~/.kates.yaml`. The CLI writes that file readable by you alone (mode `0600`). A file readable by others is tightened to `0600` the next time the CLI saves it, on `kates ctx use` for instance. That keeps other users of the machine out, not other programs you run; to keep the key out of the file, leave `--api-key` out of the context and export the key as `KATES_API_KEY` for the session instead.
 
@@ -145,7 +143,7 @@ kates ctx profiles set all              # every command again
 
 `KATES_PROFILES` replaces the context's profiles for one call or one shell: a comma- or space-separated list, or `all` for every command. An empty `KATES_PROFILES` enables every command too. A name kates does not know, in the file or in the variable, is warned about on stderr and enables nothing, so a context that names only unknown ones runs only the commands every profile enables. `kates ctx set` keeps the profiles of a context it updates, `kates ctx export` carries them, and `kates ctx import` keeps a context's profiles when the file names none. `kates help <command>` and `kates <command> --help` show the help of any command, with a note on stderr when the profiles do not enable it.
 
-Profiles shorten what `kates` lists and runs; they are not access control. `KATES_PROFILES=all` lifts them, and `kates mcp` ignores them. What an API key may do is set by its scopes, in [Scopes and Named Keys](11-api-reference.md#scopes-and-named-keys).
+Profiles shorten what `kates` lists and runs; they are not access control. `KATES_PROFILES=all` lifts them, and `kates mcp` ignores them. What an API key may do is in [Authentication](#authentication).
 
 ### Config File Format
 
@@ -191,42 +189,62 @@ These flags work with every command:
 
 `--context`, or `KATES_CONTEXT` when the flag is not given, has to name a context in `~/.kates.yaml`, and so does the current context when neither does. A name that is not there fails every command that calls the Kates API, before any request is sent, and the error lists the names that are there. Commands that don't call the API still run, so `kates ctx set` can create the context `KATES_CONTEXT` names. `default` and no name at all still mean `http://localhost:8080`, as they do before any context exists.
 
+## Calling the Kates API
+
+Most commands are one or more requests to the Kates API, and the rules below hold for all of them, so the entries don't repeat them. What a refused request prints, and the exit codes, are in [Exit Codes](#exit-codes).
+
+### Authentication
+
+The CLI sends the API key on every request as `Authorization: Bearer <key>`, and sends no such header when it has no key. It takes the key from `--api-key`, else `KATES_API_KEY`, else the context; [Context Management](#context-management) stores one in a context. The `kates` chart turns API-key authentication on by default and generates the key into the `kates-api-key` Secret. `kates health` reads a public endpoint and succeeds without a key, so check a new context with `kates test list` instead. What a key may do is set by its scopes, in [Scopes and Named Keys](11-api-reference.md#scopes-and-named-keys).
+
+`--url` and `KATES_URL` take the context's API key, proxy and `insecure` setting only to the context's own host. The port may differ, `localhost` and `127.0.0.1` count as one host, and plain HTTP never gets what the context sends over HTTPS. For another server, pass `--api-key` or set `KATES_API_KEY`; without either, the CLI says on stderr that it is not sending the context's key, and the request goes without one.
+
+### Retries and Rate Limits
+
+The Kates API sets no limit on how many requests a client sends. It limits how many test runs go at once, with `kates.engine.max-concurrent-tests`, 3 by default. A run created beyond that is refused with `429 Too Many Requests` and a `Retry-After` of 60 seconds. The CLI does not wait that out: the request is sent once, and the command fails as [API Errors](#api-errors) describes. [Rate Limits](11-api-reference.md#rate-limits) in the REST API Reference gives this limit and the one on disruptions.
+
+The CLI retries a read, a `GET`, when the connection fails or the Kates API answers with a 5xx status: three attempts in all, the second after 0.5 s and the third after 1 s more. A request that changes something, a `POST`, `PUT` or `DELETE`, is sent once and never retried; `kates test prune --dry-run`, which only counts, is retried like a read. A command that follows a run, such as `kates test create --wait`, polls it and waits longer after each failed poll, up to 30 s. By default it gives up after three failed polls in a row, with `connection lost:` in its message, and exits `1`.
+
+### Pagination
+
+`kates test list` is the one command that pages. `--page`, counted from 0, and `--size`, 20 by default, go to `GET /api/tests` as they are, and the Kates API caps a page at 200 runs, as [Pagination](11-api-reference.md#pagination) in the REST API Reference explains. The table ends with the page you are on and the total, such as `Page 1 of 3 · 47 total runs`; read the next page with `--page 1`. The other list commands read the first page and stop; `kates audit --limit` sets the size of that page. `kates evidence export` is the exception: it reads every page itself.
+
 ## Commands
 
-Find your question in the table below, then follow its link to the family's commands and flags. The last column says what the family works through. That is the Kates API, at the URL and with the API key of the context you use; Kubernetes, through the `kubectl` and `helm` the CLI runs against a cluster from your kubeconfig; or files on your machine.
+Find your question in the table below, then follow the family's link, or a command's link straight to its entry. The last column says what the family works through. That is the Kates API, at the URL and with the API key of the context you use; Kubernetes, through the `kubectl` and `helm` the CLI runs against a cluster from your kubeconfig; or files on your machine.
 
 | Family | Commands | The question it answers | What it talks to |
 |:-----|:--------|:--------|:---------|
-| [Context Management](#context-management) | `ctx set`, `use`, `show`, `export`, `import`, `profiles` | Which Kates API do your commands call, and with which key? | Local files: `~/.kates.yaml` |
-| [Health, Status & Diagnostics](#health-status--diagnostics) | `health`, `status`, `version`, `doctor` | Is the Kates API up, does it reach Kafka, and is the cluster ready to test? | Kates API; `doctor dns` and `doctor network` use `kubectl` alone |
-| [Cluster Commands](#cluster-commands) | `cluster info`, `check`, `topology`, `alerts`, `watch`, `topics`, `groups`, `broker configs`; `diff` | What does the Kafka cluster look like, and is it healthy? | Kates API |
-| [Compliance](#compliance) | `compliance check`, `lint`, `fmt` | Is the cluster still built the way a reference file declares? | Kates API for `check`; `lint` and `fmt` work on local files |
-| [Evidence for Auditors](#evidence-for-auditors) | `evidence export` | What did Kates test and record in a period, and can an auditor tell nothing changed since? | Kates API; the pack is a directory you keep |
-| [Test Commands](#test-commands) | `test list`, `create`, `get`, `delete`, `cancel`, `cleanup`, `prune`, `watch`, `apply`, `lint`, `scaffold`, `compare`, `summary`, `flame`; `scenario-diff` | How do you start a performance test, follow it and find it again? | Kates API; `test lint` and `test scaffold` work locally |
-| [Report Commands](#report-commands) | `report show`, `summary`, `export`, `diff`, `compare`, `brokers` | What did a run measure, and how does it compare with another run? | Kates API |
-| [Trend Analysis](#trend-analysis) | `trend` | How has one metric moved across a test type's runs over recent days? | Kates API |
-| [Disruption Commands](#disruption-commands) | `disruption run`, `list`, `status`, `timeline`, `types`, `kafka-metrics`, `watch`, `playbook list`, `playbook show`, `playbook run` | What happens to the cluster when a fault hits it, and how fast does it recover? | Kates API |
-| [Chaos Experiment History](#chaos-experiment-history) | `chaos list`, `show` | Which disruption plans ran recently, how did each end, and what SLA grade, if any, did it get? | Kates API |
-| [Resilience](#resilience) | `resilience run` | How much does one fault hurt a test while it runs? | Kates API |
-| [Schedule Commands](#schedule-commands) | `schedule list`, `get`, `create`, `delete` | How do you run the same test on a cron schedule? | Kates API |
-| [Observability & Monitoring](#observability--monitoring) | `dashboard`, `top` | What is running right now, and how is it doing? | Kates API |
-| [Interactive Lab](#interactive-lab) | `lab` | Which settings work best, when you try them one run at a time? | Kates API |
-| [Deployment & Lifecycle](#deployment--lifecycle) | `deploy`, `deploy status`, `charts pull`, `charts push`, `clean`, `detect`, `ports`, `auto`, `init`, `upgrade` | How do you install the stack, reach it, check it and remove it, and set up or upgrade the CLI? | Kubernetes (`kubectl`, `helm`); `init` and `upgrade` work locally |
-| [Versions and Operators](#versions-and-operators) | `versions`, `operators list` | Which Strimzi operators and Kafka versions can run on this cluster? | Kubernetes, through `kubectl` and `helm` |
-| [Migration Commands](#migration-commands) | `migrate pairs`, `plan`, `up`, `status`, `verify`, `cutover`, `rollback`, `down`, `run` | Do an older Kafka's records and consumer offsets survive a MirrorMaker 2 move onto the primary? | Kubernetes (`kubectl`, `helm`); `up` and `run` may build images with `docker` |
-| [Security Commands](#security-commands) | `security audit`, `tls-inspect`, `auth-test`, `pentest`, `compliance`, `baseline`, `drift`, `gate`, `certs`, `cve`, `secrets`, `netpol`, `acl-map`, `config-diff`, `trend` | How secure is the cluster, and has its security posture drifted? | Kates API; `security netpol` uses `kubectl` |
-| [Kyverno Policy Commands](#kyverno-policy-commands) | `kyverno status`, `violations`, `enforce`, `audit`, `detect`, `apply`, `check` | Which admission policies guard the cluster, what do they catch, and would they let Kates in? | Kubernetes (`kubectl`); `apply` and `check` also run `helm` |
-| [Kafka Client Commands](#kafka-client-commands) | `kafka brokers`, `topics`, `topic`, `groups`, `group`, `consume`, `produce`, `create-topic`, `alter-topic`, `delete-topic`, `tui`, `connect` | What is in a topic or consumer group, and how do you read, write or change it? | Kates API; `kafka connect` uses `kubectl` |
-| [Analysis & Optimization Commands](#analysis--optimization-commands) | `benchmark`, `advisor`, `explain`, `replay`, `gate`, `test baseline`, `report regression` | What do a run's results mean, and do they clear the grade or baseline you require? | Kates API |
-| [Tuning Commands](#tuning-commands) | `tune run`, `types` | How does one setting of `acks`, batching, compression, partition count or replication factor perform? | Kates API |
-| [Profile Commands](#profile-commands) | `profile save`, `list`, `compare`, `assert` | Does a new run still perform like one you saved earlier? | Kates API for `save` and `assert`; profiles are files in `~/.kates/profiles` |
-| [Cost Estimation](#cost-estimation) | `cost estimate` | Roughly what would a workload cost to run with a cloud provider? | Nothing: the CLI computes the estimate itself |
-| [Snapshot Commands](#snapshot-commands) | `snapshot create`, `list`, `diff` | What changed in the cluster's brokers, topics and groups between two moments? | Kates API for `create`; snapshots are files in `~/.kates/snapshots` |
-| [Flow Pipelines](#flow-pipelines) | `flow run`, `lint` | How do you run several tests in a row from one YAML file? | Kates API, for a pipeline read from a local file; `flow lint` works on local files |
-| [Badge Generation](#badge-generation) | `badge` | What badge shows the latest run's grade, P99 or throughput? | Kates API |
-| [Webhook Notifications](#webhook-notifications) | `webhook list`, `add`, `remove` | Which URLs hear about it when a test finishes? | Kates API |
-| [MCP Server for AI Agents](#mcp-server-for-ai-agents) | `mcp` | How does an AI agent read test runs, disruptions, security posture and cluster state? | Kates API, which the command serves to the agent over stdin and stdout |
-| [Developer & Help Commands](#developer--help-commands) | `docs`, `tldr`, `audit`, `changelog`, `watch`, `look`, `theme`, `plugin` | How does a command work, what does the audit log record, and how do you change how the CLI looks or add a command? | Nothing for `docs`, `tldr`, `look` and `theme`; `audit`, `changelog` and `watch` read the Kates API |
+| [Context Management](#context-management) | [`ctx set`](#context-management), [`use`](#context-management), [`show`](#context-management), [`export`](#context-management), [`import`](#context-management), [`profiles`](#context-management) | Which Kates API do your commands call, and with which key? | Local files: `~/.kates.yaml` |
+| [Health, Status & Diagnostics](#health-status--diagnostics) | [`health`](#health), [`status`](#status), [`version`](#version), [`doctor`](#doctor) | Is the Kates API up, does it reach Kafka, and is the cluster ready to test? | Kates API; `doctor dns` and `doctor network` use `kubectl` alone |
+| [Cluster Commands](#cluster-commands) | [`cluster info`](#cluster-info), [`check`](#cluster-check), [`topology`](#cluster-topology), [`alerts`](#cluster-alerts), [`watch`](#cluster-watch), [`topics`](#cluster-topics-groups-and-broker-configs), [`groups`](#cluster-topics-groups-and-broker-configs), [`broker configs`](#cluster-topics-groups-and-broker-configs); [`diff`](#diff) | What does the Kafka cluster look like, and is it healthy? | Kates API |
+| [Compliance](#compliance) | [`compliance check`](#compliance-check), [`lint`](#compliance-lint), [`fmt`](#compliance-fmt) | Is the cluster still built the way a reference file declares? | Kates API for `check`; `lint` and `fmt` work on local files |
+| [Evidence for Auditors](#evidence-for-auditors) | [`evidence export`](#evidence-export) | What did Kates test and record in a period, and can an auditor tell nothing changed since? | Kates API; the pack is a directory you keep |
+| [Test Commands](#test-commands) | [`test list`](#test-list), [`create`](#test-create), [`get`](#test-get), [`delete`](#test-delete), [`cancel`](#test-cancel), [`cleanup`](#test-cleanup), [`prune`](#test-prune), [`watch`](#test-watch), [`apply`](#test-apply), [`lint`](#test-lint), [`scaffold`](#test-scaffold), [`compare`](#test-compare), [`summary`](#test-summary), [`flame`](#test-flame); [`scenario-diff`](#scenario-diff) | How do you start a performance test, follow it and find it again? | Kates API; `test lint` and `test scaffold` work locally |
+| [Report Commands](#report-commands) | [`report show`](#report-show), [`summary`](#report-summary), [`export`](#report-export), [`diff`](#report-diff), [`compare`](#report-compare), [`brokers`](#report-brokers) | What did a run measure, and how does it compare with another run? | Kates API |
+| [Trend Analysis](#trend-analysis) | [`trend`](#trend) | How has one metric moved across a test type's runs over recent days? | Kates API |
+| [Disruption Commands](#disruption-commands) | [`disruption run`](#disruption-run), [`list`](#disruption-list), [`status`](#disruption-status), [`timeline`](#disruption-timeline), [`types`](#disruption-types), [`kafka-metrics`](#disruption-kafka-metrics), [`watch`](#disruption-watch), [`playbook list`](#disruption-playbook-list), [`playbook show`](#disruption-playbook-show), [`playbook run`](#disruption-playbook-run) | What happens to the cluster when a fault hits it, and how fast does it recover? | Kates API |
+| [Chaos Experiment History](#chaos-experiment-history) | [`chaos list`](#chaos-list), [`show`](#chaos-show) | Which disruption plans ran recently, how did each end, and what SLA grade, if any, did it get? | Kates API |
+| [Resilience](#resilience) | [`resilience run`](#resilience) | How much does one fault hurt a test while it runs? | Kates API |
+| [Schedule Commands](#schedule-commands) | [`schedule list`](#schedule-list), [`get`](#schedule-get), [`create`](#schedule-create), [`delete`](#schedule-delete) | How do you run the same test on a cron schedule? | Kates API |
+| [Observability & Monitoring](#observability--monitoring) | [`dashboard`](#dashboard), [`top`](#top) | What is running right now, and how is it doing? | Kates API |
+| [Interactive Lab](#interactive-lab) | [`lab`](#interactive-lab) | Which settings work best, when you try them one run at a time? | Kates API |
+| [Deployment & Lifecycle](#deployment--lifecycle) | [`deploy`](#deploy), [`deploy status`](#deploy-status), [`charts pull`](#charts-pull), [`charts push`](#charts-push), [`clean`](#clean), [`detect`](#detect), [`ports`](#ports), [`auto`](#auto), [`init`](#init), [`upgrade`](#upgrade) | How do you install the stack, reach it, check it and remove it, and set up or upgrade the CLI? | Kubernetes (`kubectl`, `helm`); `init` and `upgrade` work locally |
+| [Versions and Operators](#versions-and-operators) | [`versions`](#versions), [`operators list`](#operators-list) | Which Strimzi operators and Kafka versions can run on this cluster? | Kubernetes, through `kubectl` and `helm` |
+| [Migration Commands](#migration-commands) | [`migrate pairs`](#migration-commands), [`plan`](#migration-commands), [`up`](#migration-commands), [`status`](#migration-commands), [`verify`](#migration-commands), [`cutover`](#migration-commands), [`rollback`](#migration-commands), [`down`](#migration-commands), [`run`](#migration-commands) | Do an older Kafka's records and consumer offsets survive a MirrorMaker 2 move onto the primary? | Kubernetes (`kubectl`, `helm`); `up` and `run` may build images with `docker` |
+| [Security Commands](#security-commands) | [`security audit`](#security-audit), [`tls-inspect`](#security-tls-inspect), [`auth-test`](#security-auth-test), [`pentest`](#security-pentest), [`compliance`](#security-compliance), [`baseline`](#security-baseline), [`drift`](#security-drift), [`gate`](#security-gate), [`certs`](#security-certs), [`cve`](#security-cve), [`secrets`](#security-secrets), [`netpol`](#security-netpol), [`acl-map`](#security-acl-map), [`config-diff`](#security-config-diff), [`trend`](#security-trend) | How secure is the cluster, and has its security posture drifted? | Kates API; `security netpol` uses `kubectl` |
+| [Kyverno Policy Commands](#kyverno-policy-commands) | [`kyverno status`](#kyverno-status), [`violations`](#kyverno-violations), [`enforce`](#kyverno-enforce), [`audit`](#kyverno-audit), [`detect`](#kyverno-detect), [`apply`](#kyverno-apply), [`check`](#kyverno-check) | Which admission policies guard the cluster, what do they catch, and would they let Kates in? | Kubernetes (`kubectl`); `apply` and `check` also run `helm` |
+| [Kafka Client Commands](#kafka-client-commands) | [`kafka brokers`](#kafka-brokers), [`topics`](#kafka-topics), [`topic`](#kafka-topic), [`groups`](#kafka-groups), [`group`](#kafka-group), [`consume`](#kafka-consume), [`produce`](#kafka-produce), [`create-topic`](#kafka-create-topic), [`alter-topic`](#kafka-alter-topic), [`delete-topic`](#kafka-delete-topic), [`tui`](#kafka-tui), [`connect`](#kafka-connect) | What is in a topic or consumer group, and how do you read, write or change it? | Kates API; `kafka connect` uses `kubectl` |
+| [Analysis & Optimization Commands](#analysis--optimization-commands) | [`benchmark`](#benchmark), [`advisor`](#advisor), [`explain`](#explain), [`replay`](#replay), [`gate`](#gate), [`test baseline`](#test-baseline), [`report regression`](#test-baseline) | What do a run's results mean, and do they clear the grade or baseline you require? | Kates API |
+| [Tuning Commands](#tuning-commands) | [`tune run`](#tune-run), [`types`](#tune-types) | How does one setting of `acks`, batching, compression, partition count or replication factor perform? | Kates API |
+| [Profile Commands](#profile-commands) | [`profile save`](#profile-save), [`list`](#profile-list), [`compare`](#profile-compare), [`assert`](#profile-assert) | Does a new run still perform like one you saved earlier? | Kates API for `save` and `assert`; profiles are files in `~/.kates/profiles` |
+| [Cost Estimation](#cost-estimation) | [`cost estimate`](#cost-estimate) | Roughly what would a workload cost to run with a cloud provider? | Nothing: the CLI computes the estimate itself |
+| [Snapshot Commands](#snapshot-commands) | [`snapshot create`](#snapshot-create), [`list`](#snapshot-list), [`diff`](#snapshot-diff) | What changed in the cluster's brokers, topics and groups between two moments? | Kates API for `create`; snapshots are files in `~/.kates/snapshots` |
+| [Flow Pipelines](#flow-pipelines) | [`flow run`](#flow-run), [`lint`](#flow-lint) | How do you run several tests in a row from one YAML file? | Kates API, for a pipeline read from a local file; `flow lint` works on local files |
+| [Badge Generation](#badge-generation) | [`badge`](#badge-generation) | What badge shows the latest run's grade, P99 or throughput? | Kates API |
+| [Webhook Notifications](#webhook-notifications) | [`webhook list`](#webhook-list), [`add`](#webhook-add), [`remove`](#webhook-remove) | Which URLs hear about it when a test finishes? | Kates API |
+| [MCP Server for AI Agents](#mcp-server-for-ai-agents) | [`mcp`](#mcp) | How does an AI agent read test runs, disruptions, security posture and cluster state? | Kates API, which the command serves to the agent over stdin and stdout |
+| [Developer & Help Commands](#developer--help-commands) | [`docs`](#docs), [`tldr`](#tldr), [`audit`](#audit), [`changelog`](#changelog), [`watch`](#watch), [`look`](#look), [`theme`](#theme), [`plugin`](#plugin) | How does a command work, what does the audit log record, and how do you change how the CLI looks or add a command? | Nothing for `docs`, `tldr`, `look` and `theme`; `audit`, `changelog` and `watch` read the Kates API |
 
 Contexts, profiles and snapshots are files in your home directory, so they stay on the machine that made them. To move your contexts to another machine, print them with `kates ctx export --reveal`, keys in clear, and load the file there with `kates ctx import --file`.
 
@@ -295,6 +313,24 @@ Show CLI and runtime version information (CLI version, commit, build date, Go ru
 ```bash
 kates version
 ```
+
+Output, in the classic look, with the values your build and platform give in place of the placeholders and the default `native` backend:
+
+```text
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Version
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Kates CLI                <version>
+  Commit                   <commit>
+  Built                    <build date>
+  Binary                   <path of the running binary>
+  Go                       <Go version>
+  OS/Arch                  <os>/<arch>
+  API Status               ● UP
+  Backend                  native
+```
+
+When the Kates API doesn't answer within a moment, the last two lines are one, `API` and `not reachable`. With `-o json` it prints `cli`, `commit`, `buildDate`, `executable`, `go`, `os` and `arch`, and asks the Kates API nothing.
 
 #### doctor
 
@@ -645,6 +681,22 @@ Its flags filter and page the list:
 | `--page` | Page number (0-indexed) |
 | `--size` | Page size |
 
+Output, in the classic look, with two illustrative runs:
+
+```text
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Test Runs
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ID        Type    Status  Backend  Created
+  ────────  ──────  ──────  ───────  ───────────────────
+  9b2d4e7a  STRESS  DONE    native   2026-10-28 02:00:04
+  3f8a2c1e  LOAD    FAILED  native   2026-10-27 14:12:40
+
+  Page 1 of 1 · 2 total runs
+```
+
+An ID longer than 12 characters is cut to 12 and `…`. With `-o json` it prints the page: `items`, `page`, `size`, `total`, `totalPages` and `count`. [Pagination](#pagination) says how to read the next page.
+
 #### test create
 
 Start one test run from flags, and with `--wait` follow it to its end.
@@ -729,6 +781,12 @@ kates test delete <id>
 kates test rm <id>
 ```
 
+Output:
+
+```text
+  ✓ Test deleted: 3f8a2c1e
+```
+
 Delete a run and its results. A run that is still `PENDING` or `RUNNING` is stopped first: its tasks stop, it gives back its place among the runs the Kates API allows at once, and webhooks hear that it ended `FAILED`. To stop a run and keep it, use `kates test cancel`.
 
 #### test cancel
@@ -736,6 +794,21 @@ Delete a run and its results. A run that is still `PENDING` or `RUNNING` is stop
 ```bash
 kates test cancel <id>
 kates test cancel <id> <id> -o json
+```
+
+Output, for one run it cancelled, and the same run with `-o json`:
+
+```text
+  ✓ Cancelled: 3f8a2c1e
+```
+
+```json
+[
+  {
+    "id": "3f8a2c1e",
+    "cancelled": true
+  }
+]
 ```
 
 Cancel runs that are `PENDING` or `RUNNING` and keep them. Each run's tasks stop, the run gives back its place among the runs the Kates API allows at once, and it is stored as `FAILED`, each unfinished task with the error `Cancelled by user`. A run that has already finished cannot be cancelled; the CLI says so for that run and exits 1, as it does whenever a run on the line was not cancelled. With `-o json` it prints one object per run: its `id`, whether it was `cancelled`, and the `error` when it was not.
@@ -1348,6 +1421,15 @@ kates schedule create --name "Nightly Endurance" --cron "0 2 * * *" \
   --request endurance.json
 ```
 
+Output, for the first command, with the schedule's ID in place of `<id>`:
+
+```text
+  ✓ Schedule created: <id> (Hourly Load Test)
+  Cron                     0 * * * *
+```
+
+With `-o json` it prints the schedule the Kates API saved.
+
 All three flags are required:
 
 | Flag | Required | Description |
@@ -1368,6 +1450,12 @@ Delete a schedule. The runs it started stay.
 
 ```bash
 kates schedule delete <id>
+```
+
+Output:
+
+```text
+  ✓ Schedule deleted: <id>
 ```
 
 See also [Recipes & Patterns](14-recipes.md) for schedule-based regression detection patterns.
@@ -2636,6 +2724,12 @@ kates webhook add slack-alerts https://hooks.slack.com/services/...
 kates webhook add pagerduty https://events.pagerduty.com/integration/...
 ```
 
+Output, for the first command:
+
+```text
+  ✓ Registered webhook 'slack-alerts' → https://hooks.slack.com/services/...
+```
+
 #### webhook remove
 
 Aliases: `rm`, `delete`
@@ -2646,6 +2740,12 @@ Unregister a webhook.
 kates webhook remove <name>
 kates webhook rm <name>
 kates webhook delete <name>
+```
+
+Output:
+
+```text
+  ✓ Removed webhook '<name>'
 ```
 
 ### MCP Server for AI Agents
@@ -3010,6 +3110,16 @@ Some commands report a failure on screen and still exit `0`, so a script cannot 
 - `kates advisor` when the run or its report is not found.
 - `kates benchmark`, whatever its runs do: a test it could not create, a run that finished `FAILED` and one it lost track of all exit `0`.
 :::
+
+### API Errors
+
+A request the Kates API refuses prints one line on stderr and ends the command with exit `1`, except in the commands the callout above names. The line starts with what the command was doing and goes on with the status, the error and the message of the API's JSON answer, or `HTTP <status>:` and the body when the answer isn't JSON. A `kates test create` that a limit refuses prints this, the message naming the field:
+
+```text
+  ✖ Failed to create test: [400] Validation Failed: <message>
+```
+
+[Error Responses](11-api-reference.md#error-responses) lists the statuses the Kates API answers with. Under `-o json` the line still goes to stderr, so stdout stays empty for a script to test.
 
 ## Shell Completion
 
