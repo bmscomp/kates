@@ -896,7 +896,9 @@ func writeKyvernoValues(dir string, c kyvernoStackChart, r kyvernoCheckReport, l
 func writeUnfixed(out *bytes.Buffer, c kyvernoStackChart, ns string, notes []string, unfixed map[string]map[string]bool) {
 	out.WriteString("\n# Not fixed here:\n")
 	for _, n := range notes {
-		out.WriteString("#   " + strings.ReplaceAll(n, "\n", " ") + "\n")
+		// A policy's message is the cluster's text: every line break a YAML
+		// parser knows (\r, NEL, LS, PS too) would end the comment.
+		out.WriteString("#   " + strings.Join(strings.Fields(strings.ToValidUTF8(n, "?")), " ") + "\n")
 	}
 	policies := make([]string, 0, len(unfixed))
 	for p := range unfixed {

@@ -475,3 +475,20 @@ func TestKyvernoStackLabelKeysMatchTheChartPolicyCheck(t *testing.T) {
 		}
 	}
 }
+
+// A policy's message can't break out of its comment into values.
+func TestWriteKyvernoValuesKeepsAMessageInItsComment(t *testing.T) {
+	dir := t.TempDir()
+	report := kyvernoCheckReport{Chart: "kafka-cluster", Namespace: "kafka", Findings: []kyvernoFinding{
+		{Result: "fail", Policy: "p", Rule: "r", Message: "no\rinjected: true also: true\u0085and: true\xffbad: true", Resources: []string{"Pod/a"}},
+	}}
+	path, err := writeKyvernoValues(dir, kyvernoStackChartNamed(t, "kafka-cluster"), report, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var values map[string]any
+	b, _ := os.ReadFile(path)
+	if err := yaml.Unmarshal(b, &values); err != nil || len(values) != 0 {
+		t.Errorf("values %v, err %v, from:\n%q", values, err, b)
+	}
+}
