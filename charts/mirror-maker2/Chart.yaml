@@ -15,6 +15,9 @@ type: application
 # setting either is now refused with the constant to edit named.
 # Patch: testImages.kubectl moves to kates-tester 1.35.0, the tag the v1.35.0
 # release publishes; every chart that runs it pins the same one.
+# Patch: a mirror with neither connector is refused at render time, and
+# values-generic.yaml restates the default mirror so `kates deploy` keeps it.
+# Kafka egress admits its ports at any address: 0.0.0.0/0 matched no IPv6 broker.
 version: 0.11.22
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
@@ -43,9 +46,11 @@ annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: fixed
-      description: "A mirror without a sourceConnector or checkpointConnector block now gets that connector (tasksMax 1). Strimzi creates no connector for an absent block and still reports the KafkaMirrorMaker2 Ready, so a `--set mirrors[0]…` against the chart defaults, which Helm turns into a list holding only what was set, deployed a mirror that replicated nothing"
-    - kind: fixed
       description: "Kafka egress no longer names ipBlock 0.0.0.0/0, which matches no IPv6 address: on an IPv6 or IPv6-first cluster the workers reached no broker. The rule now admits the Kafka ports at any address, as the hook Jobs' policy already did"
+    - kind: fixed
+      description: "A mirror with neither sourceConnector nor checkpointConnector is refused at render time. Helm replaces a list rather than merging it, so a mirrors: override naming only the source dropped the default entry's connector blocks, and Strimzi reported the CR Ready with zero connectors: healthy workers mirroring nothing"
+    - kind: fixed
+      description: "values-generic.yaml restates the default mirror, connectors and source authentication included. `kates deploy` sets mirrors[0].source.* with --set, which merges into a list from a values file but replaced the chart's default list, so every non-kind deploy got a mirror with no connectors and no source credentials"
     - kind: changed
       description: "testImages.kubectl moves to kates-tester 1.35.0, the tag the v1.35.0 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.30.1 (nothing under tester/ moved), so this is the pin, not the tooling."
     - kind: fixed
