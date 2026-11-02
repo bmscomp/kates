@@ -17,8 +17,9 @@ type: application
 # release publishes; every chart that runs it pins the same one.
 # Patch: a mirror with neither connector is refused at render time, and
 # values-generic.yaml restates the default mirror so `kates deploy` keeps it.
-# Kafka egress admits its ports at any address: 0.0.0.0/0 matched no IPv6 broker.
-version: 0.11.22
+# Patch: Kafka egress admits its ports at any address: 0.0.0.0/0 matched no
+# IPv6 broker.
+version: 0.11.23
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"

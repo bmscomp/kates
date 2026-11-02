@@ -5,7 +5,8 @@ type: application
 # Patch: the umbrella packs the subcharts the v1.35.0 release pins: kates
 # 0.15.6, kafka-cluster 1.0.28, connect-cluster 2.1.23, mirror-maker2 0.11.21.
 # Patch: packs mirror-maker2 0.11.22.
-version: 0.8.20
+# Patch: packs mirror-maker2 0.11.23.
+version: 0.8.21
 appVersion: "1.0.0"
 keywords:
   - kafka
@@ -43,7 +44,9 @@ dependencies:
 annotations:
   artifacthub.io/changes: |
     - kind: changed
-      description: "Packs mirror-maker2 0.11.22, which refuses a mirror with no connectors at render time and admits its Kafka egress at any address, IPv6 included. Templates are unchanged."
+      description: "Packs mirror-maker2 0.11.23, whose Kafka egress admits its ports at any address, IPv6 included. Templates are unchanged."
+    - kind: changed
+      description: "Packs mirror-maker2 0.11.22, which refuses a mirror with no connectors at render time. Templates are unchanged."
     - kind: changed
       description: "The umbrella moves with the v1.35.0 release: it packs kates 0.15.6, kafka-cluster 1.0.28, connect-cluster 2.1.23 and mirror-maker2 0.11.21 as they are on disk. Templates are unchanged."
     - kind: changed
