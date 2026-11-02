@@ -15,7 +15,9 @@ type: application
 # setting either is now refused with the constant to edit named.
 # Patch: testImages.kubectl moves to kates-tester 1.35.0, the tag the v1.35.0
 # release publishes; every chart that runs it pins the same one.
-version: 0.11.21
+# Patch: a mirror with neither connector is refused at render time, and
+# values-generic.yaml restates the default mirror so `kates deploy` keeps it.
+version: 0.11.22
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
@@ -42,6 +44,10 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "A mirror with neither sourceConnector nor checkpointConnector is refused at render time. Helm replaces a list rather than merging it, so a mirrors: override naming only the source dropped the default entry's connector blocks, and Strimzi reported the CR Ready with zero connectors: healthy workers mirroring nothing"
+    - kind: fixed
+      description: "values-generic.yaml restates the default mirror, connectors and source authentication included. `kates deploy` sets mirrors[0].source.* with --set, which merges into a list from a values file but replaced the chart's default list, so every non-kind deploy got a mirror with no connectors and no source credentials"
     - kind: changed
       description: "testImages.kubectl moves to kates-tester 1.35.0, the tag the v1.35.0 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.30.1 (nothing under tester/ moved), so this is the pin, not the tooling."
     - kind: fixed
