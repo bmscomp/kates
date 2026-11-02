@@ -15,7 +15,7 @@ type: application
 # setting either is now refused with the constant to edit named.
 # Patch: testImages.kubectl moves to kates-tester 1.35.0, the tag the v1.35.0
 # release publishes; every chart that runs it pins the same one.
-version: 0.11.21
+version: 0.11.22
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
@@ -42,6 +42,10 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "A mirror without a sourceConnector or checkpointConnector block now gets that connector (tasksMax 1). Strimzi creates no connector for an absent block and still reports the KafkaMirrorMaker2 Ready, so a `--set mirrors[0]…` against the chart defaults, which Helm turns into a list holding only what was set, deployed a mirror that replicated nothing"
+    - kind: fixed
+      description: "Kafka egress no longer names ipBlock 0.0.0.0/0, which matches no IPv6 address: on an IPv6 or IPv6-first cluster the workers reached no broker. The rule now admits the Kafka ports at any address, as the hook Jobs' policy already did"
     - kind: changed
       description: "testImages.kubectl moves to kates-tester 1.35.0, the tag the v1.35.0 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.30.1 (nothing under tester/ moved), so this is the pin, not the tooling."
     - kind: fixed

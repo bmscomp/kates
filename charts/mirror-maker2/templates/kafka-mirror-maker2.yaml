@@ -61,7 +61,11 @@ spec:
       {{- end }}
       {{- $autoRestart := $.Values.autoRestart }}
       {{- $cutover := $.Values.cutover | default dict }}
-      {{- with .sourceConnector }}
+      {{- /* A mirror with no connector block still gets the connector:
+             Strimzi creates none for an absent block and reports Ready, and
+             `--set mirrors[0]…` against the chart default (Helm replaces
+             lists) is exactly how a mirror arrives without one. */}}
+      {{- with (.sourceConnector | default (dict "tasksMax" 1)) }}
       sourceConnector:
         {{- with .version }}
         version: {{ . | quote }}
@@ -99,7 +103,7 @@ spec:
           {{- . | nindent 10 }}
         {{- end }}
       {{- end }}
-      {{- with .checkpointConnector }}
+      {{- with (.checkpointConnector | default (dict "tasksMax" 1)) }}
       checkpointConnector:
         {{- with .version }}
         version: {{ . | quote }}

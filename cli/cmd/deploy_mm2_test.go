@@ -70,6 +70,8 @@ func TestDeployCommand_MirrorMaker2(t *testing.T) {
 	}
 	for _, want := range []string{
 		"-n kafka",
+		// Before the --set mirrors[0]…, or Helm replaces the default mirror.
+		"-f charts/mirror-maker2/values.yaml",
 		"--set target.clusterName=krafter",
 		"--set target.namespace=kafka",
 		"--set mirrors[0].source.clusterName=krafter",

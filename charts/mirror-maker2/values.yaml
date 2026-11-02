@@ -760,7 +760,7 @@ networkPolicy:
   kafka:
     ports: [9092, 9093]
     # -- One egress rule per cluster (the target's namespace, then each
-    # source's) instead of 0.0.0.0/0. Off by default because the shipped
+    # source's) instead of any address. Off by default because the shipped
     # default has to work for an external source whose address nobody has
     # declared; on, every source must be in-cluster (clusterName + namespace)
     # or carry a source.egressCIDR, and the render says which one is missing.

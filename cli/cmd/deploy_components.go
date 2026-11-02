@@ -1760,6 +1760,11 @@ func (dc *deployContext) mirrorMaker2Component() component {
 			helmArgs := []string{
 				"upgrade", "--install", "mm2", chartRootPath("charts/mirror-maker2"),
 				"-n", mm2NS, "--create-namespace",
+				// The chart's own values as a values file: --set mirrors[0]…
+				// below then merges into its loopback mirror. Against the
+				// chart defaults Helm replaces the list instead, leaving a
+				// mirror with no connectors and no source credentials.
+				"-f", chartRootPath("charts/mirror-maker2/values.yaml"),
 			}
 			if overlay := dc.chartOverlay(chartRootPath("charts/mirror-maker2")); dc.fileExists(overlay) {
 				helmArgs = append(helmArgs, "-f", overlay)

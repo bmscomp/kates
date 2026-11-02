@@ -41,7 +41,7 @@ spec:
     {{- include "kafka-common.netpol.apiServerEgress" (dict "ports" $api.ports "ipBlock" $api.ipBlock) | nindent 4 }}
     {{- end }}
     {{- if $np.kafka.perSource }}
-    {{- /* One rule per destination instead of 0.0.0.0/0. An in-cluster source
+    {{- /* One rule per destination instead of any address. An in-cluster source
            or target is reachable by its namespace, so the policy names the
            namespace rather than the internet; an external one contributes the
            CIDR its entry declares. A source with neither is a render-time
@@ -69,7 +69,7 @@ spec:
         - ipBlock:
             cidr: {{ .source.egressCIDR }}
         {{- else }}
-        {{- fail (printf "mirror-maker2: networkPolicy.kafka.perSource is on, but source %q is neither in-cluster (clusterName + namespace) nor given an egressCIDR. Per-source egress cannot be derived for it — add source.egressCIDR, or turn perSource off to allow 0.0.0.0/0." $alias) }}
+        {{- fail (printf "mirror-maker2: networkPolicy.kafka.perSource is on, but source %q is neither in-cluster (clusterName + namespace) nor given an egressCIDR. Per-source egress cannot be derived for it — add source.egressCIDR, or turn perSource off to allow any address." $alias) }}
         {{- end }}
       ports:
         {{- range $np.kafka.ports }}
@@ -78,11 +78,9 @@ spec:
         {{- end }}
     {{- end }}
     {{- else }}
-    # Kafka brokers — source AND target, arbitrary IPs
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-      ports:
+    # Kafka brokers — source AND target, any address. No ipBlock: 0.0.0.0/0
+    # matches no IPv6 destination, which drops every broker on an IPv6 cluster.
+    - ports:
         {{- range $np.kafka.ports }}
         - port: {{ . }}
           protocol: TCP
