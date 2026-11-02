@@ -17,7 +17,9 @@ type: application
 # release publishes; every chart that runs it pins the same one.
 # Patch: a mirror with neither connector is refused at render time, and
 # values-generic.yaml restates the default mirror so `kates deploy` keeps it.
-version: 0.11.22
+# Patch: Kafka egress admits its ports at any address: 0.0.0.0/0 matched no
+# IPv6 broker.
+version: 0.11.23
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
@@ -44,6 +46,8 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "Kafka egress no longer names ipBlock 0.0.0.0/0, which matches no IPv6 address: on an IPv6 or IPv6-first cluster the workers reached no broker. The rule now admits the Kafka ports at any address, as the hook Jobs' policy already did"
     - kind: fixed
       description: "A mirror with neither sourceConnector nor checkpointConnector is refused at render time. Helm replaces a list rather than merging it, so a mirrors: override naming only the source dropped the default entry's connector blocks, and Strimzi reported the CR Ready with zero connectors: healthy workers mirroring nothing"
     - kind: fixed

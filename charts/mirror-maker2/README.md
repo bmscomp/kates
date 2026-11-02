@@ -260,7 +260,7 @@ source on another cluster, and four things change:
    preflight runs exactly that.
 2. **Egress.** `networkPolicy.kafka.ports` must include the source's port;
    non-standard ports need adding, or `networkPolicy.extraEgress`. Kafka egress
-   defaults to `0.0.0.0/0` on those ports, because the shipped default has to
+   defaults to any address (IPv4 and IPv6) on those ports, because the shipped default has to
    work for an external source whose address nobody has declared. Set
    `networkPolicy.kafka.perSource: true` to narrow it to one rule per cluster —
    every source must then be in-cluster or carry `source.egressCIDR`.
@@ -480,7 +480,7 @@ Three per-source knobs are worth setting on a real fan-in:
 
 | Value | Why |
 |---|---|
-| `networkPolicy.kafka.perSource: true` | egress becomes one rule per cluster instead of `0.0.0.0/0`. Every source must then be in-cluster (`clusterName` + `namespace`) or carry `source.egressCIDR`; the render names the one that is missing. |
+| `networkPolicy.kafka.perSource: true` | egress becomes one rule per cluster instead of any address. Every source must then be in-cluster (`clusterName` + `namespace`) or carry `source.egressCIDR`; the render names the one that is missing. |
 | `secretSync.secrets[].as` | both sources probably ship a Secret called `kates-mm2`. `as` is the name the copy lands under here. |
 | `tests.replication.topicByAlias` | one topic per leg, when the mirrors select exact lists rather than patterns. |
 
