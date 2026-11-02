@@ -407,6 +407,18 @@ Ready while nothing replicates.
 {{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{- /* ── A mirror with no connectors replicates nothing ──────────────────
+       Helm replaces a list rather than merging it, so a `mirrors:` override
+       that names only the source drops the default entry's connector blocks.
+       Strimzi then reports the CR Ready with zero connectors: healthy workers
+       copying nothing. Last in this helper so the more specific checks above
+       still name their own problem first. */ -}}
+{{- range $ctx.Values.mirrors -}}
+{{- if not (or .sourceConnector .checkpointConnector) -}}
+{{- fail (printf "mirror-maker2: mirror %q has neither sourceConnector nor checkpointConnector, so Strimzi creates no connectors and nothing is mirrored while the CR still reports Ready. A mirrors: override replaces the default list, connector blocks included; copy them from the chart's values.yaml into each mirror." (.source.alias | default "source")) -}}
+{{- end -}}
+{{- end -}}
 {{- end }}
 
 {{/*

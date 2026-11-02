@@ -1,6 +1,33 @@
 # Generic overlay — for unknown clusters (EKS/GKE/AKS/on-prem). Disables
 # components that need extra operators (Prometheus CRDs). Set the source
 # bootstrap + credentials and RF to match your target cluster's broker count.
+# The default mirror, restated: `kates deploy` sets mirrors[0].source.* with
+# --set, which merges into a list from a values file but replaces the chart's
+# own default list, connector blocks included.
+mirrors:
+  - source:
+      alias: source
+      clusterName: "krafter"
+      namespace: "kafka"
+      authentication:
+        type: scram-sha-512
+        username: "kates-mm2"
+        secretName: "kates-mm2"
+        secretKey: "password"
+    sourceConnector:
+      tasksMax: 3
+      config:
+        replication.factor: 3
+        offset-syncs.topic.replication.factor: 3
+        sync.topic.acls.enabled: "false"
+        refresh.topics.interval.seconds: 60
+    checkpointConnector:
+      tasksMax: 1
+      config:
+        checkpoints.topic.replication.factor: 3
+        sync.group.offsets.enabled: "true"
+        refresh.groups.interval.seconds: 60
+
 podMonitors:
   enabled: false
 metrics:
