@@ -124,8 +124,9 @@ func (g *ValuesGenerator) computeCapacityBudget() CapacityBudget {
 	cb.ControllerReplicas = g.controllerCount()
 	cb.BrokerReplicas = g.selectBrokerReplicas()
 
-	// Step 7: Distribute across components
-	totalBrokers := cb.BrokerReplicas * max(len(zones), 1)
+	// Step 7: Distribute across components. buildBrokerPools emits three
+	// broker pools (or one of three replicas) whatever the zone count.
+	totalBrokers := cb.BrokerReplicas * 3
 	podCPUCap, podMemCap := g.schedulablePodBudget(zones, usable)
 
 	// Controller distribution

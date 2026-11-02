@@ -153,6 +153,33 @@ func TestGenerateValues_ControllerSizingMatchesThePoolsEmitted(t *testing.T) {
 	}
 }
 
+// Broker sizing divides the broker share by the brokers the pools emit,
+// three whatever the zone count: with no zones (one k3d node) it divided
+// by one, so three 8-CPU brokers were asked of an 18-CPU node and the
+// controllers never scheduled.
+func TestGenerateValues_BrokerSizingMatchesThePoolsEmitted(t *testing.T) {
+	for _, zones := range []int{0, 1, 2, 3} {
+		r := buildTestReport(zones, []string{"standard"})
+		if zones == 0 {
+			r.Nodes = append(r.Nodes, NodeInfo{CPU: 18000, MemoryGi: 39})
+		}
+		gen := NewValuesGenerator(r, "krafter")
+		emitted := 0
+		for _, p := range poolsWithRole(gen.Generate(), "broker") {
+			emitted += p.Replicas
+		}
+		want := clamp(int(float64(gen.Cap.KafkaCPU)*brokerCPUShare)/emitted, minBrokerCPU, maxBrokerCPU)
+		if gen.Cap.BrokerCPU != want {
+			t.Errorf("%d zones: broker CPU = %dm, want the share split over %d brokers, %dm",
+				zones, gen.Cap.BrokerCPU, emitted, want)
+		}
+		if zones == 0 && emitted*gen.Cap.BrokerCPU+gen.Cap.ControllerReplicas*gen.Cap.ControllerCPU > 18000 {
+			t.Errorf("one 18-CPU node: %d brokers × %dm + %d controllers × %dm do not fit",
+				emitted, gen.Cap.BrokerCPU, gen.Cap.ControllerReplicas, gen.Cap.ControllerCPU)
+		}
+	}
+}
+
 // The 0.4 keys are gone from the output: kafka-cluster 1.x ignores
 // strimziOperator, crdUpgrade and kafkaConnect, fails on
 // drainCleaner.enabled, and translates the pool keys with a deprecation
