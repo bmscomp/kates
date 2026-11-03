@@ -13,13 +13,9 @@ type: application
 # REMOVED. 0.10.0 froze them into the generated board and documented them as
 # inert, which left two keys that accept a number and ignore it; a release
 # setting either is now refused with the constant to edit named.
-# Patch: testImages.kubectl moves to kates-tester 1.35.0, the tag the v1.35.0
+# Patch: testImages.kubectl moves to kates-tester 1.36.0, the tag the v1.36.0
 # release publishes; every chart that runs it pins the same one.
-# Patch: a mirror with neither connector is refused at render time, and
-# values-generic.yaml restates the default mirror so `kates deploy` keeps it.
-# Patch: Kafka egress admits its ports at any address: 0.0.0.0/0 matched no
-# IPv6 broker.
-version: 0.11.23
+version: 0.11.24
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
@@ -46,6 +42,8 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "testImages.kubectl moves to kates-tester 1.36.0, the tag the v1.36.0 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.30.1 (nothing under tester/ moved), so this is the pin, not the tooling."
     - kind: fixed
       description: "Kafka egress no longer names ipBlock 0.0.0.0/0, which matches no IPv6 address: on an IPv6 or IPv6-first cluster the workers reached no broker. The rule now admits the Kafka ports at any address, as the hook Jobs' policy already did"
     - kind: fixed

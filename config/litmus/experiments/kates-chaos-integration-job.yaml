@@ -18,7 +18,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: chaos-runner
-          image: ghcr.io/bmscomp/kates-tester:1.35.0
+          image: ghcr.io/bmscomp/kates-tester:1.36.0
           imagePullPolicy: IfNotPresent
           env:
             - name: KATES_API_URL
