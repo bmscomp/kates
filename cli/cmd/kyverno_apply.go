@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -107,6 +108,24 @@ several are.`,
 		ns := string(nsOut)
 		devNamespaces := strings.Contains(ns, "-dev") || strings.Contains(ns, "-staging") || strings.Contains(ns, "sandbox")
 		helmArgs = append(helmArgs, "--set", fmt.Sprintf("kyvernoPolicy.policyExceptions.enabled=%t", devNamespaces))
+
+		// What the cluster's own policies need, as deploy passes it: the
+		// reused values hold .policies as it was at the last deploy.
+		policies, err := currentDeployPolicies()
+		if err != nil {
+			return err
+		}
+		warnUnresolvedPolicies(policies)
+		policyDir, err := os.MkdirTemp("", "kates-kyverno-apply-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(policyDir)
+		policyArgs, err := policies.writeChartValues(policyDir, "kates")
+		if err != nil {
+			return err
+		}
+		helmArgs = append(helmArgs, policyArgs...)
 
 		if kyvernoApplyDryRun {
 			helmArgs = append(helmArgs, "--dry-run")

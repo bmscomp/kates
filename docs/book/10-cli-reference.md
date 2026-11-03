@@ -1750,7 +1750,7 @@ Detect the cluster's configuration and deploy Kafka for it.
 kates auto
 ```
 
-`--labels-file` (default: `.labels` in the current directory) and `KATES_NAMESPACE_LABELS` label the namespace it installs into, as [Namespace Labels](12-deployment.md#namespace-labels) describes for `kates deploy`.
+`--labels-file` (default: `.labels` in the current directory) and `KATES_NAMESPACE_LABELS` label the namespace it installs into, as [Namespace Labels](12-deployment.md#namespace-labels) describes for `kates deploy`. `--policies-file` (default: `.policies`) gives the `kafka-cluster` and `monitoring` charts the current context's [Kyverno policies file](12-deployment.md#kyverno-policies-file) values.
 
 #### init
 
@@ -2140,6 +2140,7 @@ Its flags pick the mode, the extra policies and the release:
 | `--dry-run` | Render the release with `helm upgrade --install --dry-run` and report how many resources it would apply; installs nothing |
 | `--app-ns`, `--topology`, `--namespace` | The namespace of the kates release to update, as for `kates deploy`; by default the installed release's |
 | `--labels-file` | Labels for the `kyverno` and `kates` namespaces (default: `.labels` in the current directory); see [Namespace Labels](12-deployment.md#namespace-labels) |
+| `--policies-file` | The [Kyverno policies file](12-deployment.md#kyverno-policies-file) whose `kates` values the upgrade passes (default: `.policies`, skipped when missing; a named file must exist) |
 
 When two `kates` releases are installed, `kyverno apply` asks for `--app-ns`.
 

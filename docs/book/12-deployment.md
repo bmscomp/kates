@@ -979,6 +979,8 @@ Each key of an environment does one thing on a deploy:
 | `values` | Values per chart, by chart name, passed after deploy's own values files; a value deploy sets with `--set` still wins |
 | `unresolved` | Nothing: deploy warns, naming each rule, and installs. They are the rules the last check could not fix |
 
+`kates auto` passes the same values to the `kafka-cluster` and `monitoring` charts it installs, and `kates kyverno apply` passes the `kates` chart's to the release it upgrades. Both warn about `unresolved` rules.
+
 Deploy reads the environment named after the kube context it deploys to. A context with no environment gets nothing from the file. `--policies-file <path>` reads another file, which must exist. Deploy refuses a file with a key it doesn't know, a label that breaks the [label rules](#step-2--check-the-labels), or values for a chart it doesn't install.
 
 ### Fill It In From the Cluster

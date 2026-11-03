@@ -132,6 +132,17 @@ func readDeployPolicies(env string) (deployPolicies, error) {
 	return doc.Environments[env], err
 }
 
+// currentDeployPolicies is the current kube context's environment in
+// .policies. kubectl is asked for the context only when the file has
+// environments.
+func currentDeployPolicies() (deployPolicies, error) {
+	doc, err := readPoliciesDoc()
+	if err != nil || len(doc.Environments) == 0 {
+		return deployPolicies{}, err
+	}
+	return doc.Environments[currentContextName()], nil
+}
+
 // chartValues is what .policies sets in chart: its values, with the pod
 // labels under every label key the values do not already set.
 func (p deployPolicies) chartValues(chart string) map[string]any {
