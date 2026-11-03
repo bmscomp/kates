@@ -1,6 +1,6 @@
 # Admin-less Kates: enhancement plan
 
-**Status: proposed. Nothing in it is implemented yet.**
+**Status: proposed. Nothing in it is implemented yet. Run end to end on kind on 2026-11-03 as a namespace-only account: section 2.F lists what that run confirmed and found, section 9 how to repeat it.**
 
 `kates deploy --adminless` installs Kafka, Kafka Connect with its PostgreSQL, MirrorMaker 2, Apicurio, Kafka UI and the Kates API into namespaces an account already has, for an account that is not cluster-admin. This plan makes that a first-class way to run Kates rather than a deploy flag. A team with the built-in `admin` role in a few namespaces should install the stack on the first try. Every day-2 command should then work, or say plainly what it cannot see. The Kates API should keep as much of its value as namespaced rights allow, chaos included. Whatever does need a cluster admin should go out as one reviewed bundle, not as a chain of refusals.
 
@@ -84,6 +84,40 @@ Severity: **B** means the install fails for a namespace `admin`. **D** means it 
 | E3 | No CI job runs the profile as a non-admin account, so every finding above shipped unnoticed. | root cause |
 | E4 | The book documents the install path but none of the day-2 behaviour (C1–C12, D2–D7). | M |
 
+### F. Found by running it on kind
+
+On 2026-11-03 the flow ran on a single-node kind cluster (Kubernetes 1.34, 4 CPUs, 15 GiB) as a ServiceAccount bound to the built-in `admin` role in one namespace, `team`. A cluster admin had installed Strimzi 1.2.0 watching `team`, with `createAggregateRoles=true`. Section 9 has the steps.
+
+**Confirmed live:**
+- **A2:** Apicurio's install was refused on KafkaTopic `kafkasql-journal` in namespace `kafka`.
+- **A6:** 3 controllers and 3 brokers were rendered, and two brokers stayed Pending on CPU until the 15-minute timeout.
+- **C1:** `clean` without flags said "Nothing to remove".
+- **C2:** `deploy status` showed the admin's running Strimzi as "missing, Not deployed".
+- **C3:** `detect` failed.
+- **C4:** `doctor` exited 1 on Kyverno.
+- **C6:** `ports` without flags found "No Kates services".
+- **C7:** `operators list` failed.
+- **D6:** `cluster alerts` showed "✓ 0 critical" with 0 rules scanned.
+
+**What works:**
+- The capability preflight passed.
+- Kafka, Kates and Kafka UI installed in `team`.
+- A LOAD test ran 40,000 records at about 35,000 records per second.
+- `ports` with `--app-ns`/`--kafka-ns` forwarded everything.
+
+| ID | Finding | Where | Sev |
+|---|---|---|---|
+| F1 | The compliance-Role check asks for `list podmonitors` even when the cluster serves no `monitoring.coreos.com` API. The account held the other five reads, yet the Role was skipped. That one false gap switched off compliance checks, `cluster topology` (503: may not list pods) and the disruption safety guard (F7). The chart's Role carries the PodMonitor rule unconditionally too. | `cli/cmd/deploy_adminless.go` `complianceReaderGrants`; `charts/kates/templates/rbac.yaml:97-150` | B |
+| F2 | Admin-less skips introspection, so a kind cluster reads as "generic". No kind overlay is applied, and Kafka gets the chart's full default size. | `cli/cmd/deploy.go:482-490`, `:560`, `newDeployContext` `isKindReport` | B |
+| F3 | Deploy waited 15 minutes printing "2 Pending" without saying why. The FailedScheduling events ("Insufficient cpu") were readable in the account's own namespace. | `dc.waitPods` | D |
+| F4 | `--ha=false` sizes nothing: `kafka.replicas` is ignored by the chart, and MirrorMaker 2 and Connect default to 3 workers whatever the flag says. There is no flag that passes values to a chart, so a team cannot size its own stack through deploy. | `deploy_components.go:1203-1215`; `charts/mirror-maker2/values.yaml:41`; `charts/connect-cluster/values.yaml:62` | B |
+| F5 | Kafka, its node pools, topics and rebalance templates carry `helm.sh/resource-policy: keep`. **`kates clean` reported "Cluster cleaned successfully" and left the Kafka cluster running**: the Kafka CR, 2 node pools, 9 topics, 6 users, 4 pods and 4 PVCs. A reinstall adopts the kept objects without changing their spec, so node pools stayed at 3 replicas and topics at replication factor 3 after a resize. | `charts/kafka-cluster/templates/kafka.yaml:49`, `nodepools.yaml:95`, `rebalance.yaml:52`; `cli/cmd/clean.go` | B |
+| F6 | `detect` printed "the Kubernetes cluster is unreachable" and exited 0 when only the nodes read was refused. | `cli/pkg/detect/collector.go:150`, `:387`; `cli/cmd/detect.go:113` | M |
+| F7 | A playbook was REJECTED with "No broker pods found … in namespace 'team'" while the brokers ran: the pod list was refused, and the guard reads a refusal as an empty list. | `DisruptionSafetyGuard.java:376-388` | M |
+| F8 | A failed component (Apicurio) aborted the pipeline while other releases were mid-install. A rerun re-upgraded MirrorMaker 2 and undid a team's own resize. | deploy scheduler | D |
+| F9 | The version plan printed "Operator → install" in admin-less, which never installs it. | `cli/cmd/deploy_versions.go` | M |
+| F10 | `doctor`'s remediation for Kyverno is `kates kyverno apply` or `--with-kyverno`, neither of which an admin-less account may run. | `cli/cmd/doctor.go` | M |
+
 ## 3. Design principles
 
 1. **Two personas, one handoff.** The platform admin acts once per team, and the team acts every day. Whatever Kates needs from the admin goes out as one reviewed bundle, generated from the same chart versions it will install, and is verified on return.
@@ -97,7 +131,7 @@ Severity: **B** means the install fails for a namespace `admin`. **D** means it 
 
 Each wave is one PR, or a few, with its own tests and book changes. Waves 1 and 2 make the install and the commands right. Waves 3 and 4 add what admin-less cannot do today. Wave 5 proves it in CI.
 
-### Wave 1 — the install succeeds on a stock namespace `admin` (fixes A1–A7, B1–B5)
+### Wave 1 — the install succeeds on a stock namespace `admin` (fixes A1–A7, B1–B5, F1–F5)
 
 | # | Item | Done when |
 |---|---|---|
@@ -111,14 +145,19 @@ Each wave is one PR, or a few, with its own tests and book changes. Waves 1 and 
 | 1.8 | **NetworkPolicy namespaces (B2).** Pass the monitoring and operator namespaces the matrix found, or the ones given on the command line, into every chart. The defaults stop naming `monitoring` and `strimzi-operator` in admin-less. | The cluster's Prometheus scrapes the stack when the scrape option is on. |
 | 1.9 | **DNS domain (B3).** Read the cluster domain from `/etc/resolv.conf` of a short-lived pod in the app namespace, not `default`, and fall back to `cluster.local` with a note. | A cluster on `cluster.internal` gets correct bootstrap addresses. |
 | 1.10 | **No namespace creation (B4).** In admin-less, a missing namespace stops the plan and goes into the admin bundle (4.1), never into a `kubectl create` attempt. | The book's "creates no namespace" is true. |
+| 1.11 | **Compliance Role follows the cluster (F1).** The Role's PodMonitor rule renders only when `monitoring.coreos.com` is served, and the CLI asks for that grant only then. | On a cluster without the Prometheus operator, a namespace `admin` gets compliance checks, topology and the disruption guard. |
+| 1.12 | **Platform without introspection (F2).** Detect kind, k3d and minikube from the kube context and server version, which need no cluster rights, so their overlays apply in admin-less. | The kind overlay applies to an admin-less deploy on kind. |
+| 1.13 | **Say why pods wait (F3).** While waiting, read the namespace's events for the pods. Print the first FailedScheduling or ImagePullBackOff reason, and stop early on Insufficient resources that will not clear. | "2 Pending" becomes "2 brokers cannot be scheduled: Insufficient cpu" within a minute. |
+| 1.14 | **Every size has a knob (F4).** `--size` (1.6) sets node pools, MirrorMaker 2 and Connect workers, and topic replication together. `--ha` maps to it. `kafka.replicas` is honoured or removed. `--values <chart>=<file>` passes a team's own values to one chart. | `--size small` fits one 4-CPU node with the whole admin-less stack. |
+| 1.15 | **Kept resources (F5).** Deploy compares a kept Kafka, node pool or topic with what it renders, and patches what can change in place (replicas up, config) or names what cannot. | A resize through deploy takes effect, or is refused with a reason. |
 
-### Wave 2 — every command is honest (fixes C1–C12, E1)
+### Wave 2 — every command is honest (fixes C1–C12, E1, F5, F6, F8–F10)
 
 | # | Item | Done when |
 |---|---|---|
 | 2.1 | **Deployment record (E1).** Deploy writes a ConfigMap `kates-deployment` in the app namespace (the account owns it). It records the profile, the resolved namespace map, the release names and chart versions, the capability matrix summary, and what was left out. A `deploymentRecord` loader in the CLI gives every command its namespaces; flags still win. | `kates clean`, `ports`, `deploy status` and `connect` need no `--*-ns` after an admin-less deploy. |
 | 2.2 | **Forbidden is not absent.** One `kube.Classify(err, output)` helper returns Forbidden, NotFound or Error. It is used by every `kubectl get` in `cli/cmd` and `cli/pkg/detect`, and a lint test forbids a raw `get` whose error is dropped. | No refusal prints as "not installed", "pass" or "0". |
-| 2.3 | **`clean` (C1).** Use the record's releases and namespaces. Uninstall them per namespace, delete the Kafka CRs and their finalizers, offer to delete PVCs, and never touch namespaces, CRDs or ClusterRoles in admin-less. | `kates clean` after an admin-less deploy leaves the namespaces empty of Kates. |
+| 2.3 | **`clean` (C1, F5).** Use the record's releases and namespaces. Uninstall them per namespace. Then delete what the charts keep on purpose (the Kafka CR, node pools, topics, users and rebalance templates), and the finalizers. Offer to delete PVCs, report "cleaned" only when the namespaces hold no Kates object, and never touch namespaces, CRDs or ClusterRoles in admin-less. | `kates clean` after an admin-less deploy leaves the namespaces empty of Kates. |
 | 2.4 | **`deploy status` (C2).** Rows come from the record. The admin's Strimzi shows as "provided by the cluster (version, watches)" when visible, and "provided by the cluster (not visible to this account)" otherwise. | No "Not deployed" for components the profile does not own. |
 | 2.5 | **`detect` and `auto` (C3).** An admin-less collector mode reads only namespaced data, and nodes, StorageClasses and CRDs when the matrix allows. Its write probes run in the app namespace and never create one. A forbidden section shows as `unread` in every renderer. | `kates detect` on a namespace account completes and says what it could not see. |
 | 2.6 | **`doctor` (C4, C5).** Kyverno checks are skipped in admin-less with a reason. `dns` and `network` run their pods in the record's namespaces, and a forbidden NetworkPolicy list is `unread`, never `pass`. | `kates doctor` exits 0 on a healthy admin-less stack. |
@@ -126,8 +165,9 @@ Each wave is one PR, or a few, with its own tests and book changes. Waves 1 and 
 | 2.8 | **`security` and `kyverno` (C9, C11).** A forbidden Kyverno read is `unread`, the grade is not recomputed on it, and drift reads the record's namespaces. `kyverno` subcommands say "needs cluster admin" up front. | No HIGH finding from a refusal. |
 | 2.9 | **`migrate` (C10).** A forbidden CRD read says so. Labs need namespaces, so in admin-less `migrate up` refuses up front, and names the namespaces for the admin bundle. | No "CRD is not installed" from a refusal. |
 | 2.10 | **Say when chaos is off (C12).** `disruption run`, `playbook run` and `resilience run` refuse under the noop provider unless `--allow-noop` is given, with a message naming the namespaced provider (3.3). Reports carry `faultInjected: false`. | No disruption report reads as passed without a fault. |
+| 2.11 | **Small truths (F6, F8, F9, F10).** `detect` says which read was refused instead of "unreachable", and exits 2. The version plan says "operator: the cluster's" in admin-less. `doctor` gives an admin-less remediation (the admin bundle, 4.1). A failed component lets the others finish and lists all failures, and a rerun keeps a team's values for releases it did not change. | Each message matches what happened. |
 
-### Wave 3 — the backend knows its scope, and chaos works without admin (fixes D1–D7, C12)
+### Wave 3 — the backend knows its scope, and chaos works without admin (fixes D1–D7, C12, F7)
 
 | # | Item | Done when |
 |---|---|---|
@@ -137,6 +177,7 @@ Each wave is one PR, or a few, with its own tests and book changes. Waves 1 and 
 | 3.4 | **Orphan reconciler (D4).** Scan only the scope's namespaces, and say once at INFO what it skipped. | No WARN per start in namespace scope. |
 | 3.5 | **Alerts (D6).** A forbidden PrometheusRule list returns `unread`, not zero rules. The CLI prints "alert rules not readable by this account". | No silent "0 alerts". |
 | 3.6 | **INTEGRATION_CDC (D7).** Namespaces come from 3.1. The test runs where the matrix holds create on KafkaTopic and KafkaConnector (the team's own namespaces under Strimzi's aggregated roles). Otherwise it is refused before it starts, with the missing grants. | The CDC test passes on an admin-less stack with Strimzi's aggregated roles. |
+| 3.7 | **Guard reads (F7).** The disruption safety guard tells a refused pod list from an empty one, and rejects with "the Kates API may not list pods in <ns>". | No "No broker pods found" while brokers run. |
 
 ### Wave 4 — the admin handoff (fixes E2)
 
@@ -165,7 +206,7 @@ Each wave is one PR, or a few, with its own tests and book changes. Waves 1 and 
 | 4 | 1.1, 1.2 | M | One admin request instead of a chain of refusals |
 | 5 | 5.2 after 1.3, 5.1 after 4.1 | M | It stays fixed |
 
-Start with 1.1, 1.2 and 5.2 together: the capability matrix and the render-then-check preflight make the rest testable, and the chart gate stops new regressions while the waves land.
+The kind run adds two quick fixes worth shipping first, each a small change: F1 (the PodMonitor grant, 1.11) and F5 (`clean` leaving Kafka running, 2.3). Then start 1.1, 1.2 and 5.2 together: the capability matrix and the render-then-check preflight make the rest testable, and the chart gate stops new regressions while the waves land.
 
 ## 6. Decisions for the maintainer
 
@@ -183,3 +224,26 @@ Start with 1.1, 1.2 and 5.2 together: the capability matrix and the render-then-
 ## 8. Verification for every PR
 
 The repository's usual gates: `go build`, `go vet`, cross-builds, `go test ./...`, race tests, golangci-lint over the whole tree, `./mvnw test` with spotless, `check-cli-compat.sh`, `check-book-style.sh` and `check-versions.sh`. From wave 1 onwards, also the chart gate (5.2). From wave 4 onwards, also the admin-less kind job (5.1).
+
+## 9. Repeating the kind test
+
+What the run in 2.F did, in the order 5.1 would script it. The first three steps are only needed in a sandbox like the one it ran in, behind an HTTPS proxy, with Docker Hub rate-limited, and with nested containers unable to lower `oom_score_adj`. A GitHub runner needs none of them.
+
+1. **Sandbox only:**
+   - Point kind's nodes at a proxy they can reach (a TCP relay on the Docker bridge to the local proxy).
+   - Mount the proxy's CA into the node, run `update-ca-certificates` and restart containerd.
+   - Mirror `docker.io` to `mirror.gcr.io` in `/etc/containerd/certs.d/docker.io/hosts.toml`.
+   - Set `restrict_oom_score_adj = true` in the CRI plugin through `containerdConfigPatches`.
+2. Create a single-node kind cluster from `mirror.gcr.io/kindest/node:v1.34.11`.
+3. **As cluster admin:**
+   - `kubectl create namespace team`.
+   - Install Strimzi the way `kates deploy` tells an admin to (`helm upgrade --install strimzi-operator charts/strimzi-operator -n strimzi-operator --create-namespace --set strimzi-kafka-operator.createAggregateRoles=true --set strimzi-kafka-operator.watchAnyNamespace=false --set 'strimzi-kafka-operator.watchNamespaces={team}'`). Behind a proxy, also pass the `crdUpgrade.proxy.*` values.
+4. **The team account:**
+   - `kubectl -n team create serviceaccount dev`.
+   - `kubectl -n team create rolebinding dev-admin --clusterrole=admin --serviceaccount=team:dev`.
+   - A kubeconfig with `kubectl -n team create token dev`, whose context namespace is `team`.
+   - Check that `kubectl auth can-i '*' '*' --all-namespaces` says `no`.
+5. **As the team:**
+   - `kates deploy --adminless --topology single --namespace team --yes`, first with `--dry-run`.
+   - Then `deploy status`, `ports`, `doctor`, `detect`, `operators list`, `test create --type LOAD --wait`, `cluster topology`, `cluster alerts`, `disruption playbook run rolling-restart`, and `clean --yes`.
+   - Then list what is left in `team`.
