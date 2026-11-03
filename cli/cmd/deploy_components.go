@@ -1436,6 +1436,13 @@ func (dc *deployContext) kafkaConnectHelmArgs(bootstrap, kafkaSvcDomain, connect
 		)
 	}
 
+	// Strimzi turns rack.topologyKey into a required node affinity, so with no
+	// zone label on any node the workers would stay Pending. An admin-less
+	// deploy reads no nodes and lands here too: rack only saves cross-zone fetches.
+	if len(dc.report.Zones) == 0 {
+		connectArgs = append(connectArgs, "--set", "rack.enabled=false")
+	}
+
 	if deployHA {
 		connectArgs = append(connectArgs, "--set", "replicas=3")
 	} else {

@@ -990,3 +990,20 @@ func TestWaitKafkaReady(t *testing.T) {
 		t.Errorf("err = %v, want the Ready reason", err)
 	}
 }
+
+func TestKafkaConnectHelmArgsRack(t *testing.T) {
+	rackOff := func(zones []detect.ZoneInfo) bool {
+		dc := &deployContext{
+			ns:           resolvedNamespaces{kafka: "kafka", connect: "connect"},
+			report:       &detect.DetectReport{Zones: zones},
+			chartOverlay: func(string) string { return "overlay.yaml" },
+		}
+		return strings.Contains(strings.Join(dc.kafkaConnectHelmArgs("b:9092", "", "cluster.local"), " "), "rack.enabled=false")
+	}
+	if !rackOff(nil) {
+		t.Fatal("rack stays on with no zones: Strimzi's required node affinity leaves the workers Pending")
+	}
+	if rackOff([]detect.ZoneInfo{{Name: "a"}}) {
+		t.Fatal("rack turned off on a cluster with zones")
+	}
+}
