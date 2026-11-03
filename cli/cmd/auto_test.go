@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bmscomp/kates/cli/internal/helm"
+	"github.com/bmscomp/kates/cli/internal/proc"
 	"github.com/bmscomp/kates/cli/pkg/detect"
 )
 
@@ -81,5 +83,26 @@ func TestWriteAutoValues(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "values-detected.yaml")); !os.IsNotExist(err) {
 		t.Errorf("a values file was created though --values could not be read: %v", err)
+	}
+}
+
+// The monitoring release gets .policies' monitoring values, as deploy's does.
+func TestAutoMonitoringPassesPolicies(t *testing.T) {
+	origChart := autoChartDir
+	t.Cleanup(func() { autoChartDir = origChart })
+	root := t.TempDir()
+	autoChartDir = filepath.Join(root, "kafka-cluster")
+	if err := os.MkdirAll(filepath.Join(root, "monitoring"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "monitoring", "Chart.yaml"), []byte("name: monitoring\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &proc.Fake{}
+	deployAutoMonitoring(helm.NewWith(fake, ""), []string{"-f", "monitoring-policies.yaml"})
+	lines := fake.Lines()
+	if len(lines) == 0 || !strings.Contains(lines[len(lines)-1], "upgrade --install monitoring ") || !strings.Contains(lines[len(lines)-1], " -f monitoring-policies.yaml") {
+		t.Errorf("monitoring must be installed with the policies values: %q", lines)
 	}
 }

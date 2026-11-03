@@ -53,6 +53,11 @@ func runAuto(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	policies, err := currentDeployPolicies()
+	if err != nil {
+		return err
+	}
+	warnUnresolvedPolicies(policies)
 
 	executor := defaultExecutor
 	collector := detect.NewCollector(executor)
@@ -91,6 +96,10 @@ func runAuto(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	output.Success(fmt.Sprintf("Configuration generated: %s", valuesPath))
+	policyValues, err := writeDeployPolicyValues(policies, valuesPath)
+	if err != nil {
+		return err
+	}
 
 	// 3. Helm Build Dependencies Phase
 	output.Header("Helm Deployment")
@@ -121,6 +130,7 @@ func runAuto(cmd *cobra.Command, args []string) error {
 		"--timeout", "10m", "--wait",
 		"--debug",
 	}
+	helmArgs = append(helmArgs, policyValues["kafka-cluster"]...)
 
 	if autoDryRun {
 		helmArgs = append(helmArgs, "--dry-run")
@@ -140,7 +150,7 @@ func runAuto(cmd *cobra.Command, args []string) error {
 		output.Hint("⏭️  Skipping monitoring deployment (--skip-monitoring)")
 		return nil
 	}
-	deployAutoMonitoring(hc)
+	deployAutoMonitoring(hc, policyValues["monitoring"])
 	return nil
 }
 
@@ -183,7 +193,8 @@ func writeAutoValues(report *detect.DetectReport, dir string) (string, error) {
 // deployAutoMonitoring installs the monitoring chart next to the
 // kafka-cluster chart into the same namespace. Kafka is already deployed
 // when it runs, so a failure here warns rather than failing the command.
-func deployAutoMonitoring(hc *helm.Client) {
+// policyArgs pass .policies' monitoring values.
+func deployAutoMonitoring(hc *helm.Client, policyArgs []string) {
 	monitoringChartDir := filepath.Join(filepath.Dir(autoChartDir), "monitoring")
 	if _, err := os.Stat(filepath.Join(monitoringChartDir, "Chart.yaml")); os.IsNotExist(err) {
 		output.Warn(fmt.Sprintf("Monitoring chart not found at %s — skipping monitoring deployment", monitoringChartDir))
@@ -209,6 +220,7 @@ func deployAutoMonitoring(hc *helm.Client) {
 		"-f", monitoringValues,
 		"--timeout", "10m", "--wait",
 	}
+	monHelmArgs = append(monHelmArgs, policyArgs...)
 	if autoDryRun {
 		monHelmArgs = append(monHelmArgs, "--dry-run")
 	}

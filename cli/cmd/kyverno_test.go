@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -291,5 +292,45 @@ ops   cpol-x                Pod          y     1   n/a 0   0   0   5d
 	}
 	if total, perNS := policyReportFailures(""); total != 0 || len(perNS) != 0 {
 		t.Errorf("no reports: total %d, per namespace %v", total, perNS)
+	}
+}
+
+// The upgrade passes the current context's .policies values for kates, as
+// deploy does: without them a policy the cluster added since the last deploy
+// refuses the upgraded pods.
+func TestKyvernoApplyPassesPolicies(t *testing.T) {
+	calls := kyvernoApplyCluster(t, "team-kates", "kind: ClusterPolicy\n", nil)
+	kyvernoApplyDryRun = true
+	path := filepath.Join(t.TempDir(), ".policies")
+	if err := os.WriteFile(path, []byte("environments:\n  prod:\n    podLabels:\n      team: payments\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	origPath, read := policiesFilePath, runExecOutputFn
+	t.Cleanup(func() { policiesFilePath = origPath })
+	policiesFilePath = path
+	runExecOutputFn = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "kubectl" && strings.Join(args, " ") == "config current-context" {
+			return []byte("prod\n"), nil
+		}
+		return read(ctx, name, args...)
+	}
+
+	var values string
+	runExecCombinedFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		*calls = append(*calls, name+" "+strings.Join(args, " "))
+		if i := slices.Index(args, "-f"); i >= 0 {
+			b, err := os.ReadFile(args[i+1])
+			if err != nil {
+				t.Errorf("values file: %v", err)
+			}
+			values = string(b)
+		}
+		return []byte("kind: ClusterPolicy\n"), nil
+	}
+	if _, _, err := commandOutput(t, func() error { return kyvernoApplyCmd.RunE(kyvernoApplyCmd, nil) }); err != nil {
+		t.Fatalf("apply --dry-run: %v", err)
+	}
+	if len(*calls) != 1 || !strings.Contains(values, "team: payments") {
+		t.Errorf("helm must get .policies' pod labels: calls %q, values %q", *calls, values)
 	}
 }
