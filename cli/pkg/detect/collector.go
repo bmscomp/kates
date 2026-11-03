@@ -152,13 +152,7 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 		return nil
 	})
 	g.Go(func() error {
-		nodes, err := c.parseNodes(gctx)
-		if err != nil {
-			return err
-		}
-		report.Nodes = nodes
-		report.Zones = c.groupNodesByZone(nodes)
-		return nil
+		return c.CollectNodes(gctx, report)
 	})
 	g.Go(func() error {
 		report.Storage = c.getStorageClasses(gctx)
@@ -381,6 +375,18 @@ func (c *Collector) getHelmVersion(ctx context.Context) (string, int) {
 		return "unknown", 0
 	}
 	return "v" + out, major
+}
+
+// CollectNodes reads the nodes and their zones into report. An account refused
+// the read gets an error and a report with no nodes.
+func (c *Collector) CollectNodes(ctx context.Context, report *DetectReport) error {
+	nodes, err := c.parseNodes(ctx)
+	if err != nil {
+		return err
+	}
+	report.Nodes = nodes
+	report.Zones = c.groupNodesByZone(nodes)
+	return nil
 }
 
 func (c *Collector) parseNodes(ctx context.Context) ([]NodeInfo, error) {
