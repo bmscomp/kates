@@ -1,8 +1,10 @@
 apiVersion: v2
 name: headlamp
 description: Headlamp — Kubernetes Dashboard for cluster visualization and management
+icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/assets/charts/headlamp.svg
 type: application
-version: 0.2.2
+# Patch: the chart icon.
+version: 0.2.3
 appVersion: "0.40.1"
 keywords:
   - kubernetes
@@ -19,6 +21,8 @@ annotations:
   artifacthub.io/category: monitoring-logging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "A Kates chart icon."
     - kind: fixed
       description: "DNS egress goes to port 53 at any address, not only to pods: a node-local DNS cache (GKE, AKS, EKS NodeLocal DNSCache) answers from a node address, which a pod selector never matches"
     - kind: changed

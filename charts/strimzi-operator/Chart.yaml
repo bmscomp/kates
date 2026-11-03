@@ -5,12 +5,14 @@ name: strimzi-operator
 # Connect build; the Helm tests get resources, and podLabels is new.
 # Patch: testImages.kubectl moves to kates-tester 1.36.0, the tag the v1.36.0
 # release publishes; every chart that runs it pins the same one.
-version: 0.4.15
+# Patch: the chart icon.
+version: 0.4.16
 # Tracks the Strimzi operator version this chart deploys. The CLI rewrites this
 # (and the dependency version) in a generated copy when another version is
 # selected; the repository copy is the pin.
 appVersion: "1.2.0"
 description: The Strimzi Kafka Operator — wraps the upstream chart with pinned kates defaults, an owned CRD-upgrade hook, and a strict values schema
+icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/assets/charts/strimzi-operator.svg
 kubeVersion: ">=1.27.0-0"
 home: https://github.com/bmscomp/kates
 sources:
@@ -32,6 +34,8 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "A Kates chart icon."
     - kind: changed
       description: "testImages.kubectl moves to kates-tester 1.36.0, the tag the v1.36.0 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.30.1 (nothing under tester/ moved), so this is the pin, not the tooling."
     - kind: changed

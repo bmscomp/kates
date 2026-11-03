@@ -6,10 +6,12 @@ name: kates-chaos
 # kates-tester, which has the shell they need.
 # Patch: images.tester moves to kates-tester 1.36.0, the tag the v1.36.0
 # release publishes; every chart that runs it pins the same one.
-version: 2.4.2
+# Patch: the chart icon.
+version: 2.4.3
 # Tracks the LitmusChaos execution-plane version this chart deploys.
 appVersion: "3.28.0"
 description: Kates Chaos Engineering — wraps the LitmusChaos execution plane (operator, exporter, CRDs) with Kafka-specific RBAC, experiment/engine templating, and monitoring
+icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/assets/charts/kates-chaos.svg
 home: https://github.com/bmscomp/kates
 sources:
   - https://github.com/bmscomp/kates
@@ -30,6 +32,8 @@ annotations:
   artifacthub.io/category: skip-prediction
   artifacthub.io/prerelease: "false"
   artifacthub.io/changes: |
+    - kind: added
+      description: "A Kates chart icon."
     - kind: changed
       description: "images.tester moves to kates-tester 1.36.0, the tag the v1.36.0 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.30.1 (nothing under tester/ moved), so this is the pin, not the tooling."
     - kind: changed

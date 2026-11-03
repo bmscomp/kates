@@ -4,7 +4,8 @@ description: A deliberately old Kafka (2.x on ZooKeeper, or 3.x on KRaft) to mig
 type: application
 # Minor bump: mode and image derive from kafka.version when left empty, so any
 # version from 2.1 up deploys with no overlay.
-version: 0.2.1
+# Patch: the chart icon.
+version: 0.2.2
 # Tracks the default kafka.version — the newest 3.x line, whose official image
 # needs no build. Any other version is `--set kafka.version=<v>`; the mode and
 # the image follow (2.x is ZooKeeper on the built image, see values-kafka-2x.yaml).
@@ -23,11 +24,13 @@ keywords:
   - mirrormaker2
   - zookeeper
   - kraft
-icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/icon.png
+icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/assets/charts/legacy-kafka.svg
 annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "The chart icon pointed at a file the repository does not have; it is now a Kates icon."
     - kind: fixed
       description: "The Helm test pod has CPU and memory requests and a memory limit, testResources (100m/256Mi requests, 1000m/768Mi limits, what the topics Job gets: it runs two Kafka CLI JVMs), and uses imagePullSecrets like every other pod"
     - kind: added

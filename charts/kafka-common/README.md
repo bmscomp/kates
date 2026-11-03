@@ -10,7 +10,7 @@ A Helm **library** chart: the templates the Strimzi charts in this repository sh
 # Chart.yaml
 dependencies:
   - name: kafka-common
-    version: 0.1.2
+    version: 0.1.3
     repository: file://../kafka-common
 ```
 
