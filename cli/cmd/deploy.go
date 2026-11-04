@@ -229,16 +229,16 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := writeDeployValues(executor, valuesFile, report, primary.Name); err != nil {
+	// Resolve namespaces before building entries
+	ns := resolveNamespaces()
+
+	if err := writeDeployValues(commandContext(cmd), executor, valuesFile, report, primary.Name, ns); err != nil {
 		return err
 	}
 	policyValues, err := writeDeployPolicyValues(policies, valuesFile)
 	if err != nil {
 		return err
 	}
-
-	// Resolve namespaces before building entries
-	ns := resolveNamespaces()
 
 	// ── Build shared component registry (single source of truth) ──
 	sharedEntries := buildSharedEntries(ns)
@@ -580,9 +580,35 @@ func resolveDeployVersions() (*versionPlan, primaryCluster, error) {
 	return vp, primaryCluster{Name: deployKafkaName, Namespace: resolveNamespaces().kafka, Version: vp.kafka}, nil
 }
 
+// Each Connect or MirrorMaker 2 release runs this many workers by default,
+// each requesting this much: the charts' replicas and resources.requests.
+const (
+	workerReplicas = 3
+	workerCPU      = 1000 // millicores
+	workerMem      = 2    // GiB
+)
+
+// planDeployWorkers adds the Connect and MirrorMaker 2 workers this deploy
+// will install to the report, so Kafka is sized to leave room for them. A
+// release already there is in the report's running pods.
+func planDeployWorkers(ctx context.Context, report *detect.DetectReport, ns resolvedNamespaces) {
+	for _, w := range []struct {
+		enabled            bool
+		release, namespace string
+	}{
+		{deployWithKafkaConnect, "connect-cluster", ns.connect},
+		{deployWithMirrorMaker2, "mm2", ns.mm2},
+	} {
+		if w.enabled && !isHelmReleaseDeployedFn(ctx, w.release, w.namespace) {
+			report.Workload.PlannedCPURequests += workerReplicas * workerCPU
+			report.Workload.PlannedMemRequests += workerReplicas * workerMem
+		}
+	}
+}
+
 // writeDeployValues writes the values file the introspection sized.
 // Admin-less, nothing was introspected, so the file stays empty.
-func writeDeployValues(executor detect.CommandExecutor, valuesFile string, report *detect.DetectReport, kafkaName string) (err error) {
+func writeDeployValues(ctx context.Context, executor detect.CommandExecutor, valuesFile string, report *detect.DetectReport, kafkaName string, ns resolvedNamespaces) (err error) {
 	if err := os.MkdirAll(filepath.Dir(valuesFile), 0o755); err != nil {
 		return fmt.Errorf("failed to create values file: %v", err)
 	}
@@ -603,6 +629,7 @@ func writeDeployValues(executor detect.CommandExecutor, valuesFile string, repor
 	analyzer := detect.NewAnalyzer(executor)
 	analyzer.Analyze(report, detect.ParsedReqs{})
 
+	planDeployWorkers(ctx, report, ns)
 	PrintPhaseItem("Generating " + valuesFile + "...")
 	if err := detect.RenderValuesWithReserve(report, kafkaName, 0.30, f); err != nil {
 		return fmt.Errorf("failed to write values file: %v", err)

@@ -73,9 +73,9 @@ func (g *ValuesGenerator) computeCapacityBudget() CapacityBudget {
 	cb.UsedCPU = g.Report.Workload.TotalCPURequests
 	cb.UsedMem = g.Report.Workload.TotalMemRequests
 
-	// Step 3: Available = total - used
-	cb.AvailableCPU = cb.TotalCPU - cb.UsedCPU
-	cb.AvailableMem = cb.TotalMem - cb.UsedMem
+	// Step 3: Available = total - used - what the deploy adds beside Kafka
+	cb.AvailableCPU = cb.TotalCPU - cb.UsedCPU - g.Report.Workload.PlannedCPURequests
+	cb.AvailableMem = cb.TotalMem - cb.UsedMem - g.Report.Workload.PlannedMemRequests
 	if cb.AvailableCPU < 0 {
 		cb.AvailableCPU = 0
 	}
