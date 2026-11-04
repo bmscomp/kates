@@ -524,6 +524,10 @@ func TestCheckAdminlessStrimzi(t *testing.T) {
 		!strings.Contains(err.Error(), "watchNamespaces={team-connect,team-kafka,team-mm2}") {
 		t.Errorf("want the install suggested in strimzi-operator, watching the namespaces, got %v", err)
 	}
+	// Helm's RoleBindings need them: --create-namespace covers only the release's.
+	if !strings.Contains(err.Error(), "for n in team-connect team-kafka team-mm2; do kubectl create namespace") {
+		t.Errorf("want the watched namespaces created before the install, got %v", err)
+	}
 
 	for _, watches := range []string{"*", "strimzi-operator,team-kafka,team-connect,team-mm2"} {
 		runExecOutputFn = adminlessOperatorRead(watches)
@@ -539,6 +543,26 @@ func TestCheckAdminlessStrimzi(t *testing.T) {
 		!strings.Contains(err.Error(), "Strimzi 1.3.0 in namespace strimzi-operator") ||
 		!strings.Contains(err.Error(), "watchNamespaces={team-connect,team-kafka,team-mm2}") {
 		t.Errorf("want the unwatched namespace, the operator and the fix named, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "for n in team-mm2; do kubectl create namespace") {
+		t.Errorf("want the namespace to add created first, got %v", err)
+	}
+
+	// Watching the namespaces on paper, but crash-looping: an install that
+	// failed before the namespaces existed left it without RoleBindings there.
+	read := adminlessOperatorRead("*")
+	runExecOutputFn = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		out, err := read(ctx, name, args...)
+		if strings.Contains(strings.Join(args, " "), "get deployment -n strimzi-operator") {
+			out = []byte(strings.Replace(string(out), "{", `{"status":{"replicas":1},`, 1))
+		}
+		return out, err
+	}
+	err = checkAdminlessStrimzi(context.Background(), ns)
+	if err == nil || !strings.Contains(err.Error(), "no available pod") ||
+		!strings.Contains(err.Error(), "kubectl logs -n strimzi-operator deployment/") ||
+		!strings.Contains(err.Error(), "helm upgrade strimzi-operator") {
+		t.Errorf("want the down operator refused, with how to look and repair it, got %v", err)
 	}
 
 	// The account cannot list operator pods: the CRDs are enough to go on.
