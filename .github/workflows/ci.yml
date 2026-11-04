@@ -200,6 +200,21 @@ jobs:
       - name: Template validation
         run: helm template kates charts/kates/ > /dev/null
 
+      # Without its own tolerations the API pod waits out Kubernetes' default
+      # 300 s on a lost node. A user's tolerations must not drop them.
+      - name: Assert the API pod leaves a lost node quickly
+        run: |
+          out=$(helm template kates charts/kates/ \
+            --set nodeFailureTolerationSeconds=45 \
+            --set-json 'tolerations=[{"key":"dedicated","operator":"Exists"}]' \
+            --show-only templates/deployment.yaml)
+          for taint in not-ready unreachable; do
+            entry=$(printf '%s\n' "$out" | grep -A3 "key: node.kubernetes.io/$taint")
+            printf '%s\n' "$entry" | grep -q 'effect: NoExecute'
+            printf '%s\n' "$entry" | grep -q 'tolerationSeconds: 45'
+          done
+          printf '%s\n' "$out" | grep -q 'key: dedicated'
+
       # The backup CronJob dumps only the bundled PostgreSQL. values-prod.yaml
       # set backup.enabled with externalDatabase and rendered no backup,
       # silently. Assert the prod overlay renders and that the combination is

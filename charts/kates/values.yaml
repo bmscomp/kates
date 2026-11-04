@@ -216,6 +216,13 @@ containerSecurityContext:
 # -- Grace period for pod termination (seconds)
 terminationGracePeriodSeconds: 60
 
+# -- Seconds the Kates API pod stays bound to a NotReady or unreachable node
+# before Kubernetes replaces it, counted from the taint, which a dead node gets
+# some 40 to 50 s after it stops reporting. Kubernetes' default is 300. Lower
+# moves off a dead node sooner. Higher rides out a longer node outage, but a
+# node back after this long still loses the pod and the runs in it.
+nodeFailureTolerationSeconds: 30
+
 # -- Deployment update strategy. Must be Recreate; values.schema.json refuses
 # RollingUpdate, which starts the new pod while the old one still runs (see
 # replicaCount). Recreate stops the old pod first, so every upgrade has a gap:
