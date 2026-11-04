@@ -380,10 +380,17 @@ func strimziInstallSuggestion(watch []string) string {
 	return fmt.Sprintf(`Ask a cluster admin to install %s, in its own namespace strimzi-operator,
 watching %s:
 
+  %s
   helm upgrade --install strimzi-operator %s -n strimzi-operator --create-namespace \
     --set strimzi-kafka-operator.createAggregateRoles=true \
     --set strimzi-kafka-operator.watchAnyNamespace=false \
-    --set 'strimzi-kafka-operator.watchNamespaces={%s}'`, pin, strings.Join(watch, ", "), chartRef("strimzi-operator"), strings.Join(watch, ","))
+    --set 'strimzi-kafka-operator.watchNamespaces={%s}'`, pin, strings.Join(watch, ", "), createNamespacesCommand(watch), chartRef("strimzi-operator"), strings.Join(watch, ","))
+}
+
+// createNamespacesCommand makes the namespaces an operator is to watch. Its
+// RoleBindings go there, and --create-namespace covers only its own.
+func createNamespacesCommand(names []string) string {
+	return fmt.Sprintf(`for n in %s; do kubectl create namespace "$n" --dry-run=client -o yaml | kubectl apply -f -; done`, strings.Join(names, " "))
 }
 
 // adminlessOperatorAdvice says what a cluster admin could do with the
@@ -473,7 +480,8 @@ func describeStrimziOperator(op strimzi.Operator) string {
 
 // checkAdminlessStrimzi fails when Strimzi is missing, with the install a
 // cluster admin runs, or when the operators the account can see leave one of
-// the namespaces unwatched: its Kafka resources would never be reconciled.
+// the namespaces unwatched or the one watching it down: its Kafka resources
+// would never be reconciled.
 func checkAdminlessStrimzi(ctx context.Context, ns resolvedNamespaces) error {
 	watch := adminlessStrimziNamespaces(ns)
 	out, _ := runExecOutputFn(ctx, "kubectl", "api-resources", "--api-group=kafka.strimzi.io", "-o", "name")
@@ -490,6 +498,11 @@ func checkAdminlessStrimzi(ctx context.Context, ns resolvedNamespaces) error {
 	}
 	for _, op := range ops {
 		PrintPhaseItem(describeStrimziOperator(op))
+	}
+	for _, op := range ops {
+		if op.Down && slices.ContainsFunc(watch, func(n string) bool { return operatorWatches(&op, n) }) {
+			return adminlessOperatorDown(op)
+		}
 	}
 	var unwatched []string
 	for _, namespace := range watch {
@@ -511,16 +524,36 @@ func checkAdminlessStrimzi(ctx context.Context, ns resolvedNamespaces) error {
 		slices.Sort(list)
 		fix = fmt.Sprintf(`Ask a cluster admin to add them to its watched namespaces:
 
+  %s
   helm upgrade %s %s -n %s --reuse-values \
-    --set 'strimzi-kafka-operator.watchNamespaces={%s}'`, op.Release, chartRef("strimzi-operator"), op.Namespace, strings.Join(slices.Compact(list), ","))
+    --set 'strimzi-kafka-operator.watchNamespaces={%s}'`, createNamespacesCommand(unwatched), op.Release, chartRef("strimzi-operator"), op.Namespace, strings.Join(slices.Compact(list), ","))
 	}
 	return fmt.Errorf("the installed Strimzi operator does not watch %s, so its Kafka resources there would never be reconciled.\nInstalled: %s.\n%s",
 		strings.Join(unwatched, ", "), describeStrimziOperator(op), fix)
 }
 
+// adminlessOperatorDown refuses a deploy no operator would reconcile. An
+// operator whose install ran before a watched namespace existed has no
+// RoleBindings there, and crash-loops on the first list it is refused.
+func adminlessOperatorDown(op strimzi.Operator) error {
+	repair := "If it is refused in a namespace it watches, its install ran before that namespace existed: run the install again."
+	if op.Release != "" {
+		repair = fmt.Sprintf(`If it is refused in a namespace it watches, its install ran before that namespace existed. With the namespace there, repair it with:
+
+  helm upgrade %s %s -n %s --reuse-values`, op.Release, chartRef("strimzi-operator"), op.Namespace)
+	}
+	return fmt.Errorf(`the Strimzi operator has no available pod, so nothing would reconcile Kafka.
+Installed: %s.
+Ask a cluster admin to read why:
+
+  kubectl logs -n %s deployment/%s
+
+%s`, describeStrimziOperator(op), op.Namespace, op.Name, repair)
+}
+
 // checkAdminlessPrerequisites fails before anything is installed when Strimzi
-// is missing or does not watch the namespaces, or the account may not create
-// what the stack needs.
+// is missing, down or does not watch the namespaces, or the account may not
+// create what the stack needs.
 func checkAdminlessPrerequisites(ctx context.Context, ns resolvedNamespaces) error {
 	if err := checkAdminlessStrimzi(ctx, ns); err != nil {
 		return err

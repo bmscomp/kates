@@ -53,6 +53,9 @@ type Operator struct {
 	// operator's own namespace when the env comes from the pod's
 	// metadata.namespace.
 	Watches []string
+	// Down is true when the Deployment has pods and none is available, as
+	// when the operator crash-loops. Watches does not show that.
+	Down bool
 	// Window is the Kafka versions the operator supports (STRIMZI_KAFKA_IMAGES).
 	Window kafkaversion.Window
 	// Release and AppVersion come from the wrapper chart's Helm release in
@@ -174,6 +177,10 @@ func ParseOperatorDeployment(deploymentJSON []byte) (Operator, error) {
 				} `json:"spec"`
 			} `json:"template"`
 		} `json:"spec"`
+		Status struct {
+			Replicas          int `json:"replicas"`
+			AvailableReplicas int `json:"availableReplicas"`
+		} `json:"status"`
 	}
 	if err := json.Unmarshal(deploymentJSON, &d); err != nil {
 		return Operator{}, fmt.Errorf("parse Deployment: %w", err)
@@ -187,6 +194,7 @@ func ParseOperatorDeployment(deploymentJSON []byte) (Operator, error) {
 		Name:      d.Metadata.Name,
 		Image:     c.Image,
 		Version:   kafkaversion.ImageTag(c.Image),
+		Down:      d.Status.Replicas > 0 && d.Status.AvailableReplicas == 0,
 	}
 	op.Scope, op.Watches = watchScope(c, d.Metadata.Namespace)
 	if images := c.env(kafkaversion.EnvKafkaImages); images != nil && images.Value != "" {
