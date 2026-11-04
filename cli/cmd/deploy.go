@@ -486,6 +486,11 @@ func introspectDeployCluster(executor detect.CommandExecutor, target string, nam
 		// shortcut: assumes the cluster.local DNS domain; read it from a pod in the namespace if a cluster needs another.
 		report := &detect.DetectReport{Context: target, Provider: "unknown"}
 		report.Network.ClusterDomain = "cluster.local"
+		// Nodes are the one read worth trying: zones decide Kafka's rack. A
+		// refusal leaves them unknown, which kafkaRackArgs tells from none.
+		collector := detect.NewCollector(executor)
+		collector.KubeContext = target
+		_ = collector.CollectNodes(context.Background(), report)
 		return report, nil
 	}
 	PrintPhaseHeader(nextDeployPhase(), "Running Cluster Introspection (Pre-flight)")

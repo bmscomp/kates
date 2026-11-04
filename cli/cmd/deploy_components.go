@@ -1217,6 +1217,7 @@ func (dc *deployContext) kafkaComponent() component {
 			}
 
 			// (Values files are already appended above so these overrides take precedence)
+			kafkaArgs = append(kafkaArgs, dc.kafkaRackArgs()...)
 			kafkaArgs = append(kafkaArgs, dc.scrapeArgs("charts/kafka-cluster")...)
 
 			return runHelmFn(ctx, append(kafkaArgs, dc.policyArgs("kafka-cluster")...)...)
@@ -1232,6 +1233,18 @@ func (dc *deployContext) kafkaComponent() component {
 			return nil
 		},
 	}
+}
+
+// kafkaRackArgs moves rack to the hostname once the nodes are read and none has
+// a zone, as generated values do: Strimzi makes rack a required node affinity on
+// brokers, which would stay Pending. It is for the admin-less deploy, which has
+// no generated values. Nodes it could not read keep the chart's zone key, right
+// on the zoned clusters such accounts usually run on.
+func (dc *deployContext) kafkaRackArgs() []string {
+	if len(dc.report.Nodes) > 0 && len(dc.report.Zones) == 0 {
+		return []string{"--set", "kafka.rack.topologyKey=kubernetes.io/hostname"}
+	}
+	return nil
 }
 
 // kafkaUsersComponent waits for the Entity Operator and the KafkaUsers the
@@ -1438,7 +1451,7 @@ func (dc *deployContext) kafkaConnectHelmArgs(bootstrap, kafkaSvcDomain, connect
 
 	// Strimzi turns rack.topologyKey into a required node affinity, so with no
 	// zone label on any node the workers would stay Pending. An admin-less
-	// deploy reads no nodes and lands here too: rack only saves cross-zone fetches.
+	// deploy refused the nodes lands here too: rack only saves cross-zone fetches.
 	if len(dc.report.Zones) == 0 {
 		connectArgs = append(connectArgs, "--set", "rack.enabled=false")
 	}

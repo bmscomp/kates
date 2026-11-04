@@ -1007,3 +1007,55 @@ func TestKafkaConnectHelmArgsRack(t *testing.T) {
 		t.Fatal("rack turned off on a cluster with zones")
 	}
 }
+
+func TestKafkaRackArgs(t *testing.T) {
+	nodes := []detect.NodeInfo{{Name: "n1"}}
+	zones := []detect.ZoneInfo{{Name: "a"}}
+	for _, tc := range []struct {
+		name     string
+		report   detect.DetectReport
+		hostname bool
+	}{
+		{"nodes with no zone", detect.DetectReport{Nodes: nodes}, true},
+		{"nodes with zones", detect.DetectReport{Nodes: nodes, Zones: zones}, false},
+		{"nodes refused", detect.DetectReport{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dc := &deployContext{report: &tc.report}
+			got := strings.Contains(strings.Join(dc.kafkaRackArgs(), " "), "kafka.rack.topologyKey=kubernetes.io/hostname")
+			if got != tc.hostname {
+				t.Fatalf("rack on hostname = %v, want %v", got, tc.hostname)
+			}
+		})
+	}
+}
+
+type refusedNodes struct{ MockExecutor }
+
+func (*refusedNodes) Exec(string, ...string) (string, error) {
+	return "", errors.New(`nodes is forbidden: cannot list resource "nodes"`)
+}
+
+// The admin-less path skips introspection but must still see zoneless nodes,
+// and a refused read must leave them unknown, not fail the deploy.
+func TestAdminlessIntrospectionReadsNodes(t *testing.T) {
+	orig := deployAdminless
+	t.Cleanup(func() { deployAdminless = orig })
+	deployAdminless = true
+
+	report, err := introspectDeployCluster(&MockExecutor{}, "lab", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dc := (&deployContext{report: report}); len(dc.kafkaRackArgs()) == 0 {
+		t.Fatalf("zoneless nodes kept the zone rack: nodes=%d zones=%d", len(report.Nodes), len(report.Zones))
+	}
+
+	report, err = introspectDeployCluster(&refusedNodes{}, "lab", nil)
+	if err != nil {
+		t.Fatalf("a refused node read failed the deploy: %v", err)
+	}
+	if dc := (&deployContext{report: report}); len(dc.kafkaRackArgs()) != 0 {
+		t.Fatal("refused nodes changed the rack")
+	}
+}
