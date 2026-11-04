@@ -2,9 +2,8 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: appVersion and the image tag move to 1.37.0, the tag the v1.37.0
-# release publishes.
-version: 0.15.10
+# Minor: nodeFailureTolerationSeconds, a new value.
+version: 0.16.0
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -28,6 +27,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "nodeFailureTolerationSeconds, default 30: the API pod is replaced 30 s after its node goes NotReady or unreachable, not the 300 s Kubernetes defaults to. A user's tolerations are kept beside these two."
     - kind: changed
       description: "appVersion 1.37.0 and the image tag move to 1.37.0. The image takes #595 (a PodMonitor CRD that is not there, answered with a 403, no longer counts as a refused read in compliance or topology) and the zstd-jni bump #592; the release also ships the CLI fixes #589, #591, #595 and #596."
     - kind: fixed

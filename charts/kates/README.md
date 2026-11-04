@@ -196,6 +196,7 @@ rbac:
 | `podDisruptionBudget.unhealthyPodEvictionPolicy` | `IfHealthy` | Eviction policy (K8s 1.27+) |
 | `strategy.type` | `Recreate` | Must be `Recreate`: an upgrade stops the old pod before the new one starts |
 | `terminationGracePeriodSeconds` | `60` | Graceful shutdown window |
+| `nodeFailureTolerationSeconds` | `30` | Seconds the API pod stays on a NotReady or unreachable node before it is replaced |
 | `topologySpreadConstraints` | `[]` | Pod spread across zones/nodes |
 
 ### One replica

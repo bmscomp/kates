@@ -281,6 +281,11 @@
         "topologySpreadConstraints": { "type": "array" },
         "nodeSelector": { "type": "object" },
         "tolerations": { "type": "array" },
+        "nodeFailureTolerationSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Seconds the API pod stays bound to a NotReady or unreachable node before Kubernetes replaces it"
+        },
         "affinity": { "type": "object" },
         "extraEnv": { "type": "array" },
         "extraVolumes": { "type": "array" },
