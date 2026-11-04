@@ -180,6 +180,32 @@ func TestGenerateValues_BrokerSizingMatchesThePoolsEmitted(t *testing.T) {
 	}
 }
 
+// What the deploy adds beside Kafka comes out of Kafka's budget, so the pods
+// still fit: on one 18-CPU node, Connect and MirrorMaker 2 left 1.6 CPU short.
+func TestCapacityBudget_LeavesRoomForPlannedWorkers(t *testing.T) {
+	r := buildTestReport(0, []string{"standard"})
+	r.Nodes = append(r.Nodes, NodeInfo{CPU: 18000, MemoryGi: 39})
+	r.Workload.TotalCPURequests = 3100
+
+	before := NewValuesGenerator(r, "krafter").Cap
+	r.Workload.PlannedCPURequests, r.Workload.PlannedMemRequests = 6000, 12
+	after := NewValuesGenerator(r, "krafter").Cap
+
+	if after.AvailableCPU != before.AvailableCPU-6000 || after.AvailableMem != before.AvailableMem-12 {
+		t.Errorf("available = %dm/%dGi, want %dm/%dGi", after.AvailableCPU, after.AvailableMem,
+			before.AvailableCPU-6000, before.AvailableMem-12)
+	}
+	kafka := 3*after.BrokerCPU + after.ControllerReplicas*after.ControllerCPU
+	if total := 3100 + 6000 + kafka; total > 18000 {
+		t.Errorf("%dm requested on an 18000m node (Kafka %dm)", total, kafka)
+	}
+
+	r.Workload.PlannedCPURequests = 100000 // more than the node holds
+	if got := NewValuesGenerator(r, "krafter").Cap.AvailableCPU; got != 0 {
+		t.Errorf("available = %dm, want 0 rather than negative", got)
+	}
+}
+
 // The 0.4 keys are gone from the output: kafka-cluster 1.x ignores
 // strimziOperator, crdUpgrade and kafkaConnect, fails on
 // drainCleaner.enabled, and translates the pool keys with a deprecation

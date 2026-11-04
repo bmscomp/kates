@@ -261,6 +261,8 @@ type WorkloadPressure struct {
 	TotalPods          int
 	TotalCPURequests   int // millicores consumed by all running pods
 	TotalMemRequests   int // GiB consumed by all running pods
+	PlannedCPURequests int // millicores this deploy adds beside Kafka
+	PlannedMemRequests int // GiB this deploy adds beside Kafka
 	KafkaNamespacePods int
 	PerNode            []NodePressure
 	PerZone            []ZonePressure

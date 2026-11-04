@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,7 +54,7 @@ func TestWriteDeployValuesAdminlessLeavesTheFileEmpty(t *testing.T) {
 	deployAdminless = true
 
 	path := filepath.Join(t.TempDir(), "nested", "values-detected.yaml")
-	if err := writeDeployValues(defaultExecutor, path, &detect.DetectReport{}, "krafter"); err != nil {
+	if err := writeDeployValues(context.Background(), defaultExecutor, path, &detect.DetectReport{}, "krafter", resolvedNamespaces{}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)
@@ -73,7 +74,7 @@ func TestWriteDeployValuesReportsACreateFailure(t *testing.T) {
 	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := writeDeployValues(defaultExecutor, filepath.Join(blocker, "values.yaml"), &detect.DetectReport{}, "krafter")
+	err := writeDeployValues(context.Background(), defaultExecutor, filepath.Join(blocker, "values.yaml"), &detect.DetectReport{}, "krafter", resolvedNamespaces{})
 	if err == nil || !strings.Contains(err.Error(), "failed to create values file") {
 		t.Fatalf("err = %v, want a create failure", err)
 	}
@@ -106,5 +107,37 @@ func TestUpgradeLdflagsStampsTheBuild(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("ldflags %q lack %q", got, want)
 		}
+	}
+}
+
+func TestPlanDeployWorkers(t *testing.T) {
+	origDeployed, origConnect, origMM2 := isHelmReleaseDeployedFn, deployWithKafkaConnect, deployWithMirrorMaker2
+	t.Cleanup(func() {
+		isHelmReleaseDeployedFn, deployWithKafkaConnect, deployWithMirrorMaker2 = origDeployed, origConnect, origMM2
+	})
+	ns := resolvedNamespaces{connect: "connect", mm2: "kafka"}
+
+	tests := []struct {
+		name            string
+		connect, mm2    bool
+		deployed        string
+		wantCPU, wantGi int
+	}{
+		{name: "neither chosen"},
+		{name: "both new", connect: true, mm2: true, wantCPU: 6000, wantGi: 12},
+		{name: "connect only", connect: true, wantCPU: 3000, wantGi: 6},
+		{name: "connect already there", connect: true, mm2: true, deployed: "connect-cluster", wantCPU: 3000, wantGi: 6},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deployWithKafkaConnect, deployWithMirrorMaker2 = tt.connect, tt.mm2
+			isHelmReleaseDeployedFn = func(_ context.Context, release, _ string) bool { return release == tt.deployed }
+			report := &detect.DetectReport{}
+			planDeployWorkers(context.Background(), report, ns)
+			if report.Workload.PlannedCPURequests != tt.wantCPU || report.Workload.PlannedMemRequests != tt.wantGi {
+				t.Errorf("planned %dm/%dGi, want %dm/%dGi", report.Workload.PlannedCPURequests,
+					report.Workload.PlannedMemRequests, tt.wantCPU, tt.wantGi)
+			}
+		})
 	}
 }
