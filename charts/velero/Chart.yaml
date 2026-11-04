@@ -2,7 +2,7 @@ apiVersion: v2
 appVersion: 1.17.1
 description: A Helm chart for velero
 home: https://github.com/vmware-tanzu/velero
-icon: https://cdn-images-1.medium.com/max/1600/1*-9mb3AKnKdcL_QD3CMnthQ.png
+icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/assets/charts/velero.svg
 kubeVersion: '>=1.16.0-0'
 maintainers:
 - email: hsiaoairplane@gmail.com
@@ -14,9 +14,12 @@ maintainers:
 name: velero
 sources:
 - https://github.com/vmware-tanzu/velero
-version: 11.3.5
+# Patch: the chart icon.
+version: 11.3.6
 annotations:
   artifacthub.io/changes: |
+    - kind: changed
+      description: "The chart icon is now a Kates icon, served from this repository."
     - kind: fixed
       description: "DNS egress goes to port 53 at any address, not only to pods: a node-local DNS cache (GKE, AKS, EKS NodeLocal DNSCache) answers from a node address, which a pod selector never matches"
     - kind: added

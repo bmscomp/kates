@@ -2,12 +2,15 @@ apiVersion: v2
 appVersion: 3.3.0
 description: A Helm chart for Kubernetes of Apicurio Registry, backed by the
   kafka-cluster chart (Strimzi) shipped in this repository
-icon: https://design.jboss.org/apicurio/logo/logofiles/apicurio_icon_lightbkg_color.svg
+icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/assets/charts/apicurio-registry.svg
 name: apicurio-registry
 type: application
-version: 0.5.0
+# Patch: the chart icon.
+version: 0.5.1
 annotations:
   artifacthub.io/changes: |
+    - kind: changed
+      description: "The chart icon is now a Kates icon, served from this repository."
     - kind: fixed
       description: "DNS egress goes to port 53 at any address, not only to pods: a node-local DNS cache (GKE, AKS, EKS NodeLocal DNSCache) answers from a node address, which a pod selector never matches"
     - kind: changed

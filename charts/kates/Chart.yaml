@@ -4,7 +4,8 @@ description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
 # Patch: appVersion and the image tag move to 1.36.0, the tag the v1.36.0
 # release publishes.
-version: 0.15.7
+# Patch: the chart icon.
+version: 0.15.8
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -23,11 +24,13 @@ sources:
 maintainers:
   - name: bmscomp
     email: bmscomp@gmail.com
-icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/icon.png
+icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/assets/charts/kates.svg
 annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "The chart icon pointed at a file the repository does not have; it is now a Kates icon."
     - kind: changed
       description: "appVersion 1.36.0 and the image tag move to 1.36.0. Nothing under kates/ moved since 1.35.0; the release ships the CLI fixes #583 (broker sizing) and #586 (kates auto and kyverno apply pass .policies) and the mirror-maker2 fixes #584 (IPv6 Kafka egress) and #585 (a mirror with no connectors is refused). Templates are unchanged by this entry."
     - kind: changed
