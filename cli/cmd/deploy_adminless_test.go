@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/detect"
 	"github.com/bmscomp/kates/cli/pkg/strimzi"
 	"github.com/spf13/pflag"
 )
@@ -168,6 +169,191 @@ func TestRunDeploy_AdminlessInstallsTheStack(t *testing.T) {
 	}
 }
 
+func TestDetectAdminlessPlatform(t *testing.T) {
+	orig := runExecOutputFn
+	t.Cleanup(func() { runExecOutputFn = orig })
+
+	for _, tc := range []struct {
+		name, context, cluster string
+		nodes                  []detect.NodeInfo
+		kind                   bool
+		wantContext            string
+		wantLocal              bool
+	}{
+		{"the gate's team context on kind", "fanon", "kind-fanon", nil, true, "kind-fanon", true},
+		{"kind's own context", "kind-lab", "kind-lab", nil, true, "kind-lab", true},
+		{"a kind node", "lab", "lab", []detect.NodeInfo{{ProviderID: "kind://docker/lab/lab-control-plane"}}, true, "lab", true},
+		{"a shared cluster", "team", "prod-eu", []detect.NodeInfo{{ProviderID: "aws:///eu-west-1a/i-1"}}, false, "team", false},
+		{"kind inside a name", "mankind", "mankind", nil, false, "mankind", false},
+		{"a team's context on k3d", "team", "k3d-lab", nil, false, "team", true},
+		{"minikube", "minikube", "minikube", nil, false, "minikube", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) { return []byte(tc.cluster + "\n"), nil }
+			report := &detect.DetectReport{Context: tc.context, Provider: "unknown", Nodes: tc.nodes}
+			detectAdminlessPlatform(context.Background(), report)
+			if isKindReport(report) != tc.kind || report.Context != tc.wantContext || localCluster(report) != tc.wantLocal {
+				t.Errorf("kind=%v context=%q local=%v, want %v %q %v", isKindReport(report), report.Context, localCluster(report), tc.kind, tc.wantContext, tc.wantLocal)
+			}
+		})
+	}
+}
+
+func TestSizeAdminless(t *testing.T) {
+	orig := runExecOutputFn
+	t.Cleanup(func() { runExecOutputFn = orig })
+	one := []detect.NodeInfo{{Name: "n1"}}
+	for _, tc := range []struct {
+		name    string
+		report  detect.DetectReport
+		ha      bool
+		haGiven bool
+		pools   string
+		wantHA  bool
+	}{
+		{"kind with nodes refused", detect.DetectReport{Provider: "kind"}, true, false, "", false},
+		{"k3d with nodes refused", detect.DetectReport{Provider: "k3d"}, true, false, "", false},
+		{"k3d with several nodes", detect.DetectReport{Provider: "k3d", Nodes: append(one, detect.NodeInfo{Name: "n2"})}, true, false, "", true},
+		{"one readable node", detect.DetectReport{Nodes: one}, true, false, "", false},
+		{"several nodes", detect.DetectReport{Nodes: append(one, detect.NodeInfo{Name: "n2"})}, true, false, "", true},
+		{"nodes refused, not kind", detect.DetectReport{}, true, false, "", true},
+		{"--ha on one node is the user's", detect.DetectReport{Nodes: one}, true, true, "", true},
+		{"--ha=false on several nodes", detect.DetectReport{Nodes: append(one, detect.NodeInfo{Name: "n2"})}, false, true, "", false},
+		{"three brokers stay on kind", detect.DetectReport{Provider: "kind"}, true, false, "3 [\"controller\"]\n3 [\"broker\"]\n", true},
+		{"one broker stays on several nodes", detect.DetectReport{Nodes: append(one, detect.NodeInfo{Name: "n2"})}, true, false, "1 [\"controller\",\"broker\"]\n", false},
+		{"--ha over one broker is the user's", detect.DetectReport{Provider: "kind"}, true, true, "1 [\"broker\"]\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setDeployFlags(t, func() { deployAdminless, deployHA = true, tc.ha })
+			runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) { return []byte(tc.pools), nil }
+			defaultAdminlessSize(&tc.report, tc.haGiven)
+			sizeAdminless(context.Background(), &tc.report, tc.haGiven)
+			if deployHA != tc.wantHA {
+				t.Errorf("deployHA = %v, want %v", deployHA, tc.wantHA)
+			}
+		})
+	}
+}
+
+// The wizard runs between the two: its yes on kind is not undone by the second.
+func TestSizeAdminless_WizardYesStands(t *testing.T) {
+	orig := runExecOutputFn
+	t.Cleanup(func() { runExecOutputFn = orig })
+	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) { return nil, nil }
+	setDeployFlags(t, func() { deployAdminless, deployHA = true, true })
+	report := &detect.DetectReport{Provider: "kind"}
+
+	defaultAdminlessSize(report, false)
+	if deployHA {
+		t.Fatal("the wizard's question does not start from one broker on kind")
+	}
+	deployHA = true
+	sizeAdminless(context.Background(), report, false)
+	if !deployHA {
+		t.Fatal("the wizard's yes was overridden")
+	}
+}
+
+func TestBundleKindTarget(t *testing.T) {
+	orig := runExecOutputFn
+	t.Cleanup(func() { runExecOutputFn = orig })
+	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) {
+		return nil, errors.New("daemonsets.apps is forbidden")
+	}
+
+	if got, isKind := bundleKindTarget("fanon", &detect.DetectReport{Context: "kind-fanon", Provider: "kind"}); got != "kind-fanon" || !isKind {
+		t.Errorf("got %q %v, want kind's own context", got, isKind)
+	}
+	if got, isKind := bundleKindTarget("team", &detect.DetectReport{Context: "team", Provider: "unknown"}); got != "team" || isKind {
+		t.Errorf("got %q %v, want the target, not kind", got, isKind)
+	}
+	if got, isKind := bundleKindTarget("team", nil); got != "team" || isKind {
+		t.Errorf("full profile got %q %v", got, isKind)
+	}
+}
+
+// The chart's rails refuse a replication factor above the brokers, so one
+// broker must reach every chart: each of these keeps the deploy from failing,
+// or hanging, on one broker.
+func TestRunDeploy_AdminlessOnKindSizesEveryChart(t *testing.T) {
+	origOutput, origCombined, origHelm, origExec := runExecOutputFn, runExecCombinedFn, runHelmFn, runExecFn
+	origStdin, origDeployed := runExecStdinFn, isHelmReleaseDeployedFn
+	t.Cleanup(func() {
+		runExecOutputFn, runExecCombinedFn, runHelmFn, runExecFn = origOutput, origCombined, origHelm, origExec
+		runExecStdinFn, isHelmReleaseDeployedFn = origStdin, origDeployed
+	})
+	setDeployFlags(t, func() {
+		deployAdminless, deployWithSchemaRegistry, deployDryRun, deployHA = true, "apicurio", false, true
+		deployWithChaos, deployWithMonitoring, deployWithCertManager, deployWithStrimzi = true, true, true, true
+		deployWithKafkaConnect, deployWithMirrorMaker2, deployWithKafkaUI = true, true, true
+		deployTopology = "isolated"
+	})
+	setAdminlessNamespaces(t)
+	resetDeployFlagsChanged(t)
+	t.Chdir(t.TempDir())
+
+	read := adminlessClusterRead("")
+	stub := func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		joined := name + " " + strings.Join(args, " ")
+		switch {
+		case strings.Contains(joined, "config view --minify -o jsonpath={.clusters[0].name}"):
+			return []byte("kind-fanon"), nil
+		case name == "docker" || name == "kind":
+			return nil, errors.New("no local image")
+		}
+		return read(ctx, name, args...)
+	}
+	runExecOutputFn, runExecCombinedFn = stub, stub
+	var mu sync.Mutex
+	installed := map[string]string{}
+	runHelmFn = func(_ context.Context, args ...string) error {
+		if len(args) > 2 && args[0] == "upgrade" {
+			mu.Lock()
+			installed[args[2]] = strings.Join(args, " ")
+			mu.Unlock()
+		}
+		return nil
+	}
+	runExecFn = func(context.Context, string, ...string) error { return nil }
+	runExecStdinFn = func(context.Context, string, []string, string) error { return nil }
+	isHelmReleaseDeployedFn = func(context.Context, string, string) bool { return false }
+
+	if err := runDeploy(deployCmd, nil); err != nil {
+		t.Fatalf("runDeploy: %v", err)
+	}
+	for release, wants := range map[string][]string{
+		"krafter": {
+			"charts/kafka-cluster/values-kind.yaml",
+			"--set nodePools.roleDefaults.broker.replicas=1",
+			"--set nodePools.roleDefaults.controller.replicas=1",
+			`--set kafka.config.offsets\.topic\.replication\.factor=1`,
+			"--set kafka.rack.topologyKey=kubernetes.io/hostname",
+		},
+		"connect-cluster": {
+			"charts/connect-cluster/values-kind.yaml", "--set replicas=1", "--set config.replicationFactor=1",
+			"--set kafka.clusterName=krafter",
+			"--set networkPolicy.restApi.clients[0].namespace=team-kates",
+			"--set networkPolicy.restApi.clients[1].namespace=team-kafka",
+			"--set networkPolicy.restApi.clients[1].podSelector.app=kafka-ui",
+		},
+		"mm2":   {"--set replicas=1", `--set target.config.config\.storage\.replication\.factor=1`},
+		"kates": {"--set-string defaults.replicationFactor=1", "--set-string defaults.minInsyncReplicas=1", "--set service.type=ClusterIP"},
+		"kafka-ui": {
+			"http://connect-cluster-rest-api.team-connect.svc:8083", "apicurio-registry.team-kafka.svc:80",
+			"--set service.type=ClusterIP", "--set networkPolicy.extraEgress[0].ports[0].port=8080",
+		},
+	} {
+		for _, want := range wants {
+			if !strings.Contains(installed[release], want) {
+				t.Errorf("%s: want %q in %s", release, want, installed[release])
+			}
+		}
+	}
+	if c := installed["krafter"]; strings.Contains(c, "kafka.replicas") || strings.Contains(c, "zookeeper.replicas") {
+		t.Errorf("krafter sets keys the chart ignores: %s", c)
+	}
+}
+
 func TestCheckAdminlessPrerequisites(t *testing.T) {
 	orig := runExecOutputFn
 	t.Cleanup(func() { runExecOutputFn = orig })
@@ -230,10 +416,16 @@ func TestApplyAdminlessProfile_RefusesClusterScopedFlags(t *testing.T) {
 func TestRunDeploy_AdminlessComplianceRoleFollowsTheGrants(t *testing.T) {
 	for _, tc := range []struct {
 		name, refuse string
+		monitoring   string // what discovery lists for monitoring.coreos.com
+		discovery    error
 		withRole     bool
+		ruleInBundle bool // the admin's command renders the PodMonitor rule
 	}{
-		{"all reads held", "", true},
-		{"no PodMonitor reads", "podmonitors", false},
+		{"all reads held", "", podMonitorResource, nil, true, false},
+		{"no PodMonitor reads", "podmonitors", podMonitorResource, nil, false, true},
+		{"no PodMonitor reads, API not served", "podmonitors", "", nil, true, false},
+		{"no PodMonitor reads, discovery failed", "podmonitors", "", errors.New("connection refused"), false, true},
+		{"no pod reads, API not served", "can-i list pods", "", nil, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			origOutput, origCombined, origHelm, origExec := runExecOutputFn, runExecCombinedFn, runHelmFn, runExecFn
@@ -250,7 +442,14 @@ func TestRunDeploy_AdminlessComplianceRoleFollowsTheGrants(t *testing.T) {
 			resetDeployFlagsChanged(t)
 			t.Chdir(t.TempDir())
 
-			runExecOutputFn, runExecCombinedFn = adminlessClusterRead(tc.refuse), adminlessClusterRead(tc.refuse)
+			read := adminlessClusterRead(tc.refuse)
+			runExecOutputFn = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+				if slices.Contains(args, "--api-group=monitoring.coreos.com") {
+					return []byte(tc.monitoring), tc.discovery
+				}
+				return read(ctx, name, args...)
+			}
+			runExecCombinedFn = read
 			var mu sync.Mutex
 			var kates string
 			runHelmFn = func(_ context.Context, args ...string) error {
@@ -280,8 +479,11 @@ func TestRunDeploy_AdminlessComplianceRoleFollowsTheGrants(t *testing.T) {
 			if printed := strings.Contains(out, handoff); printed == tc.withRole {
 				t.Errorf("admin command printed = %v, want %v:\n%s", printed, !tc.withRole, out)
 			}
-			if !tc.withRole && !strings.Contains(out, "list podmonitors.monitoring.coreos.com") {
+			if tc.refuse == "podmonitors" && !tc.withRole && !strings.Contains(out, "list "+podMonitorResource) {
 				t.Errorf("the missing read is not named:\n%s", out)
+			}
+			if got := strings.Contains(out, "--api-versions monitoring.coreos.com/v1/PodMonitor"); got != tc.ruleInBundle {
+				t.Errorf("admin command renders the PodMonitor rule = %v, want %v:\n%s", got, tc.ruleInBundle, out)
 			}
 		})
 	}

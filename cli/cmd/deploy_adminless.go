@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
+	"github.com/bmscomp/kates/cli/pkg/detect"
 	"github.com/bmscomp/kates/cli/pkg/strimzi"
 )
 
@@ -105,6 +107,152 @@ func applyAdminlessProfile(ctx context.Context, cmd *cobra.Command) error {
 	}
 	return nil
 }
+
+// detectAdminlessPlatform tells kind, k3d and minikube with no cluster rights:
+// from the kube context, the kubeconfig's cluster name, which each writes its
+// own way whatever a team's context is called (the gate's fanon on kind-fanon),
+// or the node's providerID when nodes were read. Only kind has overlays.
+func detectAdminlessPlatform(ctx context.Context, report *detect.DetectReport) {
+	out, _ := runExecOutputFn(ctx, "kubectl", "config", "view", "--minify", "-o", "jsonpath={.clusters[0].name}")
+	cluster := strings.TrimSpace(string(out))
+	for _, name := range []string{report.Context, cluster} {
+		switch {
+		case strings.HasPrefix(name, "k3d-"):
+			report.Provider = "k3d"
+		case name == "minikube":
+			report.Provider = "minikube"
+		}
+	}
+	if strings.HasPrefix(cluster, "kind-") {
+		// kindClusterName reads it from here: the context may be a team's.
+		report.Context = cluster
+	}
+	if strings.HasPrefix(report.Context, "kind-") ||
+		slices.ContainsFunc(report.Nodes, func(n detect.NodeInfo) bool { return strings.HasPrefix(n.ProviderID, "kind://") }) {
+		report.Provider = "kind"
+	}
+}
+
+// localCluster says the report names a kind, k3d or minikube cluster, whose
+// nodes have no zones to count on even when they cannot be read.
+func localCluster(report *detect.DetectReport) bool {
+	return isKindReport(report) || report.Provider == "k3d" || report.Provider == "minikube"
+}
+
+// adminlessSmallCluster names what keeps the chart's three brokers Pending
+// until the timeout, or says "": kind, a local cluster whose nodes are unread,
+// or one node. Nodes it could not read on another cluster keep the chart's size.
+func adminlessSmallCluster(report *detect.DetectReport) string {
+	switch {
+	case isKindReport(report):
+		return "a kind cluster"
+	case localCluster(report) && len(report.Nodes) == 0:
+		return "a " + report.Provider + " cluster"
+	case len(report.Nodes) == 1:
+		return "a single node"
+	}
+	return ""
+}
+
+// defaultAdminlessSize turns HA off on a small cluster unless --ha was given,
+// before the wizard, whose answer then stands.
+func defaultAdminlessSize(report *detect.DetectReport, haGiven bool) {
+	if !haGiven && adminlessSmallCluster(report) != "" {
+		deployHA = false
+	}
+}
+
+// sizeAdminless settles the size once the namespaces are known: a Kafka already
+// there keeps its own, because a re-run that changes it would resize or strand
+// that cluster, unless --ha was given. --ha=false is the way down.
+func sizeAdminless(ctx context.Context, report *detect.DetectReport, haGiven bool) {
+	why := adminlessSmallCluster(report)
+	if why == "" {
+		why = "HA off"
+	}
+	if brokers := installedBrokers(ctx); brokers > 0 && !haGiven {
+		deployHA, why = brokers > 1, "the installed Kafka"
+	}
+	if oneBroker() {
+		PrintPhaseItem(fmt.Sprintf("Size: 1 controller, 1 broker, 1 Connect and MirrorMaker 2 worker, replication factor 1 (%s)", why))
+	}
+}
+
+// installedBrokers counts the brokers of the deploy's Kafka, 0 when there is
+// none or the read fails.
+func installedBrokers(ctx context.Context) int {
+	out, err := runExecOutputFn(ctx, "kubectl", "get", "kafkanodepools", "-n", resolveNamespaces().kafka,
+		"-l", "strimzi.io/cluster="+deployKafkaName,
+		"-o", `jsonpath={range .items[*]}{.spec.replicas}{" "}{.spec.roles}{"\n"}{end}`)
+	if err != nil {
+		return 0
+	}
+	brokers := 0
+	for _, pool := range strings.Split(string(out), "\n") {
+		replicas, roles, _ := strings.Cut(pool, " ")
+		if n, err := strconv.Atoi(replicas); err == nil && strings.Contains(roles, "broker") {
+			brokers += n
+		}
+	}
+	return brokers
+}
+
+// adminlessServiceArgs keeps a Service off the kind overlays' fixed NodePorts,
+// which are cluster-wide: another stack on the cluster would hold them.
+func adminlessServiceArgs() []string { return []string{"--set", "service.type=ClusterIP"} }
+
+// oneBroker says the deploy runs the chart's own pools at one broker. Only
+// admin-less does: the full profile's generated pools keep their count and
+// names, because a pool renamed by a re-run is a pool deleted with its data.
+func oneBroker() bool { return deployAdminless && !deployHA }
+
+// What one broker needs from each chart. Replicas sit in roleDefaults because
+// the chart's default pools set none. Kafka's own topics follow the broker
+// count; every other replication factor here would refuse or starve one broker.
+var (
+	oneBrokerKafkaArgs = []string{
+		"--set", "nodePools.roleDefaults.controller.replicas=1",
+		"--set", "nodePools.roleDefaults.controller.resources.requests.cpu=250m",
+		"--set", "nodePools.roleDefaults.broker.replicas=1",
+		"--set", "nodePools.roleDefaults.broker.resources.requests.cpu=250m",
+		"--set", "nodePools.roleDefaults.broker.resources.requests.memory=1Gi",
+		"--set", "nodePools.roleDefaults.broker.resources.limits.memory=1Gi",
+		"--set", "nodePools.roleDefaults.broker.jvmOptions.-Xms=512m",
+		"--set", "nodePools.roleDefaults.broker.jvmOptions.-Xmx=512m",
+		"--set", "nodePools.roleDefaults.broker.storage.volumes[0].id=0",
+		"--set", "nodePools.roleDefaults.broker.storage.volumes[0].size=10Gi",
+		"--set", "kafka.config.default\\.replication\\.factor=1",
+		"--set", "kafka.config.min\\.insync\\.replicas=1",
+		"--set", "kafka.config.offsets\\.topic\\.replication\\.factor=1",
+		"--set", "kafka.config.transaction\\.state\\.log\\.replication\\.factor=1",
+		"--set", "kafka.config.transaction\\.state\\.log\\.min\\.isr=1",
+		"--set", "kafka.config.share\\.coordinator\\.state\\.topic\\.replication\\.factor=1",
+		"--set", "kafka.config.share\\.coordinator\\.state\\.topic\\.min\\.isr=1",
+		"--set", "cruiseControl.enabled=false",
+		"--set", "rebalance.enabled=false",
+		"--set", "kafkaExporter.enabled=false",
+	}
+	oneBrokerConnectArgs = []string{
+		"--set", "config.replicationFactor=1",
+		"--set", "resources.requests.cpu=250m",
+		"--set", "resources.requests.memory=1Gi",
+		"--set", "jvmOptions.-Xms=512m",
+		"--set", "jvmOptions.-Xmx=512m",
+	}
+	// mirrors[0] by index merges into the overlay's list, which restates it.
+	oneBrokerMM2Args = []string{
+		"--set", "target.config.config\\.storage\\.replication\\.factor=1",
+		"--set", "target.config.offset\\.storage\\.replication\\.factor=1",
+		"--set", "target.config.status\\.storage\\.replication\\.factor=1",
+		"--set", "mirrors[0].sourceConnector.config.replication\\.factor=1",
+		"--set", "mirrors[0].sourceConnector.config.offset-syncs\\.topic\\.replication\\.factor=1",
+		"--set", "mirrors[0].checkpointConnector.config.checkpoints\\.topic\\.replication\\.factor=1",
+		"--set", "resources.requests.cpu=250m",
+		"--set", "resources.requests.memory=512Mi",
+		"--set", "jvmOptions.-Xms=256m",
+		"--set", "jvmOptions.-Xmx=256m",
+	}
+)
 
 // dropCreateNamespace takes --create-namespace out of every helm call until
 // the returned function restores the seam. Deploy creates its namespaces
@@ -292,11 +440,26 @@ func describeLeftOut(components []leftOutComponent) string {
 	return strings.Join(lines, "\n")
 }
 
+const podMonitorResource = "podmonitors.monitoring.coreos.com"
+
+// podMonitorsServed reads API discovery, which any authenticated account may.
+func podMonitorsServed(ctx context.Context) (bool, error) {
+	out, err := runExecOutputFn(ctx, "kubectl", "api-resources", "--api-group=monitoring.coreos.com", "-o", "name")
+	return slices.Contains(strings.Fields(string(out)), podMonitorResource), err
+}
+
 // prometheusOperatorAPI says whether the cluster serves PodMonitors, which
 // admin-less monitoring creates for a Prometheus already there.
 func prometheusOperatorAPI(ctx context.Context) bool {
-	out, _ := runExecOutputFn(ctx, "kubectl", "api-resources", "--api-group=monitoring.coreos.com", "-o", "name")
-	return slices.Contains(strings.Fields(string(out)), "podmonitors.monitoring.coreos.com")
+	served, _ := podMonitorsServed(ctx)
+	return served
+}
+
+// podMonitorsAbsent says the cluster answered and serves no PodMonitors. A
+// failed read is no such answer: the caller keeps asking for the grant.
+func podMonitorsAbsent(ctx context.Context) bool {
+	served, err := podMonitorsServed(ctx)
+	return err == nil && !served
 }
 
 // describeStrimziOperator is one operator as the prerequisites list it.
@@ -391,13 +554,14 @@ admin either sets strimzi-kafka-operator.createAggregateRoles=true on the Strimz
 // The reads the kates chart's Kafka-reader Role grants in the Kafka namespace
 // (charts/kates/templates/rbac.yaml), which a compliance check needs. RBAC lets
 // an account create a Role only for permissions it holds, so the install
-// creates it only when the account holds all of them.
+// creates it only when the account holds all of them. Where the cluster serves
+// no PodMonitors the Role has no such rule, so the install does not ask for it.
 var complianceReaderGrants = [][2]string{
 	{"get", "kafkas.kafka.strimzi.io"},
 	{"list", "kafkanodepools.kafka.strimzi.io"},
 	{"list", "pods"},
 	{"list", "persistentvolumeclaims"},
-	{"list", "podmonitors.monitoring.coreos.com"},
+	{"list", podMonitorResource},
 	{"list", "endpointslices.discovery.k8s.io"},
 }
 
@@ -407,7 +571,11 @@ var adminlessComplianceMissing []string
 
 func missingComplianceGrants(ctx context.Context, kafkaNS string) []string {
 	var missing []string
+	absent := podMonitorsAbsent(ctx)
 	for _, g := range complianceReaderGrants {
+		if absent && g[1] == podMonitorResource {
+			continue
+		}
 		answer, _ := runExecOutputFn(ctx, "kubectl", "auth", "can-i", g[0], g[1], "-n", kafkaNS)
 		if strings.TrimSpace(string(answer)) != "yes" {
 			missing = append(missing, g[0]+" "+g[1])
@@ -419,12 +587,17 @@ func missingComplianceGrants(ctx context.Context, kafkaNS string) []string {
 // complianceRoleHandoff tells the user how an admin turns compliance checks on
 // when the install had to leave the Role out.
 func complianceRoleHandoff(ns resolvedNamespaces, missing []string) string {
+	// helm template asks no cluster: without this it drops the PodMonitor rule.
+	apiVersions := ""
+	if !podMonitorsAbsent(context.Background()) {
+		apiVersions = " --api-versions monitoring.coreos.com/v1/PodMonitor"
+	}
 	return fmt.Sprintf(`Compliance checks are off: Kates needs a read-only Role in namespace %s, and this account
 may not create it because it lacks: %s.
 Everything else works. To turn compliance checks on, an account that holds those reads there
 (a cluster admin) runs:
 
-  helm template kates %s -n %s --set rbac.scope=namespace \
+  helm template kates %s -n %s --set rbac.scope=namespace%s \
     --set networkPolicy.kafka.namespace=%s --show-only templates/rbac.yaml | kubectl apply -f -`,
-		ns.kafka, strings.Join(missing, ", "), chartRef("kates"), ns.app, ns.kafka)
+		ns.kafka, strings.Join(missing, ", "), chartRef("kates"), ns.app, apiVersions, ns.kafka)
 }

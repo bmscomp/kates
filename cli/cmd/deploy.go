@@ -194,6 +194,12 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 	// Deploy makes each namespace itself, or uses the one already there.
 	defer dropCreateNamespace()()
+
+	executor := defaultExecutor
+	report, err := adminlessReportFirst(cmd, executor, target, namespaceLabels)
+	if err != nil {
+		return err
+	}
 	if err := configureDeploySelection(cmd, wizard); err != nil {
 		return err
 	}
@@ -202,14 +208,15 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// go in before any pod, the pre-flight probes' included. A dry run loads
 	// nothing.
 	if !deployDryRun {
-		if err := loadBundleImages(context.Background(), target, quickDetectKind()); err != nil {
+		kubeContext, isKind := bundleKindTarget(target, report)
+		if err := loadBundleImages(context.Background(), kubeContext, isKind); err != nil {
 			return err
 		}
 	}
 
-	executor := defaultExecutor
-	report, err := introspectDeployCluster(executor, target, namespaceLabels)
-	if err != nil {
+	if report != nil {
+		sizeAdminless(context.Background(), report, cmd.Flags().Changed("ha"))
+	} else if report, err = introspectDeployCluster(executor, target, namespaceLabels); err != nil {
 		return err
 	}
 
@@ -476,13 +483,40 @@ func configureDeploySelection(cmd *cobra.Command, wizard bool) error {
 	return nil
 }
 
+// adminlessReportFirst reads the report before the wizard, admin-less only: it
+// only reads, the wizard's HA question starts from the size this cluster takes,
+// and it tells kind where quickDetectKind may not read.
+func adminlessReportFirst(cmd *cobra.Command, executor detect.CommandExecutor, target string, namespaceLabels map[string]string) (*detect.DetectReport, error) {
+	if !deployAdminless {
+		return nil, nil
+	}
+	report, err := introspectDeployCluster(executor, target, namespaceLabels)
+	if err != nil {
+		return nil, err
+	}
+	defaultAdminlessSize(report, cmd.Flags().Changed("ha"))
+	return report, nil
+}
+
+// bundleKindTarget says which context the bundle's images load through and
+// whether it is kind: the admin-less report's when it told kind, since that
+// account may not read quickDetectKind's DaemonSet, and its context carries
+// kind's own name, where a team's context may not.
+func bundleKindTarget(target string, report *detect.DetectReport) (string, bool) {
+	if report != nil && isKindReport(report) {
+		return report.Context, true
+	}
+	return target, quickDetectKind()
+}
+
 // introspectDeployCluster runs the pre-flight and the introspection that
 // sizes the values file. Admin-less it runs neither.
 func introspectDeployCluster(executor detect.CommandExecutor, target string, namespaceLabels map[string]string) (*detect.DetectReport, error) {
 	if deployAdminless {
 		// Introspection reads nodes and kube-system, and its probes create
 		// namespaces and pods: nothing a namespace account may do. The charts'
-		// own defaults stand in for what it would have sized.
+		// own defaults stand in for what it would have sized, or the admin-less
+		// sizing shrinks them.
 		// shortcut: assumes the cluster.local DNS domain; read it from a pod in the namespace if a cluster needs another.
 		report := &detect.DetectReport{Context: target, Provider: "unknown"}
 		report.Network.ClusterDomain = "cluster.local"
@@ -491,6 +525,7 @@ func introspectDeployCluster(executor detect.CommandExecutor, target string, nam
 		collector := detect.NewCollector(executor)
 		collector.KubeContext = target
 		_ = collector.CollectNodes(context.Background(), report)
+		detectAdminlessPlatform(context.Background(), report)
 		return report, nil
 	}
 	PrintPhaseHeader(nextDeployPhase(), "Running Cluster Introspection (Pre-flight)")

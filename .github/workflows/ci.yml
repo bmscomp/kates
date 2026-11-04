@@ -335,6 +335,7 @@ jobs:
             fail "a cluster-scoped object is rendered"
           fi
           rbac=$(helm template kates charts/kates/ -n team --set rbac.scope=namespace \
+                   --api-versions monitoring.coreos.com/v1/PodMonitor \
                    --set networkPolicy.kafka.namespace=kafka-ns --show-only templates/rbac.yaml)
           [ "$(grep -c '^  namespace: kafka-ns$' <<<"${rbac}")" = 2 ] \
             || fail "the Role and RoleBinding are not both in networkPolicy.kafka.namespace"
@@ -348,6 +349,10 @@ jobs:
           if grep -E '^ +verbs:' <<<"${rbac}" | grep -vqE 'verbs: \["(get|list)"\]$'; then
             fail "the Kafka-namespace Role grants more than get and list"
           fi
+          rbac=$(helm template kates charts/kates/ -n team --set rbac.scope=namespace \
+                   --set networkPolicy.kafka.namespace=kafka-ns --show-only templates/rbac.yaml)
+          grep -q 'podmonitors' <<<"${rbac}" && fail "the Role names PodMonitors where the API is not served"
+          [ "$(grep -c -- '- apiGroups:' <<<"${rbac}")" = 4 ] || fail "the Kafka-namespace Role has other than its 4 rules without PodMonitors"
           out=$(helm template kates charts/kates/ --set rbac.scope=namespace \
                   --set rbac.kafkaNamespaceRole=false --show-only templates/rbac.yaml 2>&1) || true
           grep -q 'could not find template' <<<"${out}" || fail "rbac.kafkaNamespaceRole=false still renders the Role"

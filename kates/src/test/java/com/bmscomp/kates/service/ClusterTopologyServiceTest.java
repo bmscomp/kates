@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import io.fabric8.kubernetes.api.model.APIResourceListBuilder;
 import io.fabric8.kubernetes.api.model.StatusBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
@@ -86,6 +87,52 @@ class ClusterTopologyServiceTest {
                         + " such as the kates chart's with rbac.scope=namespace. The API server said: "
                         + refusal("list", "pods", ""),
                 e.getMessage());
+    }
+
+    @Test
+    void aRefusedPodMonitorListOfAnApiNotServedLeavesNothingUnread() {
+        refuse(
+                "/apis/monitoring.coreos.com/v1/namespaces/kafka/podmonitors",
+                "list",
+                "podmonitors",
+                "monitoring.coreos.com");
+        server.expect()
+                .get()
+                .withPath("/apis/monitoring.coreos.com/v1")
+                .andReturn(404, "")
+                .always();
+
+        assertEquals(Map.of(), service.describeTopology().get("unread"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void aRefusedPodMonitorListOfAnApiServedIsUnread() {
+        refuse(
+                "/apis/monitoring.coreos.com/v1/namespaces/kafka/podmonitors",
+                "list",
+                "podmonitors",
+                "monitoring.coreos.com");
+        server.expect()
+                .get()
+                .withPath("/apis/monitoring.coreos.com/v1")
+                .andReturn(
+                        200,
+                        new APIResourceListBuilder()
+                                .addNewResource()
+                                .withKind("PodMonitor")
+                                .withName("podmonitors")
+                                .withNamespaced(true)
+                                .withSingularName("podmonitor")
+                                .withVerbs("list")
+                                .endResource()
+                                .build())
+                .always();
+
+        Map<String, String> unread =
+                (Map<String, String>) service.describeTopology().get("unread");
+
+        assertEquals(refusal("list", "podmonitors", "monitoring.coreos.com"), unread.get("metrics"));
     }
 
     void refuse(String path, String verb, String resource, String group) {

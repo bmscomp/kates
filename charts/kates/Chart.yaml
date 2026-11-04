@@ -5,7 +5,8 @@ type: application
 # Patch: appVersion and the image tag move to 1.36.0, the tag the v1.36.0
 # release publishes.
 # Patch: the chart icon.
-version: 0.15.8
+# Patch: the Kafka-namespace Role's PodMonitor rule follows the cluster.
+version: 0.15.9
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -29,6 +30,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "With rbac.scope=namespace the Kafka-namespace Role carries its podmonitors rule only where the PodMonitor API exists, so a namespace admin can create it on a cluster without the Prometheus operator. helm template asks no cluster: pass --api-versions monitoring.coreos.com/v1/PodMonitor to render the rule for one that has it"
     - kind: fixed
       description: "The chart icon pointed at a file the repository does not have; it is now a Kates icon."
     - kind: changed
