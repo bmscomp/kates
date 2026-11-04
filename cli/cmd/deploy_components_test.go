@@ -736,6 +736,44 @@ func TestDeployKafkaConnectStackReconcilesExistingReleaseWhenKafkaConnectNotRead
 	}
 }
 
+// Apicurio follows the deploy's Kafka namespace, cluster name and client
+// namespaces; the chart's defaults are krafter in kafka, and an install in
+// another namespace was refused on its KafkaTopics.
+func TestApicurioHelmArgs_FollowTheDeploy(t *testing.T) {
+	dc := &deployContext{
+		ns:      resolvedNamespaces{kafka: "team-kafka", connect: "team-connect", app: "team-kates", kafkaUI: "team-ui"},
+		primary: primaryCluster{Name: "warp", Namespace: "team-kafka"},
+		report:  &detect.DetectReport{},
+		policyValues: map[string][]string{
+			"apicurio-registry": {"-f", "policy.yaml"},
+		},
+	}
+	dc.report.Network.ClusterDomain = "taz.local"
+
+	args := dc.apicurioHelmArgs()
+	cmd := strings.Join(args, " ")
+	for _, want := range []string{
+		"-n team-kafka",
+		"--set kafkaTopics.namespace=team-kafka",
+		"--set kafkaTopics.clusterName=warp",
+		"--set-string global.kafka.bootstrapServers[0]=warp-kafka-bootstrap.team-kafka.svc.taz.local:9092",
+		"--set networkPolicy.kafkaNamespace=team-kafka",
+		"--set networkPolicy.clientNamespaces[0]=team-connect",
+		"--set networkPolicy.clientNamespaces[1]=team-kates",
+		"--set networkPolicy.clientNamespaces[2]=team-ui",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("Apicurio helm upgrade lacks %q:\n%s", want, cmd)
+		}
+	}
+	if strings.Contains(cmd, "--create-namespace") {
+		t.Errorf("Apicurio asks helm to create Kafka's namespace: %s", cmd)
+	}
+	if !strings.HasSuffix(cmd, "-f policy.yaml") {
+		t.Errorf("policy values are not last: %s", cmd)
+	}
+}
+
 // A Secret copy kubectl refuses fails the deploy there and then, naming the
 // Secret and the namespaces. The apply's error used to be dropped, and the
 // deploy went on to wait on a workload that could never start. The scheduler
@@ -1019,6 +1057,9 @@ func TestKafkaRackArgs(t *testing.T) {
 		{"nodes with no zone", detect.DetectReport{Nodes: nodes}, true},
 		{"nodes with zones", detect.DetectReport{Nodes: nodes, Zones: zones}, false},
 		{"nodes refused", detect.DetectReport{}, false},
+		{"kind with nodes refused", detect.DetectReport{Provider: "kind"}, true},
+		{"k3d with nodes refused", detect.DetectReport{Provider: "k3d"}, true},
+		{"kind with zones", detect.DetectReport{Provider: "kind", Nodes: nodes, Zones: zones}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dc := &deployContext{report: &tc.report}

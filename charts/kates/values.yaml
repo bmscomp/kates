@@ -68,8 +68,8 @@ rbac:
   # -- With scope namespace: render the read-only Role and RoleBinding a
   # conformity check needs in the Kafka namespace (networkPolicy.kafka.namespace,
   # which the check then reads). An installer with only edit sets it false, and
-  # an account that may grant those reads applies them from
-  # `helm template ... --show-only templates/rbac.yaml`.
+  # an account that may grant those reads applies them from `helm template ...
+  # --api-versions monitoring.coreos.com/v1/PodMonitor --show-only templates/rbac.yaml`.
   kafkaNamespaceRole: true
   # -- With scope namespace: render a ClusterRole and ClusterRoleBinding that
   # grant get and list on nodes, so a conformity check reads any zoneLabel.

@@ -558,7 +558,7 @@ public class ClusterTopologyService {
                 result.put("podMonitors", monitorNames);
             }
         } catch (Exception e) {
-            refused(unread, "metrics", e);
+            refusedPodMonitors(unread, e);
             LOG.debug("Unable to read PodMonitors", e);
         }
         return result;
@@ -1437,6 +1437,18 @@ public class ClusterTopologyService {
         return pod.getStatus().getConditions().stream()
                 .filter(c -> "Ready".equals(c.getType()))
                 .anyMatch(c -> "True".equals(c.getStatus()));
+    }
+
+    /** RBAC answers before routing: with no rule for it, a CRD that is not there is a 403, and no refused read. */
+    private void refusedPodMonitors(Map<String, String> unread, Exception e) {
+        try {
+            if (forbidden(e) == null || !kubernetesClient.supports("monitoring.coreos.com/v1", "PodMonitor")) {
+                return;
+            }
+        } catch (KubernetesClientException undiscovered) {
+            LOG.debug("Unable to discover PodMonitors", undiscovered);
+        }
+        refused(unread, "metrics", e);
     }
 
     public static class KubernetesNotAvailableException extends RuntimeException {

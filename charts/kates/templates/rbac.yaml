@@ -99,7 +99,9 @@ subjects:
   rbac.scope=namespace: nothing cluster-scoped. Performance and INTEGRITY runs
   make no Kubernetes call; a conformity check reads these in the Kafka
   namespace (ConformityCheck). It lists PodMonitors across namespaces first,
-  then here when that is refused. Nodes stay unread: zones, skew and
+  then here when that is refused; the rule renders only where the
+  PodMonitor API exists, so an account can create this Role on a cluster
+  without it. helm template needs --api-versions for it. Nodes stay unread: zones, skew and
   kafka.rackAwareness with source cr take each pod's zone from the
   EndpointSlices of Strimzi's headless Service, unless rbac.nodeReads grants
   them below. The release namespace ends
@@ -125,9 +127,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "persistentvolumeclaims"]
     verbs: ["list"]
+  {{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PodMonitor" }}
   - apiGroups: ["monitoring.coreos.com"]
     resources: ["podmonitors"]
     verbs: ["list"]
+  {{- end }}
   - apiGroups: ["discovery.k8s.io"]
     resources: ["endpointslices"]
     verbs: ["list"]

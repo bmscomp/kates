@@ -276,7 +276,9 @@ public class ComplianceCheck {
                                 .getItems(),
                         true);
             } catch (KubernetesClientException e) {
-                if (e.getCode() == 404) {
+                // RBAC answers before routing: with no rule for it, a CRD that is not there is a 403.
+                if (e.getCode() == 404
+                        || e.getCode() == 403 && !client.supports("monitoring.coreos.com/v1", "PodMonitor")) {
                     return new Monitors(null, true);
                 }
                 throw e;

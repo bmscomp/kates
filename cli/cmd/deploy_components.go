@@ -501,6 +501,7 @@ func isKafkaClusterReady(ctx context.Context, namespace, name string) bool {
 // cluster label too, and brokers run before they have joined. A paused
 // Kafka is not waited on: the operator will not reconcile it.
 func waitKafkaReady(ctx context.Context, namespace, name string, deadline time.Time) error {
+	pods := podWaitWhy{namespace: namespace, selector: "strimzi.io/cluster=" + name}
 	for {
 		r := readKafkaReadiness(ctx, namespace, name)
 		switch {
@@ -514,7 +515,10 @@ func waitKafkaReady(ctx context.Context, namespace, name string, deadline time.T
 			if r.why != "" {
 				why = " (" + r.why + ")"
 			}
-			return fmt.Errorf("timeout waiting for Kafka %s/%s to report Ready for its current spec%s; is its operator watching namespace %s?", namespace, name, why, namespace)
+			return fmt.Errorf("timeout waiting for Kafka %s/%s to report Ready for its current spec%s%s; is its operator watching namespace %s?", namespace, name, why, pods.suffix(), namespace)
+		}
+		if err := pods.check(ctx); err != nil {
+			return err
 		}
 		select {
 		case <-ctx.Done():
@@ -1200,19 +1204,18 @@ func (dc *deployContext) kafkaComponent() component {
 				kafkaArgs = append(kafkaArgs, dc.versions.kafkaHelmArgs(dc.primary)...)
 			}
 
-			if deployHA {
+			switch {
+			case oneBroker():
+				kafkaArgs = append(kafkaArgs, oneBrokerKafkaArgs...)
+			case deployHA:
 				kafkaArgs = append(kafkaArgs,
-					"--set", "kafka.replicas=3",
 					"--set", "kafka.config.default\\.replication\\.factor=3",
 					"--set", "kafka.config.min\\.insync\\.replicas=2",
-					"--set", "zookeeper.replicas=3",
 				)
-			} else {
+			default:
 				kafkaArgs = append(kafkaArgs,
-					"--set", "kafka.replicas=1",
 					"--set", "kafka.config.default\\.replication\\.factor=1",
 					"--set", "kafka.config.min\\.insync\\.replicas=1",
-					"--set", "zookeeper.replicas=1",
 				)
 			}
 
@@ -1239,9 +1242,11 @@ func (dc *deployContext) kafkaComponent() component {
 // a zone, as generated values do: Strimzi makes rack a required node affinity on
 // brokers, which would stay Pending. It is for the admin-less deploy, which has
 // no generated values. Nodes it could not read keep the chart's zone key, right
-// on the zoned clusters such accounts usually run on.
+// on the zoned clusters such accounts usually run on, unless the cluster is a
+// local one, which has none to count on, or there is one broker, which has no
+// use for them.
 func (dc *deployContext) kafkaRackArgs() []string {
-	if len(dc.report.Nodes) > 0 && len(dc.report.Zones) == 0 {
+	if oneBroker() || len(dc.report.Zones) == 0 && (len(dc.report.Nodes) > 0 || localCluster(dc.report)) {
 		return []string{"--set", "kafka.rack.topologyKey=kubernetes.io/hostname"}
 	}
 	return nil
@@ -1420,12 +1425,18 @@ func (dc *deployContext) kafkaConnectHelmArgs(bootstrap, kafkaSvcDomain, connect
 		"-f", dc.chartOverlay(chartRootPath("charts/connect-cluster")),
 		"--set-string", "clusterDomain=" + connectDomain,
 		"--set", "kafka.namespace=" + kafkaNS,
+		"--set", "kafka.clusterName=" + dc.primary.Name,
 		"--set-string", "kafka.bootstrapServers=" + bootstrap,
 		"--set", "schemaRegistry.enabled=true",
 		"--set-string", "extraConfig.schema\\.registry\\.url=" + registryFQDN,
 		"--set", "networkPolicy.egress.databases[0].namespace=" + deployDbNS,
 		"--set", "networkPolicy.egress.databases[0].port=5432",
 		"--set", "networkPolicy.egress.databases[0].podSelector.app\\.kubernetes\\.io/name=postgresql",
+		// A list given by index replaces the chart's, which names namespace kates.
+		"--set", "networkPolicy.restApi.clients[0].namespace=" + dc.ns.app,
+		"--set", "networkPolicy.restApi.clients[0].podSelector.app\\.kubernetes\\.io/name=kates",
+		"--set", "networkPolicy.restApi.clients[1].namespace=" + dc.ns.kafkaUI,
+		"--set", "networkPolicy.restApi.clients[1].podSelector.app=kafka-ui",
 		"--timeout", "10m",
 	}
 	// Connect's spec.version must be inside the operator's window, so it
@@ -1460,6 +1471,9 @@ func (dc *deployContext) kafkaConnectHelmArgs(bootstrap, kafkaSvcDomain, connect
 		connectArgs = append(connectArgs, "--set", "replicas=3")
 	} else {
 		connectArgs = append(connectArgs, "--set", "replicas=1")
+	}
+	if oneBroker() {
+		connectArgs = append(connectArgs, oneBrokerConnectArgs...)
 	}
 
 	// Monitoring is installed by now (Kafka installs after it), so the
@@ -1604,10 +1618,29 @@ func (dc *deployContext) apicurioComponent() component {
 			return fmt.Sprintf("\n📦 Deploying Apicurio Schema Registry (Namespace: %s)...", kafkaNS)
 		},
 		install: func(ctx context.Context) error {
-			return runHelmFn(ctx, append([]string{"upgrade", "--install", "apicurio", chartRootPath("charts/apicurio-registry"), "-n", kafkaNS, "--create-namespace", "--timeout", "5m"},
-				dc.policyArgs("apicurio-registry")...)...)
+			return runHelmFn(ctx, dc.apicurioHelmArgs()...)
 		},
 	}
+}
+
+// apicurioHelmArgs is the apicurio release's argument list. Its namespace
+// needs no --create-namespace: Kafka, a dependency, lives there. The chart's
+// defaults name a cluster krafter in namespace kafka, and a list given by
+// index replaces the chart's whole list, hence every client.
+func (dc *deployContext) apicurioHelmArgs() []string {
+	kafkaNS := dc.ns.kafka
+	args := []string{"upgrade", "--install", "apicurio", chartRootPath("charts/apicurio-registry"),
+		"-n", kafkaNS,
+		"--set", "kafkaTopics.namespace=" + kafkaNS,
+		"--set", "kafkaTopics.clusterName=" + dc.primary.Name,
+		"--set-string", "global.kafka.bootstrapServers[0]=" + dc.primary.Bootstrap(dc.resolveClusterDomain()),
+		"--set", "networkPolicy.kafkaNamespace=" + kafkaNS,
+		"--set", "networkPolicy.clientNamespaces[0]=" + dc.ns.connect,
+		"--set", "networkPolicy.clientNamespaces[1]=" + dc.ns.app,
+		"--set", "networkPolicy.clientNamespaces[2]=" + dc.ns.kafkaUI,
+		"--timeout", "5m",
+	}
+	return append(args, dc.policyArgs("apicurio-registry")...)
 }
 
 // katesChaosArgs puts the Kates API on the noop chaos provider when this
@@ -1698,6 +1731,13 @@ func (dc *deployContext) katesComponent() component {
 				if len(adminlessComplianceMissing) > 0 {
 					katesArgs = append(katesArgs, "--set", "rbac.kafkaNamespaceRole=false")
 				}
+				katesArgs = append(katesArgs, adminlessServiceArgs()...)
+			}
+			if oneBroker() {
+				katesArgs = append(katesArgs,
+					"--set-string", "defaults.replicationFactor=1",
+					"--set-string", "defaults.minInsyncReplicas=1",
+				)
 			}
 			katesArgs = append(katesArgs, dc.policyArgs("kates")...)
 			katesArgs = append(katesArgs, "--timeout", "8m")
@@ -1742,6 +1782,20 @@ func (dc *deployContext) kafkaUIComponent() component {
 			}
 			if overlay := dc.chartOverlay(chartRootPath("charts/kafka-ui")); dc.fileExists(overlay) {
 				helmArgs = append(helmArgs, "-f", overlay)
+			}
+			// values-kind.yaml's addresses name namespace kafka, and a Connect
+			// Service the chart no longer makes. The chart's egress takes the
+			// URL's port, 80, but NetworkPolicy sees the pod's.
+			if dc.isKind {
+				helmArgs = append(helmArgs,
+					"--set-string", "schemaRegistry.url=http://apicurio-apicurio-registry."+kafkaNS+".svc:80/apis/ccompat/v7",
+					"--set-string", "kafkaConnect.url=http://connect-cluster-rest-api."+dc.ns.connect+".svc:8083",
+					"--set", "networkPolicy.extraEgress[0].to[0].namespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name="+kafkaNS,
+					"--set", "networkPolicy.extraEgress[0].ports[0].port=8080",
+				)
+			}
+			if deployAdminless {
+				helmArgs = append(helmArgs, adminlessServiceArgs()...)
 			}
 			return runHelmFn(ctx, append(helmArgs, dc.policyArgs("kafka-ui")...)...)
 		},
@@ -1797,6 +1851,12 @@ func (dc *deployContext) mirrorMaker2Component() component {
 					"--set-string", "version="+dc.versions.KafkaVersion,
 					"--set-string", "strimziVersion="+dc.versions.StrimziVersion,
 				)
+			}
+			if !deployHA {
+				helmArgs = append(helmArgs, "--set", "replicas=1")
+			}
+			if oneBroker() {
+				helmArgs = append(helmArgs, oneBrokerMM2Args...)
 			}
 			helmArgs = append(helmArgs, dc.scrapeArgs("charts/mirror-maker2")...)
 			helmArgs = append(helmArgs, dc.policyArgs("mirror-maker2")...)

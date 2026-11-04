@@ -288,7 +288,7 @@ jvm:
   options: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
 ```
 
-These are the chart defaults, which a plain `helm install` runs with; `values-prod.yaml` sets the same memory and `jvm.options`, with a CPU limit of `1000m`. `kates deploy` runs the native image on every cluster, which `jvm.options` does not reach (see [Native Image Build](#native-image-build)). On Kind it applies `charts/kates/values-kind.yaml` and then `charts/kates/values-native-local.yaml`, a 384Mi request and a 512Mi limit. On any other cluster, admin-less installs included, it applies `charts/kates/values-generic.yaml` and then `charts/kates/values-native.yaml`, whose 768Mi request, 1Gi limit and CPU limit of 2 replace the generic overlay's JVM sizing.
+These are the chart defaults, which a plain `helm install` runs with; `values-prod.yaml` sets the same memory and `jvm.options`, with a CPU limit of `1000m`. `kates deploy` runs the native image on every cluster, which `jvm.options` does not reach (see [Native Image Build](#native-image-build)). On Kind, admin-less installs included, it applies `charts/kates/values-kind.yaml` and then `charts/kates/values-native-local.yaml`, a 384Mi request and a 512Mi limit, when a local image is there. On any other cluster, admin-less installs included, it applies `charts/kates/values-generic.yaml` and then `charts/kates/values-native.yaml`, whose 768Mi request, 1Gi limit and CPU limit of 2 replace the generic overlay's JVM sizing.
 
 G1, the default, compares with the two low-pause collectors like this:
 
@@ -1024,10 +1024,11 @@ The granting account creates a KafkaUser for the team's Kates, here `team-kates`
 - Create, Describe, Write and Read on the topic `kates-test-events`, and Read on the group `kates-webhooks`, which carry run events to webhooks; Describe and Read on the topic `kates-dlq`, which the Kates API polls, and Read on its group `kates-dlq-consumer`.
 - Describe and DescribeConfigs on every topic for a compliance check's `topics` rules, which judge only the topics the user may describe, and DescribeConfigs on the cluster for `kafka.source: brokers`.
 
-It then renders the Role from the same release name, namespace and values as the team's install, so that it binds the right ServiceAccount, and applies it:
+It then renders the Role from the same release name, namespace and values as the team's install, so that it binds the right ServiceAccount, and applies it. `helm template` asks no cluster, so `--api-versions` keeps the PodMonitor rule; leave it out where the cluster has no Prometheus Operator:
 
 ```bash
 helm template kates oci://ghcr.io/bmscomp/charts/kates -n team \
+  --api-versions monitoring.coreos.com/v1/PodMonitor \
   --set rbac.scope=namespace --show-only templates/rbac.yaml | kubectl apply -f -
 ```
 
@@ -1038,7 +1039,7 @@ The Role is `kates-kafka-reader-team` in the `kafka` namespace, and it only read
 | `kafkas` | get | The `Kafka` resource every check starts from |
 | `kafkanodepools` | list | Storage types and whether controllers are dedicated |
 | `pods`, `persistentvolumeclaims` | list | Counts, requests, limits, placement and storage sizes |
-| `podmonitors` | list | Whether a PodMonitor selects the brokers |
+| `podmonitors` | list | Whether a PodMonitor selects the brokers; rendered only where the cluster serves that API |
 | `endpointslices` | list | Each Kafka pod's zone, since nodes are cluster-scoped |
 
 Without the Role, a compliance check stops before its first rule: the Kates API answers 503 and says which grant is missing.
@@ -1106,6 +1107,8 @@ kates deploy --adminless --topology single --namespace team
 
 It creates no namespace: each must exist, and the checks below name one the account can't use. It installs nothing cluster-scoped and skips the steps that need the cluster: Strimzi, cert-manager, Kyverno, the monitoring stack, Litmus, node introspection and namespace creation. `--with-chaos`, `--with-monitoring` and the other cluster-scoped toggles are refused with it.
 
+Node introspection is skipped, so nothing sizes the stack to the cluster, and the charts' default (three controllers and three brokers, 100Gi each) needs several nodes. `--ha=false` installs one controller and one broker with a 10Gi disk, one Connect and one MirrorMaker 2 worker, replication factor 1 everywhere, and no Cruise Control or Kafka Exporter. Deploy picks that size itself on kind, k3d and minikube, told from the kube context or the kubeconfig's cluster name, and on any cluster whose nodes the account can read and that has one node; a k3d or minikube cluster whose nodes it can read and that has several keeps the default. A Kafka already in the namespace keeps its size on a re-run. Deploy prints the size and why; `--ha` or the wizard's answer keeps the default on a new install. On kind the charts' `values-kind.yaml` overlays apply too, with `ClusterIP` Services in place of their NodePorts, which are cluster-wide. With nodes the account can't read and that carry no zone label, on another cluster, set `kafka.rack.topologyKey: kubernetes.io/hostname` for `kafka-cluster` in [`.policies`](#kyverno-policies-file), or the three brokers stay `Pending` on Strimzi's required zone affinity.
+
 Where the cluster serves the `monitoring.coreos.com` API, the wizard offers monitoring as the scrape alone. The Kafka, Connect, MirrorMaker 2 and Kates charts get their PodMonitors, ServiceMonitor and alert rules, for a Prometheus already on the cluster, whose selectors decide whether it reads these namespaces. The checks below then include the right to create PodMonitors, ServiceMonitors and PrometheusRules there.
 
 Before installing, it checks two things and stops with what is missing:
@@ -1113,11 +1116,11 @@ Before installing, it checks two things and stops with what is missing:
 - A Strimzi operator is installed (the `kafka.strimzi.io` resources exist). A cluster admin installs it once, watching the Kafka, Connect and MirrorMaker 2 namespaces.
 - The account may create what the stack needs in each namespace: Strimzi's resources where each is made (the Kafka cluster, its topics and users in the Kafka namespace, Connect's in the Connect namespace, MirrorMaker 2's in its own), and everywhere Deployments, StatefulSets, Services, Secrets, ConfigMaps, ServiceAccounts, NetworkPolicies, Roles and RoleBindings. The built-in `admin` role covers all but Strimzi's. A cluster admin adds those by setting `strimzi-kafka-operator.createAggregateRoles=true` on the Strimzi release, which adds them to `admin` and `edit`.
 
-Compliance checks need the read-only Role the `kates` chart creates in the Kafka namespace ([Step 1 — Grant the Team's Kates Access to Kafka](#step-1--grant-the-teams-kates-access-to-kafka) lists its grants). Kubernetes lets an account create a Role only for permissions it holds, so `kates deploy --adminless` first asks whether the account holds each of them there. When it does, the Role is installed and compliance checks work. When it lacks any (PodMonitors are the usual one: the built-in `admin` role doesn't include them), Kates installs without it (`rbac.kafkaNamespaceRole=false`), and everything else works. Deploy then names the missing reads and prints the command an account that holds them runs to turn compliance checks on:
+Compliance checks need the read-only Role the `kates` chart creates in the Kafka namespace ([Step 1 — Grant the Team's Kates Access to Kafka](#step-1--grant-the-teams-kates-access-to-kafka) lists its grants). Kubernetes lets an account create a Role only for permissions it holds, so `kates deploy --adminless` first asks whether the account holds each of them there, PodMonitors only where the cluster serves that API. When it does, the Role is installed and compliance checks work. When it lacks any (PodMonitors are the usual one: the built-in `admin` role doesn't include them), Kates installs without it (`rbac.kafkaNamespaceRole=false`), and everything else works. Deploy then names the missing reads and prints the command an account that holds them runs to turn compliance checks on:
 
 ```bash
 helm template kates oci://ghcr.io/bmscomp/charts/kates -n team-kates \
-  --set rbac.scope=namespace \
+  --set rbac.scope=namespace --api-versions monitoring.coreos.com/v1/PodMonitor \
   --set networkPolicy.kafka.namespace=team-kafka \
   --show-only templates/rbac.yaml | kubectl apply -f -
 ```
@@ -1232,6 +1235,8 @@ The pods' events name the constraint the scheduler couldn't satisfy:
 # Check Kafka pod events for the failing constraint
 kubectl describe pods -l strimzi.io/cluster=krafter -n kafka
 ```
+
+While it waits, `kates deploy` reads the events of its `Pending` pods and prints the first `FailedScheduling` or image pull reason, once per reason, and the failed wait's error repeats it. The wait for Kafka Connect does the same. If every node stays short of CPU or memory for the same pods for 3 minutes, the control plane's taint aside, and no autoscaler has answered for them, the wait stops there rather than running out its timeout. An account that may not read events sees none of this, and the wait runs as before.
 
 Pods stuck in `Pending` mean the scheduler can't satisfy zone affinity or provision storage — [Pods Stuck in Pending](20-installation-guide.md#pods-stuck-in-pending) in Installing Kafka with the kafka-cluster Helm Chart walks the `FailedScheduling` events constraint by constraint. Crashing brokers and a Kafka CR stuck on `NotReady` are diagnosed symptom by symptom in [Troubleshooting](15-kafka-deployment.md#troubleshooting) in Kafka Deployment Engineering.
 

@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 import jakarta.ws.rs.ClientErrorException;
 import jakarta.ws.rs.ServiceUnavailableException;
 
+import io.fabric8.kubernetes.api.model.APIResourceListBuilder;
 import io.fabric8.kubernetes.api.model.AffinityBuilder;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResourceBuilder;
@@ -975,6 +976,65 @@ class ComplianceCheckTest {
 
         assertEquals(Status.FAIL, result.status());
         assertEquals("the PodMonitor CRD is not installed", result.detail());
+    }
+
+    /** The chart's Role has no PodMonitor rule where the API is missing, so RBAC refuses before the 404. */
+    @Test
+    void aRefusalOfAnApiTheClusterDoesNotServeMeansThereIsNoCrd() throws IOException {
+        server.expect()
+                .get()
+                .withPath("/apis/monitoring.coreos.com/v1/podmonitors")
+                .andReturn(403, "")
+                .always();
+        server.expect()
+                .get()
+                .withPath("/apis/monitoring.coreos.com/v1/namespaces/kafka/podmonitors")
+                .andReturn(403, "")
+                .always();
+        server.expect()
+                .get()
+                .withPath("/apis/monitoring.coreos.com/v1")
+                .andReturn(404, "")
+                .always();
+
+        Result result = result(run("{monitoring: {podMonitor: true}}"), "monitoring.podMonitor");
+
+        assertEquals(Status.FAIL, result.status());
+        assertEquals("the PodMonitor CRD is not installed", result.detail());
+    }
+
+    /** With the API served, the same refusal is a missing grant. */
+    @Test
+    void aRefusalOfAnApiTheClusterServesStaysUnknown() throws IOException {
+        server.expect()
+                .get()
+                .withPath("/apis/monitoring.coreos.com/v1/podmonitors")
+                .andReturn(403, "")
+                .always();
+        server.expect()
+                .get()
+                .withPath("/apis/monitoring.coreos.com/v1/namespaces/kafka/podmonitors")
+                .andReturn(403, "")
+                .always();
+        server.expect()
+                .get()
+                .withPath("/apis/monitoring.coreos.com/v1")
+                .andReturn(
+                        200,
+                        new APIResourceListBuilder()
+                                .addNewResource()
+                                .withKind("PodMonitor")
+                                .withName("podmonitors")
+                                .withNamespaced(true)
+                                .withSingularName("podmonitor")
+                                .withVerbs("list")
+                                .endResource()
+                                .build())
+                .always();
+
+        Result result = result(run("{monitoring: {podMonitor: true}}"), "monitoring.podMonitor");
+
+        assertEquals(Status.UNKNOWN, result.status());
     }
 
     /** A namespace-scoped role, such as the chart's rbac.scope=namespace, lists the Kafka namespace's only. */
