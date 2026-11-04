@@ -3,7 +3,7 @@ kind: Plugin
 metadata:
   name: kates
 spec:
-  version: v1.36.0
+  version: v1.37.0
   homepage: https://github.com/bmscomp/kates
   shortDescription: Benchmark, fault-test, and audit Kafka clusters
   description: |
@@ -23,27 +23,27 @@ spec:
         matchLabels:
           os: darwin
           arch: amd64
-      uri: https://github.com/bmscomp/kates/releases/download/v1.36.0/kates-darwin-amd64.tar.gz
-      sha256: d3e5f45f2e7da86843da8cfe27b3864c4e2ddf7b9792623450d7062904b59177
+      uri: https://github.com/bmscomp/kates/releases/download/v1.37.0/kates-darwin-amd64.tar.gz
+      sha256: 06f65ad8797ffe8f58406ca05d69b60a11fb8d435eecf3baee076dde49cd20a6
       bin: kates
     - selector:
         matchLabels:
           os: darwin
           arch: arm64
-      uri: https://github.com/bmscomp/kates/releases/download/v1.36.0/kates-darwin-arm64.tar.gz
-      sha256: e4861dd481b302a722e8f0587e5383e89f494b8c43d49bed3aee864dbe2cf08c
+      uri: https://github.com/bmscomp/kates/releases/download/v1.37.0/kates-darwin-arm64.tar.gz
+      sha256: 7fb9214a69a54e376f505b879cd5e990c87b7a180549ab8bb1865c101a4152a1
       bin: kates
     - selector:
         matchLabels:
           os: linux
           arch: amd64
-      uri: https://github.com/bmscomp/kates/releases/download/v1.36.0/kates-linux-amd64.tar.gz
-      sha256: e34856f698c9ea49210873394a3811c509373cbee1eba350b9d5984d0f1f1571
+      uri: https://github.com/bmscomp/kates/releases/download/v1.37.0/kates-linux-amd64.tar.gz
+      sha256: 80f26d4665b4c3d70170ec4b3299b14c61e6d6278837f888d8cabaade224280b
       bin: kates
     - selector:
         matchLabels:
           os: linux
           arch: arm64
-      uri: https://github.com/bmscomp/kates/releases/download/v1.36.0/kates-linux-arm64.tar.gz
-      sha256: 2baec1a07fa5cfeebd92eaa085477b9646a09dc99d01ea684891d356474bad15
+      uri: https://github.com/bmscomp/kates/releases/download/v1.37.0/kates-linux-arm64.tar.gz
+      sha256: 3115d905419d806ce2f0ae088de147a177e549218ea86ac5ba0333b17ce9a899
       bin: kates
