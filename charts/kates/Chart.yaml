@@ -2,16 +2,14 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: appVersion and the image tag move to 1.36.0, the tag the v1.36.0
+# Patch: appVersion and the image tag move to 1.37.0, the tag the v1.37.0
 # release publishes.
-# Patch: the chart icon.
-# Patch: the Kafka-namespace Role's PodMonitor rule follows the cluster.
-version: 0.15.9
+version: 0.15.10
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
 # image.tag in values.yaml pinned to that release.
-appVersion: "1.36.0"
+appVersion: "1.37.0"
 keywords:
   - kafka
   - testing
@@ -30,6 +28,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "appVersion 1.37.0 and the image tag move to 1.37.0. The image takes #595 (a PodMonitor CRD that is not there, answered with a 403, no longer counts as a refused read in compliance or topology) and the zstd-jni bump #592; the release also ships the CLI fixes #589, #591, #595 and #596."
     - kind: fixed
       description: "With rbac.scope=namespace the Kafka-namespace Role carries its podmonitors rule only where the PodMonitor API exists, so a namespace admin can create it on a cluster without the Prometheus operator. helm template asks no cluster: pass --api-versions monitoring.coreos.com/v1/PodMonitor to render the rule for one that has it"
     - kind: fixed
