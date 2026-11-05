@@ -1,0 +1,563 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: katestests.kates.io
+spec:
+  group: kates.io
+  names:
+    kind: KatesTest
+    plural: katestests
+    singular: katestest
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.runId
+      name: Run
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: "One Kates run. crd-version: 1"
+        properties:
+          spec:
+            description: One Kates run, as `kubectl apply` takes it.
+            properties:
+              backend:
+                description: "Execution backend: native (the API's default) or trogdor."
+                nullable: true
+                type: string
+              scenario:
+                properties:
+                  backend:
+                    description: "Benchmark execution engine: native or trogdor."
+                    type: string
+                  baseSpec:
+                    description: Base TestSpec inherited by all phases unless overridden in phases[].spec.
+                    properties:
+                      acks:
+                        description: "Producer acknowledgment mode: \"all\", \"-1\", \"1\", or \"0\"."
+                        nullable: true
+                        x-kubernetes-int-or-string: true
+                      batchSize:
+                        description: Producer batch.size in bytes (1..16,777,216).
+                        type: integer
+                      compressionType:
+                        description: "Producer compression codec: none, gzip, snappy, lz4, or zstd."
+                        type: string
+                      consumerGroup:
+                        description: >-
+                          Consumer group ID (1..255 printable ASCII chars). Allowed only on single-phase
+                          LOAD, ENDURANCE, and INTEGRITY runs.
+                        type: string
+                      durationMs:
+                        description: >-
+                          Maximum test duration in milliseconds (0 for record-count bounded, or
+                          1,000..86,400,000).
+                        type: integer
+                      enableCrc:
+                        description: Enable CRC32 payload validation (allowed only on single-phase INTEGRITY runs).
+                        type: boolean
+                      enableIdempotence:
+                        description: "Enable producer idempotence (requires acks: \"all\")."
+                        type: boolean
+                      enableTransactions:
+                        description: "Enable Kafka transactions (requires acks: \"all\", enableIdempotence: true, and backend: native)."
+                        type: boolean
+                      fetchMaxWaitMs:
+                        description: >-
+                          Consumer fetch.max.wait.ms (1..60,000). Allowed only on single-phase LOAD,
+                          ENDURANCE, and INTEGRITY runs.
+                        type: integer
+                      fetchMinBytes:
+                        description: >-
+                          Consumer fetch.min.bytes (1..16,777,216). Allowed only on single-phase LOAD,
+                          ENDURANCE, and INTEGRITY runs.
+                        type: integer
+                      lingerMs:
+                        description: Producer linger.ms in milliseconds (0..60,000).
+                        type: integer
+                      minInsyncReplicas:
+                        description: Topic min.insync.replicas (1..10). Must be <= replicationFactor.
+                        type: integer
+                      numConsumers:
+                        description: Number of concurrent consumer tasks (1..64).
+                        type: integer
+                      numProducers:
+                        description: Number of concurrent producer tasks (1..64).
+                        type: integer
+                      numRecords:
+                        description: Number of records each producer task sends (1..100,000,000).
+                        type: integer
+                      partitions:
+                        description: Number of topic partitions (1..1,000).
+                        type: integer
+                      recordSize:
+                        description: Payload size of each record in bytes (1..10,485,760).
+                        type: integer
+                      replicationFactor:
+                        description: Topic replication factor (1..10). Must be >= minInsyncReplicas.
+                        type: integer
+                      targetThroughput:
+                        description: "Alias for throughput: target producer rate in records/sec, or -1 for unlimited."
+                        type: integer
+                      throughput:
+                        description: Target producer throughput in records/sec per producer, or -1 for unlimited.
+                        type: integer
+                      topic:
+                        description: Kafka topic name (1..249 ASCII alphanumeric, '.', '_', or '-' chars).
+                        type: string
+                    type: object
+                  description:
+                    description: Human-readable description of the multi-phase scenario.
+                    type: string
+                  labels:
+                    additionalProperties:
+                      type: string
+                    description: Arbitrary key/value string labels attached to the scenario.
+                    type: object
+                  name:
+                    description: Scenario name (1..128 characters).
+                    type: string
+                  phases:
+                    description: Ordered sequence of execution phases (WARMUP, RAMP, STEADY, SPIKE, COOLDOWN).
+                    items:
+                      description: A single execution phase within a multi-phase TestScenario.
+                      properties:
+                        durationMs:
+                          description: Phase duration in milliseconds (0 or 1,000..86,400,000).
+                          type: integer
+                        name:
+                          description: Phase display name (1..100 characters).
+                          type: string
+                        phaseType:
+                          description: "Alias for type: execution phase behavior (WARMUP, RAMP, STEADY, SPIKE, or COOLDOWN)."
+                          type: string
+                        rampSteps:
+                          description: >-
+                            Number of incremental throughput steps (2..100). Only used when phase type is
+                            RAMP.
+                          type: integer
+                        spec:
+                          description: Phase-specific TestSpec overrides merged onto scenario.baseSpec.
+                          properties:
+                            acks:
+                              description: "Producer acknowledgment mode: \"all\", \"-1\", \"1\", or \"0\"."
+                              nullable: true
+                              x-kubernetes-int-or-string: true
+                            batchSize:
+                              description: Producer batch.size in bytes (1..16,777,216).
+                              type: integer
+                            compressionType:
+                              description: "Producer compression codec: none, gzip, snappy, lz4, or zstd."
+                              type: string
+                            consumerGroup:
+                              description: >-
+                                Consumer group ID (1..255 printable ASCII chars). Allowed only on single-phase
+                                LOAD, ENDURANCE, and INTEGRITY runs.
+                              type: string
+                            durationMs:
+                              description: >-
+                                Maximum test duration in milliseconds (0 for record-count bounded, or
+                                1,000..86,400,000).
+                              type: integer
+                            enableCrc:
+                              description: Enable CRC32 payload validation (allowed only on single-phase INTEGRITY runs).
+                              type: boolean
+                            enableIdempotence:
+                              description: "Enable producer idempotence (requires acks: \"all\")."
+                              type: boolean
+                            enableTransactions:
+                              description: "Enable Kafka transactions (requires acks: \"all\", enableIdempotence: true, and backend: native)."
+                              type: boolean
+                            fetchMaxWaitMs:
+                              description: >-
+                                Consumer fetch.max.wait.ms (1..60,000). Allowed only on single-phase LOAD,
+                                ENDURANCE, and INTEGRITY runs.
+                              type: integer
+                            fetchMinBytes:
+                              description: >-
+                                Consumer fetch.min.bytes (1..16,777,216). Allowed only on single-phase LOAD,
+                                ENDURANCE, and INTEGRITY runs.
+                              type: integer
+                            lingerMs:
+                              description: Producer linger.ms in milliseconds (0..60,000).
+                              type: integer
+                            minInsyncReplicas:
+                              description: Topic min.insync.replicas (1..10). Must be <= replicationFactor.
+                              type: integer
+                            numConsumers:
+                              description: Number of concurrent consumer tasks (1..64).
+                              type: integer
+                            numProducers:
+                              description: Number of concurrent producer tasks (1..64).
+                              type: integer
+                            numRecords:
+                              description: Number of records each producer task sends (1..100,000,000).
+                              type: integer
+                            partitions:
+                              description: Number of topic partitions (1..1,000).
+                              type: integer
+                            recordSize:
+                              description: Payload size of each record in bytes (1..10,485,760).
+                              type: integer
+                            replicationFactor:
+                              description: Topic replication factor (1..10). Must be >= minInsyncReplicas.
+                              type: integer
+                            targetThroughput:
+                              description: "Alias for throughput: target producer rate in records/sec, or -1 for unlimited."
+                              type: integer
+                            throughput:
+                              description: Target producer throughput in records/sec per producer, or -1 for unlimited.
+                              type: integer
+                            topic:
+                              description: Kafka topic name (1..249 ASCII alphanumeric, '.', '_', or '-' chars).
+                              type: string
+                          type: object
+                        targetThroughput:
+                          description: Target producer throughput for this phase in records/sec, or -1 for unlimited.
+                          type: integer
+                      type: object
+                    type: array
+                  sla:
+                    description: SLA definition evaluated across the scenario run.
+                    properties:
+                      maxAvgLatencyMs:
+                        description: Maximum allowed average latency in milliseconds (> 0).
+                        type: number
+                      maxDataLossPercent:
+                        description: Maximum allowed data loss percentage (0.0..100.0).
+                        type: number
+                      maxErrorRate:
+                        description: Maximum allowed error rate as a fraction between 0.0 and 1.0.
+                        type: number
+                      maxP999LatencyMs:
+                        description: Maximum allowed p99.9 latency in milliseconds (> 0).
+                        type: number
+                      maxP99LatencyMs:
+                        description: Maximum allowed p99 latency in milliseconds (> 0).
+                        type: number
+                      maxRpoMs:
+                        description: Maximum allowed Recovery Point Objective (RPO) in milliseconds (> 0).
+                        type: number
+                      maxRtoMs:
+                        description: Maximum allowed Recovery Time Objective (RTO) in milliseconds (> 0).
+                        type: number
+                      minRecordsProcessed:
+                        description: Minimum total records processed (>= 1).
+                        type: integer
+                      minThroughputRecPerSec:
+                        description: Minimum required throughput in records/second (> 0).
+                        type: number
+                    type: object
+                  type:
+                    description: Primary test type for the scenario.
+                    type: string
+                type: object
+              sla:
+                description: >-
+                  Service Level Agreement thresholds used by Kates SlaGrader to grade a test or
+                  disruption run.
+                properties:
+                  maxAvgLatencyMs:
+                    description: Maximum allowed average latency in milliseconds (> 0).
+                    type: number
+                  maxDataLossPercent:
+                    description: Maximum allowed data loss percentage (0.0..100.0).
+                    type: number
+                  maxErrorRate:
+                    description: Maximum allowed error rate as a fraction between 0.0 and 1.0.
+                    type: number
+                  maxP999LatencyMs:
+                    description: Maximum allowed p99.9 latency in milliseconds (> 0).
+                    type: number
+                  maxP99LatencyMs:
+                    description: Maximum allowed p99 latency in milliseconds (> 0).
+                    type: number
+                  maxRpoMs:
+                    description: Maximum allowed Recovery Point Objective (RPO) in milliseconds (> 0).
+                    type: number
+                  maxRtoMs:
+                    description: Maximum allowed Recovery Time Objective (RTO) in milliseconds (> 0).
+                    type: number
+                  minRecordsProcessed:
+                    description: Minimum total records processed (>= 1).
+                    type: integer
+                  minThroughputRecPerSec:
+                    description: Minimum required throughput in records/second (> 0).
+                    type: number
+                type: object
+              spec:
+                description: >-
+                  Kates API wire-format TestSpec. Uses numRecords, numProducers, recordSize,
+                  durationMs, and throughput.
+                properties:
+                  acks:
+                    description: "Producer acknowledgment mode: \"all\", \"-1\", \"1\", or \"0\"."
+                    nullable: true
+                    x-kubernetes-int-or-string: true
+                  batchSize:
+                    description: Producer batch.size in bytes (1..16,777,216).
+                    type: integer
+                  compressionType:
+                    description: "Producer compression codec: none, gzip, snappy, lz4, or zstd."
+                    type: string
+                  consumerGroup:
+                    description: >-
+                      Consumer group ID (1..255 printable ASCII chars). Allowed only on single-phase
+                      LOAD, ENDURANCE, and INTEGRITY runs.
+                    type: string
+                  durationMs:
+                    description: >-
+                      Maximum test duration in milliseconds (0 for record-count bounded, or
+                      1,000..86,400,000).
+                    type: integer
+                  enableCrc:
+                    description: Enable CRC32 payload validation (allowed only on single-phase INTEGRITY runs).
+                    type: boolean
+                  enableIdempotence:
+                    description: "Enable producer idempotence (requires acks: \"all\")."
+                    type: boolean
+                  enableTransactions:
+                    description: "Enable Kafka transactions (requires acks: \"all\", enableIdempotence: true, and backend: native)."
+                    type: boolean
+                  fetchMaxWaitMs:
+                    description: >-
+                      Consumer fetch.max.wait.ms (1..60,000). Allowed only on single-phase LOAD,
+                      ENDURANCE, and INTEGRITY runs.
+                    type: integer
+                  fetchMinBytes:
+                    description: >-
+                      Consumer fetch.min.bytes (1..16,777,216). Allowed only on single-phase LOAD,
+                      ENDURANCE, and INTEGRITY runs.
+                    type: integer
+                  lingerMs:
+                    description: Producer linger.ms in milliseconds (0..60,000).
+                    type: integer
+                  minInsyncReplicas:
+                    description: Topic min.insync.replicas (1..10). Must be <= replicationFactor.
+                    type: integer
+                  numConsumers:
+                    description: Number of concurrent consumer tasks (1..64).
+                    type: integer
+                  numProducers:
+                    description: Number of concurrent producer tasks (1..64).
+                    type: integer
+                  numRecords:
+                    description: Number of records each producer task sends (1..100,000,000).
+                    type: integer
+                  partitions:
+                    description: Number of topic partitions (1..1,000).
+                    type: integer
+                  recordSize:
+                    description: Payload size of each record in bytes (1..10,485,760).
+                    type: integer
+                  replicationFactor:
+                    description: Topic replication factor (1..10). Must be >= minInsyncReplicas.
+                    type: integer
+                  targetThroughput:
+                    description: "Alias for throughput: target producer rate in records/sec, or -1 for unlimited."
+                    type: integer
+                  throughput:
+                    description: Target producer throughput in records/sec per producer, or -1 for unlimited.
+                    type: integer
+                  topic:
+                    description: Kafka topic name (1..249 ASCII alphanumeric, '.', '_', or '-' chars).
+                    type: string
+                type: object
+              ttlSecondsAfterFinished:
+                description: |-
+                  Seconds after the end of the run to delete this resource. Never set it on a resource Flux
+                  or Argo CD holds: the tool re-creates it, and the run repeats every TTL.
+                format: int32
+                minimum: 0.0
+                nullable: true
+                type: integer
+              type:
+                description: "`TestType`, as `POST /api/tests` takes it."
+                enum:
+                - LOAD
+                - STRESS
+                - SPIKE
+                - ENDURANCE
+                - VOLUME
+                - CAPACITY
+                - ROUND_TRIP
+                - INTEGRITY
+                - TUNE_REPLICATION
+                - TUNE_ACKS
+                - TUNE_BATCHING
+                - TUNE_COMPRESSION
+                - TUNE_PARTITIONS
+                - INTEGRATION_CDC
+                type: string
+            required:
+            - type
+            type: object
+          status:
+            nullable: true
+            properties:
+              conditions:
+                items:
+                  description: >-
+                    Condition contains details for one aspect of the current state of this API
+                    Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: >-
+                        lastTransitionTime is the last time the condition transitioned from one status
+                        to another. This should be when the underlying condition changed.  If that is not
+                        known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: >-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      type: string
+                    observedGeneration:
+                      description: >-
+                        observedGeneration represents the .metadata.generation that the condition was
+                        set based upon. For instance, if .metadata.generation is currently 12, but the
+                        .status.conditions[x].observedGeneration is 9, the condition is out of date with
+                        respect to the current state of the instance.
+                      format: int64
+                      type: integer
+                    reason:
+                      description: >-
+                        reason contains a programmatic identifier indicating the reason for the
+                        condition's last transition. Producers of specific condition types may define expected
+                        values and meanings for this field, and whether the values are considered a
+                        guaranteed API. The value should be a CamelCase string. This field may not be empty.
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              finishedAt:
+                description: >-
+                  Time is a wrapper around time.Time which supports correct marshaling to YAML
+                  and JSON.  Wrappers are provided for many of the factory methods that the time
+                  package offers.
+                format: date-time
+                nullable: true
+                type: string
+              lastHandledReconcileAt:
+                description: The `kates.io/reconcile-at` value last acted on.
+                nullable: true
+                type: string
+              observedGeneration:
+                format: int64
+                nullable: true
+                type: integer
+              phase:
+                enum:
+                - Pending
+                - Running
+                - Succeeded
+                - Failed
+                - null
+                nullable: true
+                type: string
+              runId:
+                nullable: true
+                type: string
+              startedAt:
+                description: >-
+                  Time is a wrapper around time.Time which supports correct marshaling to YAML
+                  and JSON.  Wrappers are provided for many of the factory methods that the time
+                  package offers.
+                format: date-time
+                nullable: true
+                type: string
+              summary:
+                description: "`ReportSummary`'s fields verbatim, from `GET /api/tests/{id}/report`."
+                nullable: true
+                properties:
+                  avgLatencyMs:
+                    format: double
+                    nullable: true
+                    type: number
+                  avgThroughputMBPerSec:
+                    format: double
+                    nullable: true
+                    type: number
+                  avgThroughputRecPerSec:
+                    format: double
+                    nullable: true
+                    type: number
+                  durationMs:
+                    format: int64
+                    nullable: true
+                    type: integer
+                  errorRate:
+                    format: double
+                    nullable: true
+                    type: number
+                  maxLatencyMs:
+                    format: double
+                    nullable: true
+                    type: number
+                  p50LatencyMs:
+                    format: double
+                    nullable: true
+                    type: number
+                  p95LatencyMs:
+                    format: double
+                    nullable: true
+                    type: number
+                  p999LatencyMs:
+                    format: double
+                    nullable: true
+                    type: number
+                  p99LatencyMs:
+                    format: double
+                    nullable: true
+                    type: number
+                  peakThroughputRecPerSec:
+                    format: double
+                    nullable: true
+                    type: number
+                  totalErrors:
+                    format: int64
+                    nullable: true
+                    type: integer
+                  totalRecords:
+                    format: int64
+                    nullable: true
+                    type: integer
+                type: object
+            type: object
+        required:
+        - spec
+        title: KatesTest
+        type: object
+        x-kubernetes-validations:
+        - message: exactly one of spec.spec and spec.scenario is required
+          rule: has(self.spec.spec) != has(self.spec.scenario)
+        - message: "spec.sla goes with spec.spec: a scenario carries its own sla"
+          rule: "!has(self.spec.sla) || has(self.spec.spec)"
+        - message: "spec is immutable once the run has started: create a new KatesTest"
+          rule: "!has(oldSelf.status) || !has(oldSelf.status.runId) || oldSelf.spec == self.spec"
+    served: true
+    storage: true
+    subresources:
+      status: {}

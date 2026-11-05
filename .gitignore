@@ -173,6 +173,7 @@ vendor/bundle
 ## Rust
 target/
 Cargo.lock
+!operator/Cargo.lock
 **/*.rs.bk
 
 # Kubernetes & Docker

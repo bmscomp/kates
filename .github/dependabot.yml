@@ -21,7 +21,6 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
-
   # Maven dependencies (Quarkus BOM, kafka-clients/netty CVE pins, etc.).
   - package-ecosystem: maven
     directory: /kates
@@ -43,6 +42,12 @@ updates:
   # The Go CLI: go.mod/go.sum were not on Dependabot at all.
   - package-ecosystem: gomod
     directory: /cli
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: cargo
+    directory: /operator
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
