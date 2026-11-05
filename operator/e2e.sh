@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # End-to-end checks of a running operator, against a real Kates API and Kafka.
 #
-#   KUBECONFIG=<scratch> operator/e2e.sh [namespace]
+#   KUBECONFIG=<scratch> operator/e2e.sh [namespace] [kafka namespace] [kafka name]
 #
 # The namespace must be watched and hold a working kates-connection. Each check
 # creates its own resources under a unique name and asserts what the plan says.
 set -uo pipefail
 
 ns=${1:-payments}
+kafka_ns=${2:-kafka}
+kafka_name=${3:-krafter}
 k=(kubectl -n "$ns")
 failed=0
 suffix=$(date +%s)
@@ -95,5 +97,22 @@ check "Reconciling" False/Paused "$(condition "$name" Reconciling)"
 "${k[@]}" annotate katestest "$name" kates.io/pause-reconciliation- >/dev/null
 finished "$name"
 check "runs once resumed" Succeeded "$(get katestest "$name" '{.status.phase}')"
+
+echo "== a compliance check, then its spec edited"
+name=rules-$suffix
+verdict() { "${k[@]}" wait --for=jsonpath="{.status.verdict}=$2" "kafkacompliance/$1" --timeout=120s >/dev/null; }
+compliant() { get kafkacompliance "$1" "{.status.conditions[?(@.type=='Compliant')].status}/{.status.conditions[?(@.type=='Compliant')].reason}"; }
+printf 'apiVersion: kates.io/v1alpha1\nkind: KafkaCompliance\nmetadata: {name: %s}\nspec: {interval: 1h, reference: {target: {namespace: %s, name: %s}, brokers: {count: {min: 1}}}}\n' \
+  "$name" "$kafka_ns" "$kafka_name" | "${k[@]}" apply -f - >/dev/null
+verdict "$name" PASS
+check "Compliant" True/PASS "$(compliant "$name")"
+[ -n "$(get kafkacompliance "$name" '{.status.nextCheckAt}')" ] && pass "next check set" || fail "no next check"
+"${k[@]}" patch kafkacompliance "$name" --type=merge -p '{"spec":{"reference":{"brokers":{"count":{"min":9999}}}}}' >/dev/null
+verdict "$name" FAIL
+check "Compliant after the edit" False/FAIL "$(compliant "$name")"
+[ -n "$(get kafkacompliance "$name" '{.status.failed[0].rule}')" ] && pass "failed rule named" || fail "no failed rule"
+"${k[@]}" get events --field-selector reason=ComplianceFailed,involvedObject.name="$name" -o name | grep -q . \
+  && pass "ComplianceFailed event" || fail "no ComplianceFailed event"
+"${k[@]}" delete kafkacompliance "$name" --timeout=30s >/dev/null
 
 exit $failed

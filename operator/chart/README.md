@@ -76,6 +76,79 @@ The first returns on every ending, and the second exits non-zero on a failed run
 
 Deleting a `KatesTest` whose run is live cancels the run first. The run's record stays in Kates. A deleted and re-created `KatesTest` is a new run.
 
+### On a schedule
+
+There is no schedule kind. A `CronJob` creates one `KatesTest` per firing, and waits for it so `Forbid` holds across firings:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nightly-load
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nightly-load
+rules:
+  - apiGroups: [kates.io]
+    resources: [katestests]
+    verbs: [create, get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nightly-load
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nightly-load
+subjects:
+  - kind: ServiceAccount
+    name: nightly-load
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-load
+spec:
+  schedule: "0 2 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: nightly-load
+          restartPolicy: Never
+          containers:
+            - name: run
+              image: ghcr.io/bmscomp/kates-tester:1.38.0
+              command: [/bin/sh, -ec]
+              args:
+                - |
+                  run=$(kubectl create -o name -f - <<EOF
+                  apiVersion: kates.io/v1alpha1
+                  kind: KatesTest
+                  metadata:
+                    generateName: nightly-load-
+                  spec:
+                    type: LOAD
+                    spec: {numRecords: 1000000}
+                    sla: {maxP99LatencyMs: 100}
+                    ttlSecondsAfterFinished: 86400
+                  EOF
+                  )
+                  kubectl wait --for=jsonpath='{.status.finishedAt}' "$run" --timeout=30m
+                  kubectl wait --for=condition=Ready "$run" --timeout=0
+```
+
+The Job fails when the run does, so the `CronJob`'s history shows the missed gates. The API's own `/api/schedules` is still there, but it needs an `admin` key and leaves no resource per firing.
+
+`kates-tester` is unsigned. Where the Kates chart's `kyvernoPolicy.cosign` is on with Enforce, its pod is refused in that release's namespace: run the `CronJob` in another namespace and bind its ServiceAccount in the target, or use your own image with a shell and kubectl.
+
 ### GitOps
 
 To rerun a `KatesTest`, rename it: the new name is a new run. With pruning on, the old resource is deleted, and its run is cancelled first if it is still live.

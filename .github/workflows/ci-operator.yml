@@ -6,7 +6,7 @@ name: CI · Operator
 
 on:
   push:
-    branches: [main]
+    branches: [main, operator]
   pull_request:
     branches: [main]
 
