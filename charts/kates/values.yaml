@@ -584,10 +584,15 @@ metrics:
 postgresql:
   # -- Deploy bundled PostgreSQL
   enabled: true
-  # -- PostgreSQL image (official library image; Alpine variants also work)
+  # -- PostgreSQL image, the official library image pinned to a patch release.
+  # Moving between Alpine (musl) and Debian (glibc) on existing data breaks its
+  # text indexes, so that switch is refused unless allowLibcChange is set.
   image:
     repository: postgres
-    tag: "16"
+    tag: "16.15-alpine"
+  # -- Accept data written on the other libc. Set it for one upgrade, once
+  # that data is reindexed: see the upgrade playbook of the book.
+  allowLibcChange: false
   # -- Database authentication
   auth:
     # -- Database name

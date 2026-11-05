@@ -2,6 +2,17 @@
        replication. productionMode fails rendering if this is enabled (see
        secret.yaml); production deployments use externalDatabase. */}}
 {{- if .Values.postgresql.enabled }}
+{{- $image := include "kates.imageRef" (dict "image" (printf "%s:%s" .Values.postgresql.image.repository .Values.postgresql.image.tag) "ctx" .) }}
+{{- /* musl and glibc sort text differently, so a switch under existing data
+       leaves text indexes that miss rows. lookup finds nothing under helm
+       template: the check-libc init container below covers that case. */}}
+{{- $running := lookup "apps/v1" "StatefulSet" .Release.Namespace (include "kates.postgresql.fullname" .) }}
+{{- if and $running (not .Values.postgresql.allowLibcChange) }}
+  {{- $was := (index $running.spec.template.spec.containers 0).image }}
+  {{- if ne (contains "alpine" $was) (contains "alpine" $image) }}
+    {{- fail (printf "postgresql.image: this release's database runs on %s and the new image is %s. Alpine and Debian sort text differently, so switching under existing data breaks its text indexes. Stay on the same libc (postgresql.image.tag=16.15 is Debian), or move with the steps under Change the PostgreSQL libc in the upgrade playbook of the book" $was $image) }}
+  {{- end }}
+{{- end }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -40,9 +51,42 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      initContainers:
+      # Runs whatever rendered the chart, so it also stops Argo CD and a
+      # reinstall onto a retained volume, which the lookup above cannot see.
+      - name: check-libc
+        image: {{ $image | quote }}
+        {{- with .Values.postgresql.containerSecurityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        env:
+        - name: ALLOW_LIBC_CHANGE
+          value: {{ .Values.postgresql.allowLibcChange | quote }}
+        command:
+        - sh
+        - -c
+        - |
+          marker=/var/lib/postgresql/data/.libc
+          libc=glibc
+          if [ -f /etc/alpine-release ]; then libc=musl; fi
+          if [ -f /var/lib/postgresql/data/pgdata/PG_VERSION ]; then
+            # Data older than this check has no marker: it ran the Debian default.
+            was=$(cat "$marker" 2>/dev/null || echo glibc)
+            if [ "$was" != "$libc" ] && [ "$ALLOW_LIBC_CHANGE" != true ]; then
+              echo "This data was written on $was and this image uses $libc: switching breaks text indexes. See Change the PostgreSQL libc in the upgrade playbook of the book." >&2
+              exit 1
+            fi
+          fi
+          echo "$libc" > "$marker"
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+        resources:
+          {{- toYaml .Values.postgresql.resources | nindent 10 }}
       containers:
       - name: postgresql
-        image: {{ include "kates.imageRef" (dict "image" (printf "%s:%s" .Values.postgresql.image.repository .Values.postgresql.image.tag) "ctx" .) | quote }}
+        image: {{ $image | quote }}
         {{- with .Values.postgresql.containerSecurityContext }}
         securityContext:
           {{- toYaml . | nindent 10 }}

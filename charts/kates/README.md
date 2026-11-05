@@ -212,6 +212,8 @@ Upgrading from 0.10.7 or earlier: `values-prod.yaml` there ran an autoscaler of 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `postgresql.enabled` | `true` | Deploy bundled PostgreSQL |
+| `postgresql.image.tag` | `16.15-alpine` | PostgreSQL image tag. Alpine and Debian sort text differently, so a switch under existing data is refused |
+| `postgresql.allowLibcChange` | `false` | Accept data written on the other libc, for one upgrade after reindexing; see the upgrade playbook of the book |
 | `postgresql.auth.existingSecret` | `""` | Pre-created Secret holding the DB password (the username is `postgresql.auth.username`) |
 | `postgresql.auth.passwordKey` | `password` | Key in that Secret holding the password |
 | `cnpg.enabled` | `false` | Replicated PostgreSQL through CloudNativePG; needs the operator and `postgresql.enabled=false` |
