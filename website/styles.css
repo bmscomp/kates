@@ -96,6 +96,7 @@ h1, h2, .brand-name { font-family: "EB Garamond", Georgia, serif; letter-spacing
 .nav-links { display: flex; align-items: center; gap: 22px; }
 .nav-links a { color: var(--text); font-weight: 500; font-size: 0.95rem; }
 .nav-links a:hover { color: var(--heading); text-decoration: none; }
+.nav-links a[aria-current="page"] { color: var(--heading); text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 2px; text-underline-offset: 0.35em; }
 .nav-links .gh { display: inline-flex; align-items: center; gap: 6px; }
 .nav-toggle { display: none; background: none; border: 0; padding: 9px 11px; cursor: pointer; }
 .nav-toggle span { display: block; width: 22px; height: 2px; background: var(--heading); margin: 5px 0; border-radius: 2px; }
@@ -602,6 +603,31 @@ h1, h2, .brand-name { font-family: "EB Garamond", Georgia, serif; letter-spacing
 .install :focus-visible, .code-title :focus-visible { outline-color: var(--code-prompt); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
+/* ---------- work with us ---------- */
+.work-page { padding: 88px 0 96px; }
+.work-page h1 { margin-bottom: 40px; }
+.work-grid { display: grid; grid-template-columns: 1fr 300px; gap: 72px; align-items: start; }
+.work-list { border-top: 2px solid var(--heading); }
+.work-list details { border-bottom: 1px solid var(--border-strong); }
+.work-list summary { padding: 20px 36px 20px 0; position: relative; cursor: pointer; list-style: none; font: 600 clamp(1.45rem, 3vw, 2rem)/1.2 "EB Garamond", Georgia, serif; color: var(--heading); }
+.work-list summary::-webkit-details-marker { display: none; }
+.work-list summary::after { content: "+"; position: absolute; right: 4px; top: 18px; font-family: var(--sans); font-weight: 400; color: var(--accent); }
+.work-list details[open] summary::after { content: "−"; }
+.work-list summary:hover { color: var(--accent); }
+.work-list details > div { padding: 0 0 28px; max-width: 60ch; }
+.work-list h2 { margin-bottom: 8px; font: 600 0.98rem var(--sans); letter-spacing: 0; color: var(--text); }
+.work-list a { font-weight: 600; }
+.work-page aside { position: sticky; top: 96px; padding-top: 88px; }
+.work-page aside .btn { width: 100%; }
+.work-sponsor { display: block; margin-top: 14px; text-align: center; font-size: 0.95rem; }
+@media (max-width: 1000px) {
+  .work-grid { grid-template-columns: 1fr; gap: 40px; }
+  .work-page aside { position: static; padding-top: 0; }
+}
+@media (max-width: 760px) {
+  .work-page { padding: 56px 0 64px; }
+}
+
 /* ---------- footer ---------- */
 .footer { background: var(--heading); padding: 56px 0 28px; }
 .footer-inner { display: grid; grid-template-columns: 1.3fr 2fr; gap: 48px; }
@@ -618,14 +644,8 @@ h1, h2, .brand-name { font-family: "EB Garamond", Georgia, serif; letter-spacing
   .cards.three { grid-template-columns: 1fr 1fr; }
   .footer-inner { grid-template-columns: 1fr; }
 }
-@media (max-width: 760px) {
-  body { font-size: 16px; }
-  .section { padding: 64px 0; }
-  .hero { padding: 56px 0 48px; }
-  .cards.three, .screens, .footer-links { grid-template-columns: 1fr; }
+@media (max-width: 1020px) {
   .nav-toggle { display: block; }
-  .install code { font-size: 0.85rem; }
-  .copy { min-height: 44px; }
   .nav-links {
     display: none; position: absolute; left: 0; right: 0; top: 100%; flex-direction: column; align-items: stretch;
     gap: 0; background: var(--bg); border-bottom: 1px solid var(--border); padding: 8px var(--gutter) 16px;
@@ -634,6 +654,14 @@ h1, h2, .brand-name { font-family: "EB Garamond", Georgia, serif; letter-spacing
   .nav-links.open { display: flex; }
   .nav-links a { padding: 12px 0; border-bottom: 1px solid var(--border); }
   .nav-links .btn { margin-top: 12px; border-bottom: 0; }
+}
+@media (max-width: 760px) {
+  body { font-size: 16px; }
+  .install code { font-size: 0.85rem; }
+  .copy { min-height: 44px; }
+  .section { padding: 64px 0; }
+  .hero { padding: 56px 0 48px; }
+  .cards.three, .screens, .footer-links { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }

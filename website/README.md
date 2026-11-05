@@ -6,7 +6,8 @@ site links to it.
 
 ```
 website/
-├── index.html      the one page
+├── index.html      the main page
+├── work-with-us.html  business enquiries, linked from the menu and footer
 ├── styles.css      the Paper theme (light, EB Garamond headings) and the layout
 ├── site.js         mobile menu, footer year and the animated figures
 ├── CNAME           custom domain (katesplatform.io) for GitHub Pages
