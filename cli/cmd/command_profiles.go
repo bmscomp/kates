@@ -66,6 +66,7 @@ var commandProfiles = map[string][]string{
 	"replay":        {"performance", "integrity"},
 	"report":        {"performance", "integrity", "chaos"},
 	"resilience":    {"chaos"},
+	"rights":        nil,
 	"scenario-diff": {"performance", "integrity"},
 	"schedule":      {"performance", "integrity"},
 	"security":      {"security"},
