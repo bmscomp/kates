@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=EB+Garamond:wght@500;600&display=swap');
 /* Kates marketing site — katesplatform.io
    Theme "Paper": light, editorial; EB Garamond headings, navy ink, sky accent.
    Alternative palettes live in themes/. */
@@ -75,7 +74,7 @@ h3 { font-size: 1.2rem; font-weight: 600; }
 .nav-links a { color: var(--text); font-weight: 500; font-size: 0.95rem; }
 .nav-links a:hover { color: var(--heading); text-decoration: none; }
 .nav-links .gh { display: inline-flex; align-items: center; gap: 6px; }
-.nav-toggle { display: none; background: none; border: 0; padding: 8px; cursor: pointer; }
+.nav-toggle { display: none; background: none; border: 0; padding: 9px 11px; cursor: pointer; }
 .nav-toggle span { display: block; width: 22px; height: 2px; background: var(--heading); margin: 5px 0; border-radius: 2px; }
 
 /* ---------- buttons ---------- */
@@ -480,6 +479,7 @@ h3 { font-size: 1.2rem; font-weight: 600; }
   color: var(--tui-muted);
 }
 .arch-keyhints b { color: var(--tui-focus); font-weight: 600; }
+@media (hover: none) { .arch .arch-keyhints, .kz .arch-keyhints span:not(:first-child) { display: none; } }
 .arch[data-tui-design="panels"] .arch-keyhints b,
 .kz[data-tui-design="panels"] .arch-keyhints b { color: #bd93f9; }
 .arch-keyhints .sep { color: var(--tui-border); }
