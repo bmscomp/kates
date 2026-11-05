@@ -19,6 +19,15 @@
   if (year) year.textContent = String(new Date().getFullYear());
 })();
 
+// The pause button a looping figure carries; left hidden when motion is reduced, since nothing loops then.
+function holdControl(figure) {
+  var btn = figure.querySelector('.arch-pause');
+  btn.hidden = false;
+  btn.addEventListener('click', function () {
+    btn.textContent = figure.classList.toggle('held') ? 'Play animation' : 'Pause animation';
+  });
+}
+
 // Architecture diagram: entrance once in view, pause off-screen, highlight a box and its links on hover or focus.
 (function () {
   var arch = document.querySelector('.arch');
@@ -132,8 +141,9 @@
     b.addEventListener('click', function () { t = k / N * D; if (reduce) render((k + 0.99) / N); });
   });
   if (reduce) return render(0.99);
+  holdControl(arch);
   requestAnimationFrame(function tick(now) {
-    if (last && !arch.classList.contains('paused')) t = (t + now - last) % D;
+    if (last && !arch.classList.contains('paused') && !arch.classList.contains('held')) t = (t + now - last) % D;
     last = now;
     render(t / D);
     requestAnimationFrame(tick);
@@ -171,5 +181,6 @@
     }, { threshold: 0.2 }).observe(kz);
   }
   set(0);
-  setInterval(function () { if (on) set(ph = (ph + 1) % steps.length); }, 2800);
+  holdControl(kz);
+  setInterval(function () { if (on && !kz.classList.contains('held')) set(ph = (ph + 1) % steps.length); }, 2800);
 })();
