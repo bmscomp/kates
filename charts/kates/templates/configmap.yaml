@@ -49,7 +49,7 @@ data:
   KATES_ENGINE_SUBMISSION_TIMEOUT_MS: {{ .Values.engine.submissionTimeoutMs | default "120000" | quote }}
   KATES_API_SECURITY_ENABLED: {{ .Values.apiKey.enabled | default false | quote }}
 
-  {{- if or .Values.postgresql.enabled .Values.externalDatabase.enabled }}
+  {{- if or .Values.postgresql.enabled .Values.externalDatabase.enabled .Values.cnpg.enabled }}
   QUARKUS_DATASOURCE_DB_KIND: "postgresql"
   QUARKUS_DATASOURCE_JDBC_URL: {{ include "kates.postgresql.jdbcUrl" . | quote }}
   QUARKUS_DATASOURCE_JDBC_MAX_SIZE: {{ .Values.postgresql.connectionPool.maxSize | default "20" | quote }}

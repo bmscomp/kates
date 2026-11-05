@@ -214,6 +214,11 @@ Upgrading from 0.10.7 or earlier: `values-prod.yaml` there ran an autoscaler of 
 | `postgresql.enabled` | `true` | Deploy bundled PostgreSQL |
 | `postgresql.auth.existingSecret` | `""` | Pre-created Secret holding the DB password (the username is `postgresql.auth.username`) |
 | `postgresql.auth.passwordKey` | `password` | Key in that Secret holding the password |
+| `cnpg.enabled` | `false` | Replicated PostgreSQL through CloudNativePG; needs the operator and `postgresql.enabled=false` |
+| `cnpg.instances` | `3` | PostgreSQL instances, each on its own node |
+| `cnpg.storage.size` | `10Gi` | Volume size of each instance |
+| `cnpg.storage.storageClass` | `""` | Storage class; the cluster's default when empty |
+| `cnpg.resources` | see `values.yaml` | Requests and limits of each instance |
 | `externalDatabase.enabled` | `false` | Use an external PostgreSQL |
 | `externalDatabase.existingSecret` | `""` | Pre-created Secret holding the external DB password (the username is `externalDatabase.username`) |
 | `externalDatabase.passwordKey` | `password` | Key in that Secret holding the password |

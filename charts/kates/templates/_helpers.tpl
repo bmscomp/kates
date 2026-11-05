@@ -42,16 +42,31 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{ include "kates.fullname" . }}-postgresql
 {{- end }}
 
+{{- define "kates.cnpg.fullname" -}}
+{{ include "kates.fullname" . }}-db
+{{- end }}
+
+{{/* The host the chart waits for: the bundled database's, or the primary's Service. */}}
+{{- define "kates.dbHost" -}}
+{{- $name := ternary (printf "%s-rw" (include "kates.cnpg.fullname" .)) (include "kates.postgresql.fullname" .) .Values.cnpg.enabled -}}
+{{ $name }}.{{ .Release.Namespace }}.svc.{{ .Values.global.clusterDomain }}
+{{- end }}
+
 {{- define "kates.postgresql.jdbcUrl" -}}
 {{- if .Values.postgresql.enabled -}}
 jdbc:postgresql://{{ include "kates.postgresql.fullname" . }}.{{ .Release.Namespace }}.svc.{{ .Values.global.clusterDomain }}:5432/{{ .Values.postgresql.auth.database }}
+{{- else if .Values.cnpg.enabled -}}
+{{- /* Timeouts: a connection to a dead node otherwise hangs on TCP for minutes after a failover. */ -}}
+jdbc:postgresql://{{ include "kates.dbHost" . }}:5432/{{ .Values.externalDatabase.database }}?socketTimeout=60&tcpKeepAlive=true&connectTimeout=5
 {{- else -}}
 jdbc:postgresql://{{ .Values.externalDatabase.host }}:{{ .Values.externalDatabase.port | default 5432 }}/{{ .Values.externalDatabase.database }}
 {{- end -}}
 {{- end }}
 
 {{- define "kates.dbSecretName" -}}
-{{- if .Values.postgresql.enabled -}}
+{{- if .Values.cnpg.enabled -}}
+  {{- include "kates.cnpg.fullname" . -}}-app
+{{- else if .Values.postgresql.enabled -}}
   {{- if .Values.postgresql.auth.existingSecret -}}
     {{- .Values.postgresql.auth.existingSecret -}}
   {{- else -}}
@@ -74,7 +89,9 @@ postgresql.auth.username or externalDatabase.username.
 */}}
 {{- define "kates.dbPasswordKey" -}}
 {{- $db := ternary .Values.postgresql.auth .Values.externalDatabase .Values.postgresql.enabled -}}
-{{- if $db.existingSecret -}}
+{{- if .Values.cnpg.enabled -}}
+  password
+{{- else if $db.existingSecret -}}
   {{- $db.passwordKey | default "password" -}}
 {{- else -}}
   QUARKUS_DATASOURCE_PASSWORD
@@ -91,7 +108,7 @@ migration Job. The Secret is required: a wrong name or key stops the pod
 with CreateContainerConfigError instead of logging in with no password.
 */}}
 {{- define "kates.dbEnv" -}}
-{{- if or .Values.postgresql.enabled .Values.externalDatabase.enabled -}}
+{{- if or .Values.postgresql.enabled .Values.externalDatabase.enabled .Values.cnpg.enabled -}}
 - name: QUARKUS_DATASOURCE_USERNAME
   value: {{ include "kates.dbUsername" . | quote }}
 - name: QUARKUS_DATASOURCE_PASSWORD

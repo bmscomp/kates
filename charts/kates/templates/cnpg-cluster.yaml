@@ -1,0 +1,49 @@
+{{- if .Values.cnpg.enabled }}
+{{- if or .Values.postgresql.enabled .Values.externalDatabase.enabled }}
+  {{- fail "cnpg.enabled replaces the database: set postgresql.enabled=false and externalDatabase.enabled=false." }}
+{{- end }}
+{{- if not (.Capabilities.APIVersions.Has "postgresql.cnpg.io/v1") }}
+  {{- fail "cnpg.enabled needs the CloudNativePG operator: install it first, see the deployment chapter of the book. helm template needs --api-versions postgresql.cnpg.io/v1." }}
+{{- end }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "kates.cnpg.fullname" . }}
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  instances: {{ .Values.cnpg.instances }}
+  primaryUpdateStrategy: unsupervised
+  inheritedMetadata:
+    labels:
+      app.kubernetes.io/name: {{ include "kates.cnpg.fullname" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: database
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+    topologyKey: kubernetes.io/hostname
+  {{- if gt (int .Values.cnpg.instances) 1 }}
+  postgresql:
+    # preferred: with no standby left the primary keeps writing, so a Kates API
+    # never stalls on its database. A double failure can lose the last writes.
+    synchronous:
+      method: any
+      number: 1
+      dataDurability: preferred
+  {{- end }}
+  bootstrap:
+    initdb:
+      database: {{ .Values.externalDatabase.database }}
+      owner: {{ include "kates.dbUsername" . }}
+  storage:
+    size: {{ .Values.cnpg.storage.size }}
+    {{- with .Values.cnpg.storage.storageClass }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+  {{- with .Values.cnpg.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

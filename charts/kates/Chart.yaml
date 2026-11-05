@@ -2,8 +2,8 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Minor: nodeFailureTolerationSeconds, a new value.
-version: 0.16.0
+# Minor: cnpg, a new value block.
+version: 0.17.0
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -27,6 +27,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "cnpg.enabled renders a CloudNativePG Cluster and connects the API to its primary, so the database survives a node crash. It needs the operator installed first and postgresql.enabled=false. Off by default."
     - kind: added
       description: "nodeFailureTolerationSeconds, default 30: the API pod is replaced 30 s after its node goes NotReady or unreachable, not the 300 s Kubernetes defaults to. A user's tolerations are kept beside these two."
     - kind: changed

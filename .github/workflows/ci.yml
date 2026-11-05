@@ -202,6 +202,26 @@ jobs:
 
       # Without its own tolerations the API pod waits out Kubernetes' default
       # 300 s on a lost node. A user's tolerations must not drop them.
+      - name: Assert cnpg.enabled replaces the database
+        run: |
+          on=(--set cnpg.enabled=true --set postgresql.enabled=false --api-versions postgresql.cnpg.io/v1)
+          out=$(helm template kates charts/kates/ "${on[@]}")
+          cluster=$(printf '%s\n' "$out" | yq 'select(.kind == "Cluster")')
+          [ "$(printf '%s\n' "$cluster" | yq .spec.instances)" = 3 ]
+          [ "$(printf '%s\n' "$cluster" | yq .spec.affinity.podAntiAffinityType)" = required ]
+          [ "$(printf '%s\n' "$cluster" | yq .spec.postgresql.synchronous.dataDurability)" = preferred ]
+          [ "$(printf '%s\n' "$cluster" | yq .spec.bootstrap.initdb.database)" = kates ]
+          if printf '%s\n' "$out" | grep -q '^kind: StatefulSet'; then exit 1; fi
+          printf '%s\n' "$out" | grep -q 'jdbc:postgresql://kates-db-rw\.'
+          printf '%s\n' "$out" | grep -A3 'name: QUARKUS_DATASOURCE_PASSWORD' | grep -q 'name: kates-db-app'
+          printf '%s\n' "$out" | grep -q 'until nc -z kates-db-rw\.'
+          printf '%s\n' "$out" | grep -q 'cnpg.io/cluster: kates-db'
+          # One instance has no standby to wait for.
+          if helm template kates charts/kates/ "${on[@]}" --set cnpg.instances=1 | grep -q synchronous:; then exit 1; fi
+          # Refused: two databases, and no operator.
+          if helm template kates charts/kates/ --set cnpg.enabled=true --api-versions postgresql.cnpg.io/v1 >/dev/null 2>&1; then exit 1; fi
+          if helm template kates charts/kates/ --set cnpg.enabled=true --set postgresql.enabled=false >/dev/null 2>&1; then exit 1; fi
+
       - name: Assert the API pod leaves a lost node quickly
         run: |
           out=$(helm template kates charts/kates/ \

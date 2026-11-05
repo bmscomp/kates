@@ -25,12 +25,12 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if .Values.postgresql.enabled }}
+      {{- if or .Values.postgresql.enabled .Values.cnpg.enabled }}
       initContainers:
       - name: wait-for-postgres
         image: {{ include "kates.imageRef" (dict "image" .Values.initContainers.waitForPostgres.image "ctx" .) | quote }}
         imagePullPolicy: {{ .Values.initContainers.waitForPostgres.pullPolicy | default "IfNotPresent" }}
-        command: ['sh', '-c', 'until nc -z {{ include "kates.postgresql.fullname" . }}.{{ .Release.Namespace }}.svc.{{ .Values.global.clusterDomain }} 5432; do echo "Waiting for PostgreSQL..."; sleep 2; done']
+        command: ['sh', '-c', 'until nc -z {{ include "kates.dbHost" . }} 5432; do echo "Waiting for PostgreSQL..."; sleep 2; done']
         {{- with .Values.initContainers.waitForPostgres.securityContext | default .Values.containerSecurityContext }}
         securityContext:
           {{- toYaml . | nindent 10 }}
