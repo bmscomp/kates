@@ -186,7 +186,7 @@ h1, h2, .brand-name { font-family: "EB Garamond", Georgia, serif; letter-spacing
   background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 0.85rem; display: grid; place-items: center;
 }
 .code-block { background: var(--code-bg); border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; font-size: 0.86rem; }
-.code-title { padding: 9px 16px; border-bottom: 1px solid var(--code-border); color: var(--code-muted); font-size: 0.78rem; font-family: var(--mono); background: var(--code-bar); }
+.code-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 16px; border-bottom: 1px solid var(--code-border); color: var(--code-muted); font-size: 0.78rem; font-family: var(--mono); background: var(--code-bar); }
 .code-block pre { margin: 0; padding: 18px 20px; overflow-x: auto; color: var(--code-text); line-height: 1.6; }
 .code-block .c { color: var(--code-muted); }
 .code-block .k { color: #a9cff6; }
@@ -590,8 +590,17 @@ h1, h2, .brand-name { font-family: "EB Garamond", Georgia, serif; letter-spacing
 .cta { text-align: center; background: radial-gradient(60% 80% at 50% 0%, rgba(26, 91, 204, 0.1), transparent 70%); }
 .cta-inner { display: flex; flex-direction: column; align-items: center; }
 .cta-inner .sub { max-width: 54ch; }
-.install { margin-top: 28px; }
-.install code { font-size: 1rem; padding: 10px 16px; border-radius: 10px; background: var(--code-bg); border: 1px solid var(--border-strong); color: var(--code-text); }
+.install { display: flex; align-items: center; gap: 12px; margin-top: 28px; padding: 10px 12px 10px 18px; border-radius: 10px; background: var(--code-bg); }
+.install code { font-size: 1.05rem; color: var(--code-text); }
+.cta-links { margin: 18px 0 0; color: var(--muted); font-size: 0.95rem; }
+.copy {
+  min-width: 8ch; padding: 4px 10px; border: 1px solid var(--code-border); border-radius: 6px;
+  background: transparent; color: var(--code-text); font: 500 0.75rem var(--mono); cursor: pointer; transition: border-color .12s ease;
+}
+.copy:hover { border-color: var(--code-prompt); }
+.copy[hidden] { display: none; }
+.install :focus-visible, .code-title :focus-visible { outline-color: var(--code-prompt); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* ---------- footer ---------- */
 .footer { background: var(--heading); padding: 56px 0 28px; }
@@ -615,6 +624,8 @@ h1, h2, .brand-name { font-family: "EB Garamond", Georgia, serif; letter-spacing
   .hero { padding: 56px 0 48px; }
   .cards.three, .screens, .footer-links { grid-template-columns: 1fr; }
   .nav-toggle { display: block; }
+  .install code { font-size: 0.85rem; }
+  .copy { min-height: 44px; }
   .nav-links {
     display: none; position: absolute; left: 0; right: 0; top: 100%; flex-direction: column; align-items: stretch;
     gap: 0; background: var(--bg); border-bottom: 1px solid var(--border); padding: 8px var(--gutter) 16px;

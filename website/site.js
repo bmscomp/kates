@@ -153,3 +153,22 @@ function holdControl(figure) {
   holdControl(kz);
   setInterval(function () { if (on && !kz.classList.contains('held')) set(ph = (ph + 1) % steps.length); }, 2800);
 })();
+
+// Copy buttons stay hidden without the clipboard API, so none can offer what won't work.
+(function () {
+  if (!navigator.clipboard) return;
+  var status = document.getElementById('copy-status');
+  document.querySelectorAll('[data-copy]').forEach(function (btn) {
+    var timer;
+    function report(message) {
+      btn.textContent = status.textContent = message;
+      clearTimeout(timer);
+      timer = setTimeout(function () { btn.textContent = 'Copy'; status.textContent = ''; }, 2000);
+    }
+    btn.hidden = false;
+    btn.addEventListener('click', function () {
+      var text = document.querySelector(btn.getAttribute('data-copy')).textContent.trim();
+      navigator.clipboard.writeText(text).then(function () { report('Copied'); }, function () { report('Failed'); });
+    });
+  });
+})();
