@@ -9,7 +9,7 @@ website/
 ├── index.html      the one page
 ├── styles.css      the Paper theme (light, EB Garamond headings) and the layout
 ├── themes/         alternative palettes (navy, phosphor, ember, slate); add one <link> after styles.css to switch
-├── site.js         mobile menu and footer year
+├── site.js         mobile menu, footer year and the animated figures
 ├── CNAME           custom domain (katesplatform.io) for GitHub Pages
 ├── _headers        security and cache headers (Cloudflare Pages, Netlify)
 ├── robots.txt, sitemap.xml
@@ -62,5 +62,7 @@ the domain root. Setup, once:
 
 Both deploys are independent: each runs when its secret is present and skips otherwise.
 `.nojekyll` in this folder stops GitHub Pages from running Jekyll, which would otherwise drop
-`_headers` and anything else starting with an underscore. GitHub Pages ignores `_headers`
-anyway: the security headers apply only on Cloudflare or Netlify.
+`_headers` and anything else starting with an underscore. GitHub Pages, which serves the
+live site today, ignores `_headers`, so the Content-Security-Policy also sits in a `<meta>`
+tag in `index.html`. Change both together. The other headers, and `frame-ancestors`, apply
+only on Cloudflare or Netlify.

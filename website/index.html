@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <!-- GitHub Pages serves this site and ignores _headers, so the policy lives here; a meta tag cannot set frame-ancestors. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; connect-src 'self'; base-uri 'self'; form-action 'self'">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Kates — Kafka testing, chaos and security on Kubernetes</title>
   <meta name="description" content="Kates puts load on Apache Kafka, injects faults into its brokers, measures throughput, P99 latency, recovery time and lost records, and audits broker security. Repeatable on a laptop, pass/fail in CI.">
@@ -21,7 +24,7 @@
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@500;600&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 
   <script type="application/ld+json">
@@ -94,10 +97,10 @@
         </div>
 
         <div class="hero-demo">
-          <div class="terminal" role="img" aria-label="Terminal running a Kates load test and a CI gate">
+          <div class="terminal">
             <div class="terminal-bar"><span></span><span></span><span></span><em>zsh — kates</em></div>
-            <pre><code><span class="p">$</span> kates health
-<span class="ok">✓</span> Kates API      http://localhost:8080   <span class="dim">v1.0</span>
+            <pre tabindex="0" aria-label="Terminal running a Kates load test and a CI gate"><code><span class="p">$</span> kates health
+<span class="ok">✓</span> Kates API      http://localhost:8080
 <span class="ok">✓</span> Kafka          krafter.kafka           <span class="dim">3 brokers · 3 zones</span>
 
 <span class="p">$</span> kates test create --type LOAD --records 100000 --wait
@@ -252,7 +255,7 @@ recovery     <span class="num">6.4</span> s      lost records  <span class="num"
         <div class="how-code">
           <div class="code-block">
             <div class="code-title">Terminal</div>
-<pre><code><span class="c"># 1. The CLI (macOS or Linux)</span>
+<pre tabindex="0" aria-label="Install commands"><code><span class="c"># 1. The CLI (macOS or Linux)</span>
 brew install bmscomp/tap/kates
 git clone https://github.com/bmscomp/kates &amp;&amp; cd kates
 
@@ -272,7 +275,7 @@ kates gate --min-grade C --records 100000</code></pre>
           </div>
           <div class="code-block">
             <div class="code-title">GitHub Actions</div>
-<pre><code><span class="k">- uses:</span> bmscomp/kates@v1
+<pre tabindex="0" aria-label="GitHub Actions workflow"><code><span class="k">- uses:</span> bmscomp/kates@v1
   <span class="k">with:</span>
     <span class="k">api-url:</span> ${{ secrets.KATES_API_URL }}
     <span class="k">api-key:</span> ${{ secrets.KATES_API_KEY }}
@@ -521,8 +524,6 @@ kates gate --min-grade C --records 100000</code></pre>
           </div>
           <p class="arch-step"></p>
           <div class="arch-keyhints" aria-hidden="true">
-            <span><b>1–5</b> phase</span>
-            <span class="sep">│</span>
             <span><b>hover</b> inspect node</span>
             <span class="sep">│</span>
             <span><b>T</b> next look</span>
@@ -581,19 +582,19 @@ kates gate --min-grade C --records 100000</code></pre>
 
         <div class="screens">
           <figure>
-            <img src="assets/kates-lab-panels-dracula.png" alt="kates lab interactive performance tuning in the Panels look with Dracula colors" loading="lazy">
+            <img src="assets/kates-lab-panels-dracula.png" width="1024" height="669" alt="kates lab interactive performance tuning in the Panels look with Dracula colors" loading="lazy">
             <figcaption><b><code>kates lab</code> · Panels look &amp; Dracula colors.</b> Tune producer parameters, run load iterations, compare P99 latency and throughput deltas, and switch looks (<code>T</code>) or color palettes (<code>C</code>) live.</figcaption>
           </figure>
           <figure>
-            <img src="assets/kates-lab-classic-aurora.png" alt="kates lab interactive performance tuning in the Classic look with Aurora colors" loading="lazy">
+            <img src="assets/kates-lab-classic-aurora.png" width="1024" height="669" alt="kates lab interactive performance tuning in the Classic look with Aurora colors" loading="lazy">
             <figcaption><b><code>kates lab</code> · Classic look &amp; Aurora colors.</b> The same interactive tuning session rendered in the Classic borderless layout with the Aurora palette; persist your favorite with <code>kates theme set</code>.</figcaption>
           </figure>
           <figure>
-            <img src="assets/kates-dashboard-grid-aurora.png" alt="kates dashboard live cluster and test monitor in the Grid look with Aurora colors" loading="lazy">
+            <img src="assets/kates-dashboard-grid-aurora.png" width="1024" height="669" alt="kates dashboard live cluster and test monitor in the Grid look with Aurora colors" loading="lazy">
             <figcaption><b><code>kates dashboard</code> · Grid look &amp; Aurora colors.</b> Live 1s-refreshing view of API and Kafka broker health, under-replicated partitions, active workloads, completed runs, and real-time throughput/P99 sparklines.</figcaption>
           </figure>
           <figure>
-            <img src="assets/kates-ctx-profiles-chips.png" alt="kates ctx profiles set interactive selector in the Chips look" loading="lazy">
+            <img src="assets/kates-ctx-profiles-chips.png" width="1024" height="316" alt="kates ctx profiles set interactive selector in the Chips look" loading="lazy">
             <figcaption><b><code>kates ctx profiles set</code> · Chips look.</b> Scope the CLI to the command groups you need—<code>performance</code>, <code>integrity</code>, <code>chaos</code>, <code>topology</code>, <code>security</code>, or <code>deploy</code>—per context.</figcaption>
           </figure>
         </div>
@@ -607,7 +608,7 @@ kates gate --min-grade C --records 100000</code></pre>
           <p class="eyebrow">Compared with the usual workflow</p>
           <h2>Benchmark tools measure. Kates measures under failure and keeps score.</h2>
         </div>
-        <div class="table-wrap">
+        <div class="table-wrap" tabindex="0" aria-label="Comparison of Kates with other Kafka testing tools">
           <table class="compare">
             <thead>
               <tr>
@@ -637,7 +638,7 @@ kates gate --min-grade C --records 100000</code></pre>
         <div class="how-code">
           <div class="code-block">
             <div class="code-title">scenario.yaml</div>
-<pre><code><span class="k">name:</span> checkout-peak
+<pre tabindex="0" aria-label="Example scenario file"><code><span class="k">name:</span> checkout-peak
 <span class="k">type:</span> LOAD
 <span class="k">records:</span> 2000000
 <span class="k">producers:</span> 8
@@ -652,7 +653,7 @@ kates gate --min-grade C --records 100000</code></pre>
           </div>
           <div class="code-block">
             <div class="code-title">Terminal</div>
-<pre><code>$ kates test apply -f scenario.yaml --wait
+<pre tabindex="0" aria-label="Scenario run output"><code>$ kates test apply -f scenario.yaml --wait
 <span class="ok">PASS</span>  throughput 47,902 ≥ 40,000
 <span class="ok">PASS</span>  P99 19.6 ms ≤ 25 ms
 <span class="ok">PASS</span>  recovery 8.1 s ≤ 30 s
