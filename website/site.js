@@ -73,7 +73,7 @@ function holdControl(figure) {
 
   // The disruption story: five phases on a 13 s loop, or a click on the timeline. Time only runs while the figure is on screen.
   var D = 13000, N = 5;
-  var steps = ['Steady load: measuring the baseline', 'Injecting broker-pod-kill through LitmusChaos',
+  var steps = ['Steady load: measuring the baseline', 'Injecting POD_KILL through LitmusChaos',
     'Broker down: ISR shrinks, P99 climbs', 'Broker back: recovery time measured', 'Run graded A and stored; the CLI exits 0'];
   var btns = arch.querySelectorAll('.arch-tl button'), bar = arch.querySelector('.arch-tl-bar span'), step = arch.querySelector('.arch-step');
   var kzFig = document.querySelector('.kz');
@@ -159,9 +159,9 @@ function holdControl(figure) {
   var move = kz.querySelector('[data-move]'), take = kz.querySelector('[data-take]');
   var steps = [
     '<b>Steady load.</b> Every partition has 3 in-sync replicas; each broker leads one.',
-    '<b>Inject.</b> LitmusChaos runs broker-pod-kill on krafter-kafka-1.',
+    '<b>Inject.</b> LitmusChaos runs POD_KILL on krafter-brokers-1.',
     '<b>Broker down.</b> p1 leadership moves to zone c, ISR drops to 2, P99 17.8 → 41.2 ms.',
-    '<b>Recovery.</b> krafter-kafka-1 is back and catching up on what it missed.',
+    '<b>Recovery.</b> krafter-brokers-1 is back and catching up on what it missed.',
     '<b>Healthy.</b> ISR back to 3, preferred leader restored. Recovered in 6.4 s, 0 records lost.'
   ];
   function set(ph) {
