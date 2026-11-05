@@ -76,7 +76,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Short: "A LOAD run is one producer and one consumer whatever numProducers says; only STRESS runs parallel producers.",
 		Text: "A LOAD run is one producer and one consumer, whatever numProducers and numConsumers say, " +
 			"so it cannot show how the cluster behaves under parallel clients. STRESS starts one producer per numProducers.",
-		Refs: []string{mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1656-1665", "case LOAD ->", "case STRESS ->")},
+		Refs: []string{mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1677-1686", "case LOAD ->", "case STRESS ->")},
 	},
 	{
 		ID:    mcpCaveatReaperDeadline,
@@ -99,11 +99,11 @@ var mcpCaveatsCore = []mcpCaveat{
 			"kates/src/main/resources/application.properties:333-347",
 			mcpAnchoredRef(mcpJava+"engine/TestTimeoutReaper.java:49-51,67-76,161-164,192-205",
 				"TestResult.TaskStatus.STOPPING", "kates.engine.reaper-grace-ms", "\"-submission\"", "\"Timeout: still \""),
-			mcpJava + "engine/TestOrchestrator.java:132-154,186-189,354,1125-1184,1250-1259,1314-1346",
-			mcpJava + "persistence/EntityMapper.java:158-167",
+			mcpJava + "engine/TestOrchestrator.java:132-163,197-200,366,1142-1205,1271-1280,1335-1367",
+			mcpJava + "persistence/EntityMapper.java:161-170",
 			"kates/src/main/resources/db/migration/V24__run_planned_duration.sql:1-13",
-			mcpJava + "domain/TestRun.java:478-481",
-			mcpJava + "api/HealthResource.java:51-72",
+			mcpJava + "domain/TestRun.java:520-523",
+			mcpJava + "api/HealthResource.java:53-75",
 		},
 	},
 	{
@@ -123,13 +123,13 @@ var mcpCaveatsCore = []mcpCaveat{
 			"integrity-cg-integrity, without transactions.",
 		Refs: []string{
 			mcpJava + "domain/TestSpec.java:14-32,111-113",
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:165,180-182,225",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:174,189-191,236",
 				"applyTypeDefaults(type, request.getSpec())", ".withRequestedSpec(", "buildTasks(type, spec, run.getId())"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1045-1091", "TestSpec applyTypeDefaults(", "return merged;"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1635-1639,1730-1734",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1062-1108", "TestSpec applyTypeDefaults(", "return merged;"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1656-1660,1751-1755",
 				"Only when asked", `"-integrity-0-group")`),
 			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:792", `task.getConsumerGroup() + "-integrity"`),
-			mcpAnchoredRef(mcpJava+"persistence/EntityMapper.java:56,84-85,143-145",
+			mcpAnchoredRef(mcpJava+"persistence/EntityMapper.java:56,85-86,146-148",
 				"entity.setRequestedSpecJson(toJson(run.getRequestedSpec()))", "fromJson(entity.getRequestedSpecJson()",
 				"if (run.getRequestedSpec() != null)"),
 			"kates/src/main/resources/db/migration/V23__requested_spec_fields.sql:1-6",
@@ -174,7 +174,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Text: "A TUNE_* run executes one produce task with the spec's single configuration: it measures one setting " +
 			"and compares none.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1741-1742", "case TUNE_REPLICATION,", "-tune-0"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1762-1763", "case TUNE_REPLICATION,", "-tune-0"),
 			mcpJava + "trogdor/SpecFactory.java:38-39",
 		},
 	},
@@ -186,7 +186,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Refs: []string{
 			mcpJava + "trend/TrendResource.java:31-60",
 			mcpJava + "trend/TrendService.java:53-54,185-189",
-			mcpAnchoredRef(mcpJava+"service/TestRunRepository.java:341-361",
+			mcpAnchoredRef(mcpJava+"service/TestRunRepository.java:351-371",
 				"List<TestRun> findWithResults(", "WHERE r.testType = :type AND r.status = :status",
 				".map(EntityMapper::toDomain)"),
 		},

@@ -149,8 +149,17 @@ public class TestOrchestrator {
     }
 
     public com.bmscomp.kates.util.Result<TestRun, Exception> executeTest(CreateTestRequest request) {
+        return executeTest(request, null);
+    }
+
+    /**
+     * Starts the run with {@code clientKey} in its first INSERT, so that
+     * two creates with one key cannot both store a run; the column's unique
+     * index fails the second as any failed save, permit released.
+     */
+    public com.bmscomp.kates.util.Result<TestRun, Exception> executeTest(CreateTestRequest request, String clientKey) {
         if (request.isScenario()) {
-            return executeScenario(request);
+            return executeScenario(request, clientKey);
         }
 
         // Before the permit: a request that cannot run as written is the
@@ -180,7 +189,9 @@ public class TestOrchestrator {
         TestRun run = new TestRun(type, spec)
                 .withBackend(backendName)
                 .withRequestedSpec(explicitFieldsOf(request.getSpec()))
-                .withPlannedDurationMs(plannedDurationMs(type, spec));
+                .withSla(request.getSla())
+                .withPlannedDurationMs(plannedDurationMs(type, spec))
+                .withClientKey(clientKey);
         // Register BEFORE the first thing that can throw. A transient failure in
         // save/fireEvent used to strand the permit forever (the semaphore drained
         // one permit per failure until restart), because nothing had recorded
@@ -324,7 +335,7 @@ public class TestOrchestrator {
      * not a staircase.
      */
     @io.opentelemetry.instrumentation.annotations.WithSpan("TestOrchestrator.executeScenario")
-    com.bmscomp.kates.util.Result<TestRun, Exception> executeScenario(CreateTestRequest request) {
+    com.bmscomp.kates.util.Result<TestRun, Exception> executeScenario(CreateTestRequest request, String clientKey) {
         TestScenario scenario = request.getScenario();
         TestType type = scenario.getType() != null ? scenario.getType() : request.getType();
         String backendName = scenarioBackend(request);
@@ -346,6 +357,7 @@ public class TestOrchestrator {
                 .withLabels(scenario.getLabels())
                 .withSla(scenario.getSla())
                 .withPlannedDurationMs(plannedDurationMs(scenario))
+                .withClientKey(clientKey)
                 .withStatus(TestResult.TaskStatus.RUNNING);
 
         // Scenarios previously bypassed the concurrency cap entirely — executeTest
@@ -721,10 +733,15 @@ public class TestOrchestrator {
      * it were about to start until the timeout reaper failed it, once its
      * deadline had passed. Failing to write this is not worth
      * masking the original error, so it only logs.
+     *
+     * <p>Saved without its key: a first save that failed left no row, and this
+     * one would hold the key for a run that never started, which every retry
+     * would then be answered with. A row that did commit keeps its key, since
+     * no save updates that column.
      */
     private void markStrandedAsFailed(TestRun run) {
         try {
-            repository.save(run.withStatus(TestResult.TaskStatus.FAILED));
+            repository.save(run.withClientKey(null).withStatus(TestResult.TaskStatus.FAILED));
         } catch (RuntimeException e) {
             LOG.warnf("Could not mark stranded run %s as FAILED: %s", run.getId(), e.getMessage());
         }
@@ -1154,6 +1171,10 @@ public class TestOrchestrator {
                     new InvalidTestSpecException("", Map.of("type", why + " to one of " + typeNames())));
         }
         if (request.isScenario()) {
+            if (request.getSla() != null) {
+                return java.util.Optional.of(new InvalidTestSpecException(
+                        "", Map.of("sla", "a scenario carries its own; move it to scenario.sla")));
+            }
             TestScenario scenario = request.getScenario();
             // The checks below read every phase, so a null one threw there.
             Map<String, String> nulls = new java.util.LinkedHashMap<>();

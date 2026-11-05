@@ -5,7 +5,9 @@ import java.time.format.DateTimeParseException;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
@@ -19,11 +21,14 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 import io.smallrye.common.annotation.Blocking;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.ParameterIn;
 import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
@@ -73,6 +78,17 @@ public class TestResource {
      */
     private static final int PRUNE_LIMIT = 1000;
 
+    /** What test_runs.client_key holds. */
+    private static final int CLIENT_KEY_LENGTH = 128;
+
+    /**
+     * Serialises the creates of one Idempotency-Key, so that the second finds
+     * the first's run. Enough because the Kates API runs one replica; beyond
+     * that the unique index holds. Striped, so no map of keys has to be emptied.
+     */
+    private static final Object[] CLIENT_KEY_LOCKS =
+            Stream.generate(Object::new).limit(64).toArray();
+
     private static final String AN_INSTANT = "an ISO-8601 instant such as 2026-09-07T00:00:00Z";
 
     private static final Logger LOG = Logger.getLogger(TestResource.class);
@@ -109,17 +125,58 @@ public class TestResource {
     @Operation(
             summary = "Create and execute a test",
             description = "Submits a new performance test run for asynchronous execution")
+    @APIResponse(responseCode = "200", description = "The run this Idempotency-Key already created; nothing started")
     @APIResponse(responseCode = "202", description = "Test accepted for execution")
     @APIResponse(
             responseCode = "400",
             description = "Invalid request, including a value outside its limits in the spec or a scenario's specs,"
-                    + " or a spec field the test type or backend cannot apply; fieldErrors names each field")
+                    + " a spec field the test type or backend cannot apply, an sla beside a scenario, or an"
+                    + " Idempotency-Key that is blank, over 128 characters or holds a control character;"
+                    + " fieldErrors names each field")
     @APIResponse(responseCode = "429", description = "Concurrency limit reached — retry later")
     @APIResponse(
             responseCode = "500",
             description = "A fault in the Kates API, such as its database being unreachable; the run did not start")
-    public Response createTest(@Valid CreateTestRequest request) {
-        var result = orchestrator.executeTest(request);
+    @Parameter(
+            name = "Idempotency-Key",
+            in = ParameterIn.HEADER,
+            description = "Starts at most one run for this key, and answers later requests with it",
+            schema = @Schema(type = SchemaType.STRING, maxLength = CLIENT_KEY_LENGTH))
+    public Response createTest(@Valid CreateTestRequest request, @Context HttpHeaders headers) {
+        // Not @HeaderParam: it reads a blank header as absent, which would
+        // start a run the caller meant to key.
+        return create(request, headers.getHeaderString("Idempotency-Key"));
+    }
+
+    private Response create(CreateTestRequest request, String clientKey) {
+        if (clientKey == null) {
+            return start(request, null);
+        }
+        if (!isClientKey(clientKey)) {
+            String refused = "Idempotency-Key must be 1 to " + CLIENT_KEY_LENGTH
+                    + " characters, not blank, with no control characters";
+            return Response.status(400)
+                    .entity(ApiError.validationFailed(refused, Map.of("Idempotency-Key", refused)))
+                    .build();
+        }
+        synchronized (CLIENT_KEY_LOCKS[Math.floorMod(clientKey.hashCode(), CLIENT_KEY_LOCKS.length)]) {
+            // A replay starts nothing, so it leaves only the response filter's row.
+            return repository
+                    .findByClientKey(clientKey)
+                    .map(run -> Response.ok(run).build())
+                    .orElseGet(() -> start(request, clientKey));
+        }
+    }
+
+    /** Whether a run can hold this key: POST refuses any other, and Postgres refuses NUL in a query. */
+    private static boolean isClientKey(String key) {
+        return !key.isBlank()
+                && key.length() <= CLIENT_KEY_LENGTH
+                && key.chars().noneMatch(Character::isISOControl);
+    }
+
+    private Response start(CreateTestRequest request, String clientKey) {
+        var result = orchestrator.executeTest(request, clientKey);
         if (result.isFailure()) {
             Exception failure = result.asFailure().orElseThrow();
             ApiError error = notStarted(request, failure);
@@ -399,16 +456,28 @@ public class TestResource {
     @GET
     @Operation(
             summary = "List test runs",
-            description = "Returns paginated test runs, optionally filtered by type or status")
+            description = "Returns paginated test runs, optionally filtered by type or status, or the run an"
+                    + " Idempotency-Key created")
     @APIResponse(responseCode = "200", description = "Paginated list of test runs")
     public Response listTests(
             @Parameter(description = "Filter by test type") @QueryParam("type") String type,
             @Parameter(description = "Filter by status") @QueryParam("status") String status,
+            @Parameter(description = "The Idempotency-Key the run was created with; type and status are ignored")
+                    @QueryParam("clientKey")
+                    String clientKey,
             @Parameter(description = "Page number (0-based)") @QueryParam("page") @DefaultValue("0") int page,
             @Parameter(description = "Page size (max 200)") @QueryParam("size") @DefaultValue("50") int size) {
 
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(size, 200));
+
+        if (clientKey != null && !clientKey.isEmpty()) {
+            List<TestRun> content = isClientKey(clientKey)
+                    ? repository.findByClientKey(clientKey).stream().toList()
+                    : List.of();
+            return Response.ok(new PagedResponse<>(content, safePage, safeSize, content.size()))
+                    .build();
+        }
 
         if (type != null && !type.isEmpty()) {
             try {

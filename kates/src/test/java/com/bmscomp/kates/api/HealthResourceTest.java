@@ -47,6 +47,7 @@ class HealthResourceTest {
                 .then()
                 .statusCode(200)
                 .body("status", is("UP"))
+                .body("capabilities", hasItem("clientKey"))
                 .body("engine.activeBackend", is("native"))
                 .body("engine.availableBackends", hasItems("native", "trogdor"))
                 .body("kafka.status", is("UP"))

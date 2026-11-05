@@ -82,6 +82,15 @@ public class TestRunEntity {
     @Column(name = "planned_duration_ms")
     private Long plannedDurationMs;
 
+    /**
+     * The Idempotency-Key the run was created with. Unique here as in V29,
+     * since the unit tests build their schema from this entity, and never
+     * updated: a save mutates the managed entity, from copies that may not
+     * carry it.
+     */
+    @Column(name = "client_key", length = 128, unique = true, updatable = false)
+    private String clientKey;
+
     @OneToMany(mappedBy = "testRun", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @OrderBy("id ASC")
     private List<TestResultEntity> results = new ArrayList<>();
@@ -187,6 +196,14 @@ public class TestRunEntity {
 
     public void setPlannedDurationMs(Long plannedDurationMs) {
         this.plannedDurationMs = plannedDurationMs;
+    }
+
+    public String getClientKey() {
+        return clientKey;
+    }
+
+    public void setClientKey(String clientKey) {
+        this.clientKey = clientKey;
     }
 
     public List<TestResultEntity> getResults() {

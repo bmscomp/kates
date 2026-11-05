@@ -9,6 +9,7 @@
     { "required": ["type"] },
     { "required": ["scenario"] }
   ],
+  "not": { "required": ["sla", "scenario"] },
   "properties": {
     "type": {
       "description": "Test type for a single-phase run (or fallback if scenario.type is omitted).",
@@ -21,6 +22,10 @@
     "spec": {
       "description": "Wire-format TestSpec parameters (uses numRecords, numProducers, recordSize, durationMs, throughput).",
       "$ref": "#/$defs/wireTestSpec"
+    },
+    "sla": {
+      "description": "Pass/fail criteria for a run with no scenario; a scenario carries its own under scenario.sla.",
+      "$ref": "#/$defs/slaDefinition"
     },
     "scenario": {
       "description": "Multi-phase scenario envelope with baseSpec, ordered execution phases, SLA definition, and metadata labels.",

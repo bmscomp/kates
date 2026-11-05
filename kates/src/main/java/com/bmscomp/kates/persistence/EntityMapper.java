@@ -58,6 +58,7 @@ public final class EntityMapper {
         entity.setLabelsJson(toJson(run.getLabels()));
         entity.setCdcPhasesJson(toJson(run.getCdcPhases()));
         entity.setPlannedDurationMs(run.getPlannedDurationMs());
+        entity.setClientKey(run.getClientKey());
 
         if (run.getResults() != null) {
             for (TestResult result : run.getResults()) {
@@ -83,7 +84,8 @@ public final class EntityMapper {
                 .withCdcPhases(fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}))
                 .withRequestedSpec(
                         fromJson(entity.getRequestedSpecJson(), new TypeReference<LinkedHashMap<String, Object>>() {}))
-                .withPlannedDurationMs(entity.getPlannedDurationMs());
+                .withPlannedDurationMs(entity.getPlannedDurationMs())
+                .withClientKey(entity.getClientKey());
 
         if (entity.getResults() != null) {
             run = run.withResults(entity.getResults().stream()
@@ -114,7 +116,8 @@ public final class EntityMapper {
                 .withCdcPhases(fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}))
                 .withRequestedSpec(
                         fromJson(entity.getRequestedSpecJson(), new TypeReference<LinkedHashMap<String, Object>>() {}))
-                .withPlannedDurationMs(entity.getPlannedDurationMs());
+                .withPlannedDurationMs(entity.getPlannedDurationMs())
+                .withClientKey(entity.getClientKey());
     }
 
     /**

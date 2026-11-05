@@ -95,7 +95,7 @@ func mcpDidKatesCauseThis(_ context.Context, req *mcp.GetPromptRequest) (*mcp.Ge
 
 // mcpDidKatesCauseThisText is the prompt itself. Every fact it states about
 // Kates was checked against the code: runs and disruptions record no owner
-// (domain/TestRun.java:16-42, disruption/DisruptionReportEntity.java:15-34);
+// (domain/TestRun.java:16-44, disruption/DisruptionReportEntity.java:15-34);
 // audit rows name the principal that made each change (V26), and every REST
 // and gRPC change and every scheduled firing writes one
 // (audit/AuditResponseFilter.java, security/GrpcApiKeyInterceptor.java,

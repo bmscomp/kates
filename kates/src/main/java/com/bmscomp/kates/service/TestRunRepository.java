@@ -105,6 +105,17 @@ public class TestRunRepository {
         return entity != null ? Optional.of(EntityMapper.toDomain(entity)) : Optional.empty();
     }
 
+    /** The run created with this Idempotency-Key, read without its task results. */
+    public Optional<TestRun> findByClientKey(String clientKey) {
+        return em
+                .createQuery("SELECT r FROM TestRunEntity r WHERE r.clientKey = :clientKey", TestRunEntity.class)
+                .setParameter("clientKey", clientKey)
+                .getResultList()
+                .stream()
+                .findFirst()
+                .map(EntityMapper::toDomainSummary);
+    }
+
     public List<TestRun> findAll() {
         return em
                 .createQuery("SELECT r FROM TestRunEntity r ORDER BY r.createdAt DESC", TestRunEntity.class)

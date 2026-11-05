@@ -5,17 +5,25 @@ import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import jakarta.inject.Inject;
+import jakarta.persistence.EntityManager;
 
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
+import io.quarkus.test.junit.mockito.InjectSpy;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import com.bmscomp.kates.SchedulerOffTestProfile;
@@ -40,8 +48,11 @@ class TestResourceTest {
     @InjectMock
     TopicService topicService;
 
-    @Inject
+    @InjectSpy
     TestRunRepository repository;
+
+    @Inject
+    EntityManager em;
 
     @BeforeEach
     void setUp() {
@@ -584,6 +595,238 @@ class TestResourceTest {
                         "LOAD",
                         "phases",
                         List.of(java.util.Map.of("name", phaseName, "phaseType", "STEADY", "durationMs", 60_000))));
+    }
+
+    private static final String FLAT_LOAD = "{\"type\": \"LOAD\", \"backend\": \"trogdor\", \"spec\": {}}";
+
+    private static final String SCENARIO = "{\"type\": \"LOAD\", \"backend\": \"trogdor\", \"scenario\": {"
+            + "\"baseSpec\": {}, \"phases\": [{\"name\": \"steady\", \"phaseType\": \"STEADY\","
+            + " \"durationMs\": 60000}]}}";
+
+    private static String newKey() {
+        return UUID.randomUUID().toString();
+    }
+
+    private static io.restassured.response.Response postWithKey(String key, String body) {
+        return given().contentType("application/json")
+                .header("Idempotency-Key", key)
+                .body(body)
+                .when()
+                .post("/api/tests");
+    }
+
+    private void refuseTasks() {
+        when(trogdorClient.createTask(any())).thenThrow(new IllegalStateException("no coordinator in tests"));
+    }
+
+    private long handlerAuditRows(String runId) {
+        return QuarkusTransaction.requiringNew()
+                .call(() -> em.createQuery(
+                                "SELECT COUNT(a) FROM AuditEventEntity a WHERE a.action = 'CREATE' AND a.target = :id",
+                                Long.class)
+                        .setParameter("id", runId)
+                        .getSingleResult());
+    }
+
+    @Test
+    void aRepeatedKeyAnswersTheFirstRunWithoutAnotherHandlerAuditRow() {
+        refuseTasks();
+        String key = newKey();
+
+        String id = postWithKey(key, FLAT_LOAD)
+                .then()
+                .statusCode(202)
+                .body("clientKey", is(key))
+                .extract()
+                .path("id");
+        postWithKey(key, FLAT_LOAD).then().statusCode(200).body("id", is(id)).body("clientKey", is(key));
+
+        assertEquals(1, handlerAuditRows(id));
+    }
+
+    @Test
+    void differentKeysStartTwoRuns() {
+        refuseTasks();
+
+        String first = postWithKey(newKey(), FLAT_LOAD)
+                .then()
+                .statusCode(202)
+                .extract()
+                .path("id");
+        String second = postWithKey(newKey(), FLAT_LOAD)
+                .then()
+                .statusCode(202)
+                .extract()
+                .path("id");
+
+        org.junit.jupiter.api.Assertions.assertNotEquals(first, second);
+    }
+
+    /** A loser past the lookup would reach the unique column and answer 500. */
+    @Test
+    void twoThreadsWithOneKeyStartOneRun() throws Exception {
+        refuseTasks();
+        String key = newKey();
+        CountDownLatch start = new CountDownLatch(1);
+        List<CompletableFuture<io.restassured.response.Response>> posts = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            posts.add(CompletableFuture.supplyAsync(() -> {
+                try {
+                    start.await();
+                } catch (InterruptedException e) {
+                    throw new IllegalStateException(e);
+                }
+                return postWithKey(key, FLAT_LOAD);
+            }));
+        }
+        start.countDown();
+
+        var first = posts.get(0).get();
+        var second = posts.get(1).get();
+
+        assertEquals(java.util.Set.of(200, 202), java.util.Set.of(first.statusCode(), second.statusCode()));
+        assertEquals(first.<String>path("id"), second.<String>path("id"));
+        given().queryParam("clientKey", key).when().get("/api/tests").then().body("total", is(1));
+    }
+
+    @Test
+    void aScenarioSentTwiceWithOneKeyStartsOneRun() {
+        refuseTasks();
+        String key = newKey();
+
+        String id = postWithKey(key, SCENARIO)
+                .then()
+                .statusCode(202)
+                .body("clientKey", is(key))
+                .extract()
+                .path("id");
+        postWithKey(key, SCENARIO).then().statusCode(200).body("id", is(id));
+    }
+
+    @Test
+    void theListFindsARunByItsClientKey() {
+        refuseTasks();
+        String key = newKey();
+        String id = postWithKey(key, FLAT_LOAD).then().statusCode(202).extract().path("id");
+
+        given().queryParam("clientKey", key)
+                .when()
+                .get("/api/tests")
+                .then()
+                .statusCode(200)
+                .body("total", is(1))
+                .body("items.id", org.hamcrest.Matchers.contains(id))
+                .body("items[0].clientKey", is(key));
+        given().queryParam("clientKey", newKey())
+                .when()
+                .get("/api/tests")
+                .then()
+                .statusCode(200)
+                .body("total", is(0))
+                .body("items", empty());
+    }
+
+    /** {@code save} mutates the managed entity, so a write that drops the key would null a column GET reads. */
+    @ParameterizedTest
+    @ValueSource(strings = {FLAT_LOAD, SCENARIO})
+    void theClientKeySurvivesEveryStatusWrite(String body) {
+        refuseTasks();
+        String key = newKey();
+        String id = postWithKey(key, body).then().statusCode(202).extract().path("id");
+        awaitStatus(id, "FAILED");
+
+        TestRun whole = repository.findById(id).orElseThrow();
+        repository.save(whole.withStatus(TestResult.TaskStatus.RUNNING));
+        repository.save(whole.withStatus(TestResult.TaskStatus.DONE));
+        given().when().get("/api/tests/" + id).then().body("status", is("DONE")).body("clientKey", is(key));
+
+        // The timeout reaper writes back a run read without its results.
+        repository.save(repository.findByClientKey(key).orElseThrow().withStatus(TestResult.TaskStatus.FAILED));
+        given().when()
+                .get("/api/tests/" + id)
+                .then()
+                .body("status", is("FAILED"))
+                .body("clientKey", is(key));
+    }
+
+    /** RestAssured trims the header, and a blank one reaches the API empty. */
+    @ParameterizedTest
+    @ValueSource(strings = {" ", "tab\tinside"})
+    void aBlankOrControlCharacterKeyIsRefusedByName(String key) {
+        verifyRefused(key);
+    }
+
+    @Test
+    void aKeyOver128CharactersIsRefusedByName() {
+        verifyRefused("k".repeat(129));
+    }
+
+    private void verifyRefused(String key) {
+        postWithKey(key, FLAT_LOAD)
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", hasKey("Idempotency-Key"));
+        verifyNoInteractions(trogdorClient);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {FLAT_LOAD, SCENARIO})
+    void aFailedSaveLeavesTheKeyForTheRetry(String body) {
+        refuseTasks();
+        String key = newKey();
+        doThrow(new IllegalStateException("database blip"))
+                .doCallRealMethod()
+                .when(repository)
+                .save(argThat(run -> key.equals(run.getClientKey())));
+
+        postWithKey(key, body).then().statusCode(500);
+        postWithKey(key, body).then().statusCode(202).body("clientKey", is(key));
+    }
+
+    @Test
+    void anSlaBesideAScenarioIsRefused() {
+        given().contentType("application/json")
+                .body(SCENARIO.substring(0, SCENARIO.length() - 1) + ", \"sla\": {\"maxP99LatencyMs\": 1}}")
+                .when()
+                .post("/api/tests")
+                .then()
+                .statusCode(400)
+                .body("fieldErrors", hasKey("sla"));
+        verifyNoInteractions(trogdorClient);
+    }
+
+    @Test
+    void aFlatRequestsSlaFailsTheReportWhenBreached() {
+        refuseTasks();
+        String id = given().contentType("application/json")
+                .body("{\"type\": \"LOAD\", \"backend\": \"trogdor\", \"spec\": {},"
+                        + " \"sla\": {\"maxP99LatencyMs\": 1}}")
+                .when()
+                .post("/api/tests")
+                .then()
+                .statusCode(202)
+                .body("sla.maxP99LatencyMs", is(1.0f))
+                .extract()
+                .path("id");
+        awaitStatus(id, "FAILED");
+
+        var measured = new TestResult()
+                .withTaskId("t-sla")
+                .withStatus(TestResult.TaskStatus.DONE)
+                .withRecordsSent(1000)
+                .withP99LatencyMs(50);
+        repository.save(repository
+                .findById(id)
+                .orElseThrow()
+                .withResults(List.of(measured))
+                .withStatus(TestResult.TaskStatus.DONE));
+
+        given().when()
+                .get("/api/tests/" + id + "/report")
+                .then()
+                .statusCode(200)
+                .body("overallSlaVerdict.passed", is(false));
     }
 
     private static void awaitStatus(String id, String status) {
