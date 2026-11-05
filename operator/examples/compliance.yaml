@@ -1,0 +1,11 @@
+apiVersion: kates.io/v1alpha1
+kind: KafkaCompliance
+metadata:
+  name: krafter-rules
+spec:
+  interval: 1h
+  reference:
+    target: {namespace: kafka, name: krafter}
+    brokers:
+      count: {min: 3}
+      zones: {min: 3}

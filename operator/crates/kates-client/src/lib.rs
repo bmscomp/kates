@@ -421,8 +421,8 @@ impl Client {
         let response = response.map_err(|error| Error::Unavailable {
             status: None,
             api_message: None,
-            // reqwest's text names the URL and never the headers, so no key can reach it.
-            detail: error.without_url().to_string(),
+            // reqwest's text names neither the URL nor the headers here, so no key can reach it.
+            detail: chain(&error.without_url()),
         })?;
         if response.status().is_success() {
             return Ok(response);
@@ -433,6 +433,17 @@ impl Client {
         let body = response.text().await.unwrap_or_default();
         Err(classify(status, &headers, &body, &host))
     }
+}
+
+// reqwest's own text is "error sending request"; the cause is at the end of its sources.
+fn chain(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        text = format!("{text}: {cause}");
+        source = cause.source();
+    }
+    text
 }
 
 async fn decode<T: serde::de::DeserializeOwned>(response: Response) -> Result<T, Error> {
@@ -698,6 +709,17 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(*seen.lock().unwrap(), [("GET", "/api/tests/{id}", 200)]);
+    }
+
+    #[tokio::test]
+    async fn a_network_error_says_why() {
+        let client = Client::new("http://127.0.0.1:1", None).unwrap();
+        let error = client.get_test(&key(), "r").await.unwrap_err();
+        let Error::Unavailable { status, detail, .. } = error else {
+            panic!("{error:?}");
+        };
+        assert_eq!(status, None);
+        assert!(detail.to_lowercase().contains("refused"), "{detail}");
     }
 
     #[test]

@@ -1,0 +1,43 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kates-operator
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kates-operator.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace }}
+      ports:
+        - port: http
+          protocol: TCP
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Ports only, with no to: the template cannot know which namespace a kates-connection names.
+    - ports:
+        - port: 8080
+          protocol: TCP
+    # 6443 is the API server's own port after the kubernetes Service's DNAT, and NetworkPolicy
+    # leaves undefined whether a policy runs before or after that rewrite.
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+    {{- with .Values.networkPolicy.egressRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

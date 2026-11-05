@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "kates-operator values",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "global": {
+      "type": "object",
+      "properties": {
+        "imageRegistry": { "type": "string" },
+        "imagePullSecrets": { "$ref": "#/$defs/pullSecrets" }
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string", "not": { "const": "latest" } },
+        "digest": { "type": "string", "pattern": "^(sha256:[0-9a-f]{64})?$" },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "imagePullSecrets": { "$ref": "#/$defs/pullSecrets" },
+    "watchNamespaces": { "$ref": "#/$defs/names" },
+    "watchAnyNamespace": { "type": "boolean" },
+    "kafka": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "namespaces": { "$ref": "#/$defs/names" } }
+    },
+    "rbac": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "clusterRoles": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "create": { "type": "boolean" } }
+        },
+        "aggregateRoles": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "create": { "type": "boolean" } }
+        },
+        "kafkaNamespaceRole": { "type": "boolean" }
+      }
+    },
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fallback": { "type": "boolean" },
+        "existingSecret": { "type": "string", "minLength": 1 }
+      }
+    },
+    "crdUpgrade": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "resources": { "type": "object" }
+      }
+    },
+    "replicas": { "type": "integer", "minimum": 1 },
+    "resources": { "type": "object" },
+    "logFormat": { "enum": ["text", "json"] },
+    "tracing": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "endpoint": { "type": "string" } }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "monitoringNamespace": { "type": "string" },
+        "egressRules": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "monitoring": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "enabled": { "type": "boolean" } }
+    },
+    "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+    "podAnnotations": { "type": "object" },
+    "nodeSelector": { "type": "object" },
+    "tolerations": { "type": "array" },
+    "affinity": { "type": "object" }
+  },
+  "$defs": {
+    "names": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "pullSecrets": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          { "type": "string", "minLength": 1 },
+          { "type": "object", "required": ["name"], "properties": { "name": { "type": "string", "minLength": 1 } } }
+        ]
+      }
+    }
+  }
+}

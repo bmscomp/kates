@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kates-operator
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  # A rolling update would run two reconcilers until the old pod lets go of the Lease.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "kates-operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- toYaml (merge (include "kates-operator.labels" . | fromYaml) .Values.podLabels) | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: kates-operator
+      {{- include "kates-operator.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- include "kates-operator.podSecurityContext" . | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: operator
+          image: {{ include "kates-operator.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "kates-operator.securityContext" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: KATES_OPERATOR_NAMESPACES
+              value: {{ include "kates-operator.namespaces" . | quote }}
+            - name: KATES_OPERATOR_KAFKA_NAMESPACES
+              value: {{ if .Values.watchAnyNamespace }}"*"{{ else }}{{ join "," .Values.kafka.namespaces | quote }}{{ end }}
+            - name: LOG_FORMAT
+              value: {{ .Values.logFormat | quote }}
+            {{- with .Values.tracing.endpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ . | quote }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.connection.fallback }}
+          volumeMounts:
+            - name: connection
+              mountPath: /etc/kates-operator/connection
+              readOnly: true
+          {{- end }}
+      {{- if .Values.connection.fallback }}
+      # Projected with no subPath, so the kubelet refreshes a rotated key; optional, so a
+      # missing Secret leaves the resources at NoConnection and the pod running.
+      volumes:
+        - name: connection
+          projected:
+            sources:
+              - secret:
+                  name: {{ .Values.connection.existingSecret }}
+                  optional: true
+      {{- end }}

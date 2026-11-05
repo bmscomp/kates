@@ -1,0 +1,34 @@
+{{- if and .Values.rbac.kafkaNamespaceRole (not .Values.watchAnyNamespace) }}
+{{- $root := . }}
+{{- $name := printf "kates-operator-kafka-reader-%s" .Release.Namespace | trunc 63 | trimSuffix "-" }}
+{{- range .Values.kafka.namespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ . }}
+  labels:
+    {{- include "kates-operator.labels" $root | nindent 4 }}
+rules:
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkas"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ . }}
+  labels:
+    {{- include "kates-operator.labels" $root | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: kates-operator
+    namespace: {{ $root.Release.Namespace }}
+{{- end }}
+{{- end }}

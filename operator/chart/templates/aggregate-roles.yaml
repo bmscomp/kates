@@ -1,0 +1,35 @@
+{{- if .Values.rbac.aggregateRoles.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kates-operator-view-{{ .Release.Namespace }}
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
+rules:
+  - apiGroups: ["kates.io"]
+    resources: ["katestests", "kafkacompliances"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kates-operator-edit-{{ .Release.Namespace }}
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+    rbac.authorization.k8s.io/aggregate-to-edit: "true"
+rules:
+  - apiGroups: ["kates.io"]
+    resources: ["katestests", "kafkacompliances"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kates-operator-admin-{{ .Release.Namespace }}
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+rules:
+  {{- include "kates-operator.rules" . | nindent 2 }}
+{{- end }}
