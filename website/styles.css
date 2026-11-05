@@ -376,6 +376,7 @@ h3 { font-size: 1.2rem; font-weight: 600; }
 
 /* Chips look: filled pill badge on top border of each node */
 .arch[data-tui-design="chips"] .t-title { opacity: 0; }
+.arch[data-tui-design] .arch-v .t-title { opacity: 1; } /* the vertical diagram has no border titles */
 .arch[data-tui-design="chips"] .title-cut { fill: var(--tui-accent); rx: 4px; }
 .arch[data-tui-design="chips"] .box-cli .title-cut,
 .arch[data-tui-design="chips"] .box-api .title-cut { fill: #d8b4fe; }

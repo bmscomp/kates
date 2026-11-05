@@ -38,6 +38,21 @@ jobs:
       - name: Validate HTML
         run: npx --yes html-validate@9 website/index.html
 
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Lint the scenario the page shows
+        run: |
+          python3 - > "$RUNNER_TEMP/scenario.yaml" <<'PY'
+          import html, re
+          page = open("website/index.html").read()
+          code = re.search(r'<pre id="scenario-example".*?<code>(.*?)</code>', page, re.S).group(1)
+          print(html.unescape(re.sub(r"<[^>]+>", "", code)))
+          PY
+          cd cli && go run . test lint "$RUNNER_TEMP/scenario.yaml"
+
       - name: Check that every local asset the page references exists
         run: |
           set -euo pipefail

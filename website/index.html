@@ -98,8 +98,8 @@
 
         <div class="hero-demo">
           <div class="terminal">
-            <div class="terminal-bar"><span></span><span></span><span></span><em>zsh — kates</em></div>
-            <pre tabindex="0" aria-label="Terminal running a Kates load test and a CI gate"><code><span class="p">$</span> kates health
+            <div class="terminal-bar"><span></span><span></span><span></span><em>sample output</em></div>
+            <pre tabindex="0" aria-label="Sample terminal output of a Kates load test, a fault and a CI gate"><code><span class="p">$</span> kates health
 <span class="ok">✓</span> Kates API      http://localhost:8080
 <span class="ok">✓</span> Kafka          krafter.kafka           <span class="dim">3 brokers · 3 zones</span>
 
@@ -109,13 +109,13 @@ throughput   <span class="num">48,112</span> rec/s
 P50 / P95 / P99   <span class="num">3.1</span> / <span class="num">9.4</span> / <span class="num">17.8</span> ms
 errors       <span class="num">0</span>          grade  <span class="grade">A</span>
 
-<span class="p">$</span> kates resilience run --type LOAD --fault broker-pod-kill
-fault        broker-pod-kill → krafter-kafka-1
+<span class="p">$</span> kates resilience run -f broker-kill.yaml
+fault        POD_KILL → krafter-brokers-1
 before/after P99   17.8 → <span class="warn">41.2</span> ms   (+131%)
 recovery     <span class="num">6.4</span> s      lost records  <span class="num">0</span>
 
-<span class="p">$</span> kates gate --min-grade B
-<span class="ok">PASS</span>  grade A ≥ B   <span class="dim">exit 0</span></code></pre>
+<span class="p">$</span> kates gate --min-grade C
+<span class="ok">PASS</span>  grade A ≥ C   <span class="dim">exit 0</span></code></pre>
           </div>
         </div>
       </div>
@@ -234,18 +234,18 @@ recovery     <span class="num">6.4</span> s      lost records  <span class="num"
       <div class="wrap how-grid">
         <div class="how-copy">
           <p class="eyebrow">Quick start</p>
-          <h2>From an empty laptop to a graded load test in five commands.</h2>
+          <h2>From an empty laptop to a graded load test.</h2>
           <p class="sub">
             You need Docker, Kind, kubectl and Helm, and about 16 GB of RAM. Everything else,
             Strimzi, Kafka, Prometheus, Grafana, LitmusChaos and the Kates API, is installed by
             <code>kates deploy</code>.
           </p>
           <ol class="steps">
-            <li><b>Install the CLI</b> with Homebrew, or download a single binary from the latest release.</li>
-            <li><b>Create the lab</b>: a three-zone Kind cluster named <code>panda</code>.</li>
-            <li><b>Deploy the stack</b> with a wizard, or <code>--dry-run</code> to see the plan first.</li>
+            <li><b>Install the CLI</b> with Homebrew, and clone the repository for its <code>make</code> targets.</li>
+            <li><b>Create the lab</b>: a three-zone Kind cluster named <code>panda</code>, with the Kates API image loaded.</li>
+            <li><b>Deploy the stack</b> with a wizard, or <code>--dry-run</code> to see the plan first. It installs into kubectl&#39;s current context, so check that first.</li>
             <li><b>Open the ports</b>: the CLI context is configured with the API URL and key.</li>
-            <li><b>Run a test</b> and read the graded report.</li>
+            <li><b>Run a test</b> and read the graded report. When you finish, <code>make clean</code> removes the lab.</li>
           </ol>
           <div class="cta-row">
             <a class="btn btn-primary" href="https://github.com/bmscomp/kates#quick-start">Full quick start</a>
@@ -258,6 +258,7 @@ recovery     <span class="num">6.4</span> s      lost records  <span class="num"
 <pre tabindex="0" aria-label="Install commands"><code><span class="c"># 1. The CLI (macOS or Linux)</span>
 brew install bmscomp/tap/kates
 git clone https://github.com/bmscomp/kates &amp;&amp; cd kates
+git checkout "$(git describe --tags --abbrev=0 --match 'v*')"
 
 <span class="c"># 2. A three-zone Kind cluster named panda</span>
 make cluster
@@ -269,7 +270,7 @@ kates deploy
 <span class="c"># 4. Port-forwards and a ready CLI context</span>
 kates ports
 
-<span class="c"># 5. A first load test, then a CI gate</span>
+<span class="c"># 5. A first load test, then a CI gate (exit 1 below the grade)</span>
 kates test create --type LOAD --records 100000 --wait
 kates gate --min-grade C --records 100000</code></pre>
           </div>
@@ -279,7 +280,7 @@ kates gate --min-grade C --records 100000</code></pre>
   <span class="k">with:</span>
     <span class="k">api-url:</span> ${{ secrets.KATES_API_URL }}
     <span class="k">api-key:</span> ${{ secrets.KATES_API_KEY }}
-    <span class="k">min-grade:</span> B</code></pre>
+    <span class="k">min-grade:</span> C</code></pre>
           </div>
         </div>
       </div>
@@ -294,7 +295,7 @@ kates gate --min-grade C --records 100000</code></pre>
           <p class="sub">
             Performance tests work against any Kafka cluster the Kates API can reach. Fault injection
             targets Strimzi-managed brokers. Every run is stored, so the numbers from last month are
-            there to compare with today's.
+            there to compare with today's. The numbers in the two figures below are illustrative.
           </p>
         </div>
 
@@ -398,7 +399,7 @@ kates gate --min-grade C --records 100000</code></pre>
               <circle class="broker" cx="616" cy="124" r="7" />
               <circle class="broker hit" cx="650" cy="124" r="7" />
               <circle class="broker" cx="684" cy="124" r="7" />
-              <text x="650" y="150" text-anchor="middle" class="t-sub t-small">kafka-0 · 1 · 2</text>
+              <text x="650" y="150" text-anchor="middle" class="t-sub t-small">brokers-0 · 1 · 2</text>
             </g>
             <g class="box node" data-node="litmus" tabindex="0" role="img" aria-label="LitmusChaos" style="--d:3" data-note="LitmusChaos carries out the 13 disruption types against the brokers, then lets them recover.">
               <rect class="pane-bg litmus-hit" x="560" y="206" width="180" height="68" rx="6" />
@@ -554,17 +555,17 @@ kates gate --min-grade C --records 100000</code></pre>
           <div class="kz-src"><b>Kates API · producers</b><span>● 48,112 rec/s · acks=all</span></div>
           <div class="kz-row" aria-hidden="true">
             <div><div class="kz-lane"><i></i><i></i><i></i></div>
-              <div class="kz-brk"><div class="kz-brk-h"><b><span>krafter-</span>kafka-0</b><small>zone a</small></div>
+              <div class="kz-brk"><div class="kz-brk-h"><b><span>krafter-</span>brokers-0</b><small>zone a</small></div>
                 <div class="kz-parts"><span class="ldr">p0</span><span>p1</span><span>p2</span></div></div></div>
             <div class="kz-hit"><div class="kz-lane"><i></i><i></i><i></i></div>
-              <div class="kz-brk"><div class="kz-brk-h"><b><span>krafter-</span>kafka-1</b><small>zone b</small></div>
+              <div class="kz-brk"><div class="kz-brk-h"><b><span>krafter-</span>brokers-1</b><small>zone b</small></div>
                 <div class="kz-parts"><span>p0</span><span class="ldr" data-move>p1</span><span>p2</span></div></div></div>
             <div><div class="kz-lane"><i></i><i></i><i></i></div>
-              <div class="kz-brk"><div class="kz-brk-h"><b><span>krafter-</span>kafka-2</b><small>zone c</small></div>
+              <div class="kz-brk"><div class="kz-brk-h"><b><span>krafter-</span>brokers-2</b><small>zone c</small></div>
                 <div class="kz-parts"><span>p0</span><span data-take>p1</span><span class="ldr">p2</span></div></div></div>
           </div>
           <div class="kz-row" aria-hidden="true"><div></div><div class="kz-bolt"><span class="kz-inject-tag">↑ inject</span></div><div></div></div>
-          <div class="kz-row" aria-hidden="true"><div></div><div class="kz-chaos"><b>LitmusChaos</b><span>broker-pod-kill</span></div><div></div></div>
+          <div class="kz-row" aria-hidden="true"><div></div><div class="kz-chaos"><b>LitmusChaos</b><span>POD_KILL</span></div><div></div></div>
           <div class="kz-isr" aria-hidden="true">
             <span>ISR p0 <i></i><i class="hit"></i><i></i></span>
             <span>ISR p1 <i></i><i class="hit"></i><i></i></span>
@@ -613,19 +614,19 @@ kates gate --min-grade C --records 100000</code></pre>
             <thead>
               <tr>
                 <th scope="col">Capability</th>
+                <th scope="col" class="hl">Kates</th>
                 <th scope="col"><code>kafka-producer-perf-test</code></th>
                 <th scope="col">OpenMessaging Benchmark</th>
                 <th scope="col">Manual Litmus / <code>kubectl</code></th>
-                <th scope="col" class="hl">Kates</th>
               </tr>
             </thead>
             <tbody>
-              <tr><th scope="row">Load, stress, spike and round-trip workloads</th><td>Producer or consumer only</td><td class="yes">Yes</td><td class="no">No</td><td class="yes hl">Yes</td></tr>
-              <tr><th scope="row">Coordinated fault injection under load</th><td class="no">No</td><td class="no">No</td><td>Manual</td><td class="yes hl">Yes</td></tr>
-              <tr><th scope="row">Blast-radius guard and rollback</th><td class="no">No</td><td class="no">No</td><td class="no">No</td><td class="yes hl">Yes</td></tr>
-              <tr><th scope="row">Zero-loss, ordering and gap verification</th><td class="no">No</td><td class="no">No</td><td class="no">No</td><td class="yes hl">Yes</td></tr>
-              <tr><th scope="row">Broker security and compliance audit</th><td class="no">No</td><td class="no">No</td><td class="no">No</td><td class="yes hl">A–F · CIS / SOC 2 / PCI DSS</td></tr>
-              <tr><th scope="row">Repeatable CI gates and historical trends</th><td class="no">No</td><td class="no">No</td><td class="no">No</td><td class="yes hl">Yes</td></tr>
+              <tr><th scope="row">Load, stress, spike and round-trip workloads</th><td class="yes hl">Yes</td><td>Producer or consumer only</td><td class="yes">Yes</td><td class="no">No</td></tr>
+              <tr><th scope="row">Coordinated fault injection under load</th><td class="yes hl">Yes</td><td class="no">No</td><td class="no">No</td><td>Manual</td></tr>
+              <tr><th scope="row">Blast-radius guard and rollback</th><td class="yes hl">Yes</td><td class="no">No</td><td class="no">No</td><td class="no">No</td></tr>
+              <tr><th scope="row">Zero-loss, ordering and gap verification</th><td class="yes hl">Yes</td><td class="no">No</td><td class="no">No</td><td class="no">No</td></tr>
+              <tr><th scope="row">Broker security and compliance audit</th><td class="yes hl">A–F · CIS / SOC 2 / PCI DSS</td><td class="no">No</td><td class="no">No</td><td class="no">No</td></tr>
+              <tr><th scope="row">Repeatable CI gates and historical trends</th><td class="yes hl">Yes</td><td class="no">No</td><td class="no">No</td><td class="no">No</td></tr>
             </tbody>
           </table>
         </div>
@@ -638,40 +639,40 @@ kates gate --min-grade C --records 100000</code></pre>
         <div class="how-code">
           <div class="code-block">
             <div class="code-title">scenario.yaml</div>
-<pre tabindex="0" aria-label="Example scenario file"><code><span class="k">name:</span> checkout-peak
+<pre id="scenario-example" tabindex="0" aria-label="Example scenario file"><code><span class="k">name:</span> checkout-peak
 <span class="k">type:</span> LOAD
-<span class="k">records:</span> 2000000
-<span class="k">producers:</span> 8
-<span class="k">gates:</span>
-  <span class="k">minThroughput:</span> 40000      <span class="c"># rec/s</span>
-  <span class="k">maxP99LatencyMs:</span> 25
-  <span class="k">maxErrorRate:</span> 0.001
-<span class="k">disruption:</span>
-  <span class="k">type:</span> broker-pod-kill
-  <span class="k">maxAffectedBrokers:</span> 1
-  <span class="k">maxRecoverySeconds:</span> 30</code></pre>
+<span class="k">spec:</span>
+  <span class="k">records:</span> 200000
+  <span class="k">recordSizeBytes:</span> 1024
+  <span class="k">acks:</span> all
+<span class="k">validate:</span>
+  <span class="k">minThroughputRecPerSec:</span> 40000
+  <span class="k">maxP99LatencyMs:</span> 100</code></pre>
           </div>
           <div class="code-block">
-            <div class="code-title">Terminal</div>
+            <div class="code-title">Terminal · real run, kates v1.37.0, Kind, 3 brokers, 2026-11-05</div>
 <pre tabindex="0" aria-label="Scenario run output"><code>$ kates test apply -f scenario.yaml --wait
-<span class="ok">PASS</span>  throughput 47,902 ≥ 40,000
-<span class="ok">PASS</span>  P99 19.6 ms ≤ 25 ms
-<span class="ok">PASS</span>  recovery 8.1 s ≤ 30 s
-<span class="ok">PASS</span>  lost records 0
-grade <span class="grade">A</span> · junit → reports/checkout-peak.xml</code></pre>
+Scenario       ID        Status  Note
+checkout-peak  6d29fdde  DONE    <span class="ok">✓ SLA Pass</span>
+
+$ kates report summary 6d29fdde
+Avg Throughput   247.8K rec/s
+P50 Latency      2.46 ms
+P99 Latency      67.01 ms
+Error Rate       0.0000%</code></pre>
           </div>
         </div>
         <div class="how-copy">
           <p class="eyebrow">CI gates</p>
           <h2>Make resilience a build step, not a quarterly exercise.</h2>
           <p class="sub">
-            Describe a workload and its SLA in a scenario file. Kates runs it, injects the fault,
-            checks every gate and exits non-zero when one fails. The same file runs on a laptop and
+            Describe a workload and its SLA in a scenario file. Kates runs it, checks every gate
+            and exits non-zero when one fails. The same file runs on a laptop and
             in the pipeline, and every run lands in PostgreSQL so a regression shows up as a trend,
             not a surprise.
           </p>
           <ul class="checks">
-            <li><code>kates gate --min-grade B</code> for a one-line performance gate</li>
+            <li><code>kates gate --min-grade C</code> for a one-line performance gate</li>
             <li><code>kates security gate</code> for the broker configuration grade</li>
             <li>JUnit XML for your CI dashboard, webhooks for everything else</li>
             <li>A GitHub Action, <code>bmscomp/kates</code>, ready to drop into a workflow</li>
@@ -685,7 +686,7 @@ grade <span class="grade">A</span> · junit → reports/checkout-peak.xml</code>
       <div class="wrap cta-inner">
         <img src="assets/kates-logo.svg" width="72" height="72" alt="">
         <h2>Try the failure before it tries you.</h2>
-        <p class="sub">Kates is free and open source. Install it, point it at a cluster, and read the first graded report in minutes.</p>
+        <p class="sub">Kates is free and open source. Install it, point it at a cluster, and read the first graded report.</p>
         <div class="cta-row center">
           <a class="btn btn-primary" href="https://github.com/bmscomp/kates">Star on GitHub</a>
           <a class="btn btn-ghost" href="https://bmscomp.github.io/kates/">Read the book</a>
