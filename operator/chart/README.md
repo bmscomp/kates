@@ -6,12 +6,26 @@ The operator drives a Kates API that is already running, through its REST API. I
 
 ## Install
 
-Build the image from the repository root, then load or push it where the cluster can pull it. No image is published yet.
+```bash
+helm install kates-operator oci://ghcr.io/bmscomp/charts/kates-operator --version 0.1.0 \
+  -n kates-operator --create-namespace
+```
+
+It needs Kubernetes 1.29 or newer and pulls `ghcr.io/bmscomp/kates-operator`, for amd64 and arm64. On a cluster that pulls from a mirror, set `global.imageRegistry` and `global.imagePullSecrets`. The image and the chart are signed with cosign:
 
 ```bash
-docker build -f operator/Dockerfile -t kates-operator:dev .
-helm upgrade --install kates-operator operator/chart -n kates-operator --create-namespace \
-  --set image.repository=kates-operator --set image.tag=dev
+cosign verify ghcr.io/bmscomp/kates-operator:0.1.0 \
+  --certificate-identity-regexp 'https://github.com/bmscomp/kates/.github/workflows/publish-operator.yml@refs/tags/operator-v.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+To run your own build, from the repository root:
+
+```bash
+docker build -f operator/Dockerfile -t <registry>/kates-operator:dev .
+docker push <registry>/kates-operator:dev
+helm install kates-operator operator/chart -n kates-operator --create-namespace \
+  --set image.repository=<registry>/kates-operator --set image.tag=dev
 ```
 
 | Mode | Values | Rendered |
@@ -24,9 +38,10 @@ helm upgrade --install kates-operator operator/chart -n kates-operator --create-
 For the last mode a cluster admin applies the CRDs and the aggregated roles once, and the namespace admin installs with `--skip-crds`:
 
 ```bash
-kubectl apply --server-side -f operator/chart/crds/
-helm template kates-operator operator/chart -n team --show-only templates/aggregate-roles.yaml | kubectl apply -f -
-helm install kates-operator operator/chart -n team --skip-crds \
+helm pull oci://ghcr.io/bmscomp/charts/kates-operator --version 0.1.0 --untar
+kubectl apply --server-side -f kates-operator/crds/
+helm template kates-operator ./kates-operator -n team --show-only templates/aggregate-roles.yaml | kubectl apply -f -
+helm install kates-operator ./kates-operator -n team --skip-crds \
   --set rbac.clusterRoles.create=false --set rbac.aggregateRoles.create=false
 ```
 
