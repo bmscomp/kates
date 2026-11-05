@@ -26,7 +26,7 @@ import (
 // Every tool goes through addReadTool and reads only with GET. get_run and
 // assess_run read the run with GET /api/tests/{id}, which makes the backend
 // poll a run that is still active and save what it finds
-// (TestResource.java:458-464, TestOrchestrator.refreshStatus); both
+// (TestResource.java:527-533, TestOrchestrator.refreshStatus); both
 // descriptions say so. Third-party text (task errors, scenario and phase
 // names, labels, plan names, audit details, backend messages) is fenced;
 // ids, types and statuses are cleaned so an agent can pass them back.
@@ -574,15 +574,15 @@ func mcpRunDecodeSpec(raw json.RawMessage, w *mcpRunSpecWire) (bool, error) {
 }
 
 // mcpRunSpecFrom reads the stored spec. A run without a topic used one named
-// after its type (TestOrchestrator.java:1614,1941-1942). The topic, acks and
+// after its type (TestOrchestrator.java:1635,1962-1963). The topic, acks and
 // compressionType are shown as identifiers only when they hold values Kafka
 // accepts (mcpKafkaTopicRE, mcpAcksRE, mcpCompressionRE, the values
 // TestSpec's bean validation accepts). A stored run can hold others: a
 // schedule saved by a PUT, which runs no bean validation
 // (ScheduleResource.java:224-226), fires its spec as sent, a Kates API
-// without the check of a scenario's specs (TestOrchestrator.java:1126-1130)
-// stored a scenario's base spec as sent (TestOrchestrator.java:347-355,
-// 373-377), and one without the check of a gRPC request's fields
+// without the check of a scenario's specs (TestOrchestrator.java:1143-1147)
+// stored a scenario's base spec as sent (TestOrchestrator.java:358-367,
+// 385-389), and one without the check of a gRPC request's fields
 // (GrpcTestService.java:116-121) stored a compressionType sent over gRPC
 // unchecked. So another value is third-party text and goes, fenced, into
 // invalid. The seven fields a backend without
@@ -706,7 +706,7 @@ func mcpRunRequestedFrom(call *mcpCall, run *client.MCPRun) (*mcpRunRequestedSpe
 func mcpRunTaskFrom(call *mcpCall, t client.MCPRunTask) mcpRunTaskOut {
 	return mcpRunTaskOut{
 		// A scenario run's task ids are the run id and the phase name
-		// (TestOrchestrator.java:1758), which nothing validates.
+		// (TestOrchestrator.java:1779), which nothing validates.
 		TaskID:              call.FenceN(t.TaskID, 128),
 		Phase:               call.FenceN(t.PhaseName, 64),
 		Status:              mcpSanitizeLine(t.Status, 16),
@@ -1031,7 +1031,7 @@ var mcpCaveatsRunsList = []mcpCaveat{
 			mcpAnchoredRef(mcpJava+"report/ReportGenerator.java:220-249,283-294",
 				"report.setSummary(MetricUtils.computeSummary(results));",
 				"summaries.put(phase, MetricUtils.computeSummary(rows))"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:415-424,2089-2105",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:427-436,2110-2126",
 				"TestResult.TaskStatus.PENDING : TestResult.TaskStatus.RUNNING",
 				"private static TestRun withUnfinishedTasksFailed("),
 		},
@@ -1051,7 +1051,7 @@ var mcpCaveatsRunsList = []mcpCaveat{
 				"private void runIntegrity(", "state.integrityResult = state.verifier.verify("),
 			mcpAnchoredRef(mcpJava+"engine/DataIntegrityVerifier.java:51,224-227",
 				"static final int MAX_LOST_RANGES = 1000;", "if (chaosStartNanos <= 0) {"),
-			mcpAnchoredRef(mcpJava+"persistence/EntityMapper.java:34-43,216-223,243",
+			mcpAnchoredRef(mcpJava+"persistence/EntityMapper.java:34-43,219-226,246",
 				"entity.setIntegrityJson(integrityJson);",
 				".withIntegrity(fromJson(INTEGRITY_JSON, entity.getIntegrityJson(), IntegrityResult.class));",
 				"DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false"),
@@ -1070,9 +1070,9 @@ var mcpCaveatsRunsList = []mcpCaveat{
 			"except for a run cancelled before its tasks existed; a cancel through the REST API also leaves a CANCEL " +
 			"audit row.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:2040-2118",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:2061-2139",
 				`"Cancelled by user"`, `EventKind.FAILED, "cancelled"`, "return run.withResults(updatedResults);"),
-			mcpAnchoredRef(mcpJava+"api/TestResource.java:497-542",
+			mcpAnchoredRef(mcpJava+"api/TestResource.java:566-611",
 				`@Path("/{id}/cancel")`, `auditService.record("CANCEL"`, `"Test cancelled; it is stored as FAILED"`),
 			mcpJava + "domain/TestResult.java:25-31",
 		},
@@ -1100,14 +1100,14 @@ var mcpCaveatsRunsList = []mcpCaveat{
 			"say which the API is, but a scenario run's tasks do: on an older API they all start within moments " +
 			"of one another.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:341-343,391-402,404-420",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:352-354,403-414,416-432",
 				"applyTypeDefaults(type, scenario.getBaseSpec())", ".withRequestedSpec(",
 				"long phaseStartMs = System.currentTimeMillis();", "scenario.resolveSpecForPhase(phase)",
 				"phaseStartMs = saturatedSum(phaseStartMs", "backend.submit(task)", "TestResult.TaskStatus.PENDING"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1452-1480,1552-1591,1601-1613",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1473-1501,1573-1612,1622-1634",
 				"MAX_RAMP_STEPS = 100", "scenarioInapplicableFields(TestScenario scenario", "is a SPIKE phase",
 				"has none (", "check no record CRCs"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1738-1807", "List<BenchmarkTask> buildPhaseTask(",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1759-1828", "List<BenchmarkTask> buildPhaseTask(",
 				"int baseTarget = Math.max(1, spec.getThroughput() / steps);", "saturatedSum(startAtMs, s * stepMs)",
 				`taskId + "-spike"`),
 			mcpAnchoredRef(mcpJava+"domain/TestScenario.java:108-183",

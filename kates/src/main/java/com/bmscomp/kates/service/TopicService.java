@@ -53,6 +53,10 @@ public class TopicService {
             abortOn = {org.apache.kafka.common.errors.TopicExistsException.class, IllegalArgumentException.class})
     @Timeout(35_000)
     public void createTopic(String name, int partitions, int replicationFactor, Map<String, String> configs) {
+        // -1 asks the broker for its default; anything past a short would wrap silently in the cast below
+        if (replicationFactor < -1 || replicationFactor > Short.MAX_VALUE) {
+            throw new IllegalArgumentException("replicationFactor out of range: " + replicationFactor);
+        }
         AdminClient client = adminService.getClient();
         try {
             NewTopic newTopic = new NewTopic(name, partitions, (short) replicationFactor);

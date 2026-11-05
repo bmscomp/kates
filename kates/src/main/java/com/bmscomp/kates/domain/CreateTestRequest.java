@@ -16,6 +16,7 @@ public class CreateTestRequest {
 
     private String backend;
     private TestScenario scenario;
+    private SlaDefinition sla;
 
     public CreateTestRequest() {}
 
@@ -49,6 +50,14 @@ public class CreateTestRequest {
 
     public void setScenario(TestScenario scenario) {
         this.scenario = scenario;
+    }
+
+    public SlaDefinition getSla() {
+        return sla;
+    }
+
+    public void setSla(SlaDefinition sla) {
+        this.sla = sla;
     }
 
     public boolean isScenario() {

@@ -125,7 +125,7 @@ func mcpInvalidArgument(message, value string) error {
 
 // mcpID is a test-run or disruption id as tool input. The backend mints both
 // as the first 8 characters of a random UUID, so 8 lowercase hex characters
-// (domain/TestRun.java:46,64; disruption/DisruptionLauncher.java:77). The
+// (domain/TestRun.java:48,67; disruption/DisruptionLauncher.java:77). The
 // schema carries the pattern, so the SDK refuses a bad id before any Kates
 // code runs; mcpValidateID checks again for ids that arrive another way.
 type mcpID string

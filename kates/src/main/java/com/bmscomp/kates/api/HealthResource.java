@@ -1,6 +1,7 @@
 package com.bmscomp.kates.api;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import jakarta.annotation.security.PermitAll;
 import jakarta.inject.Inject;
@@ -47,12 +48,14 @@ public class HealthResource {
     @GET
     @Operation(
             summary = "Application health",
-            description = "Returns engine status, Kafka connectivity, and test type configurations")
+            description = "Returns engine status, Kafka connectivity, test type configurations, and the"
+                    + " capabilities a client can check before relying on them")
     public Map<String, Object> health() {
         boolean kafkaReachable = clusterHealthService.isReachable();
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("status", kafkaReachable ? "UP" : "DEGRADED");
+        response.put("capabilities", List.of("clientKey"));
 
         response.put(
                 "engine",

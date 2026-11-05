@@ -40,6 +40,8 @@ public class TestRun {
      * not part of the run the API answers with.
      */
     private final Long plannedDurationMs;
+    /** The Idempotency-Key the run was created with; null when it had none. */
+    private final String clientKey;
 
     public TestRun() {
         this(
@@ -52,6 +54,7 @@ public class TestRun {
                 null,
                 null,
                 new LinkedHashMap<>(),
+                null,
                 null,
                 null,
                 null,
@@ -74,6 +77,7 @@ public class TestRun {
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 
@@ -91,7 +95,8 @@ public class TestRun {
             Map<String, Long> cdcPhases,
             String cdcPhase,
             Map<String, Object> requestedSpec,
-            Long plannedDurationMs) {
+            Long plannedDurationMs,
+            String clientKey) {
         this.id = id;
         this.testType = testType;
         this.spec = spec;
@@ -106,6 +111,7 @@ public class TestRun {
         this.cdcPhase = cdcPhase;
         this.requestedSpec = requestedSpec != null ? new LinkedHashMap<>(requestedSpec) : null;
         this.plannedDurationMs = plannedDurationMs;
+        this.clientKey = clientKey;
     }
 
     public TestRun withResult(TestResult result) {
@@ -125,7 +131,8 @@ public class TestRun {
                 cdcPhases,
                 cdcPhase,
                 requestedSpec,
-                plannedDurationMs);
+                plannedDurationMs,
+                clientKey);
     }
 
     public TestRun withId(String id) {
@@ -143,7 +150,8 @@ public class TestRun {
                 cdcPhases,
                 cdcPhase,
                 requestedSpec,
-                plannedDurationMs);
+                plannedDurationMs,
+                clientKey);
     }
 
     public TestRun withTestType(TestType testType) {
@@ -161,7 +169,8 @@ public class TestRun {
                 cdcPhases,
                 cdcPhase,
                 requestedSpec,
-                plannedDurationMs);
+                plannedDurationMs,
+                clientKey);
     }
 
     public TestRun withSpec(TestSpec spec) {
@@ -179,7 +188,8 @@ public class TestRun {
                 cdcPhases,
                 cdcPhase,
                 requestedSpec,
-                plannedDurationMs);
+                plannedDurationMs,
+                clientKey);
     }
 
     public TestRun withStatus(TestResult.TaskStatus status) {
@@ -197,7 +207,8 @@ public class TestRun {
                 cdcPhases,
                 cdcPhase,
                 requestedSpec,
-                plannedDurationMs);
+                plannedDurationMs,
+                clientKey);
     }
 
     public TestRun withResults(List<TestResult> results) {
@@ -215,7 +226,8 @@ public class TestRun {
                 cdcPhases,
                 cdcPhase,
                 requestedSpec,
-                plannedDurationMs);
+                plannedDurationMs,
+                clientKey);
     }
 
     public TestRun withCreatedAt(String createdAt) {
@@ -233,7 +245,8 @@ public class TestRun {
                 cdcPhases,
                 cdcPhase,
                 requestedSpec,
-                plannedDurationMs);
+                plannedDurationMs,
+                clientKey);
     }
 
     public TestRun withBackend(String backend) {
@@ -251,7 +264,8 @@ public class TestRun {
                 cdcPhases,
                 cdcPhase,
                 requestedSpec,
-                plannedDurationMs);
+                plannedDurationMs,
+                clientKey);
     }
 
     public TestRun withScenarioName(String scenarioName) {
@@ -269,7 +283,8 @@ public class TestRun {
                 cdcPhases,
                 cdcPhase,
                 requestedSpec,
-                plannedDurationMs);
+                plannedDurationMs,
+                clientKey);
     }
 
     public TestRun withLabels(Map<String, String> labels) {
@@ -287,7 +302,8 @@ public class TestRun {
                 cdcPhases,
                 cdcPhase,
                 requestedSpec,
-                plannedDurationMs);
+                plannedDurationMs,
+                clientKey);
     }
 
     public TestRun withSla(SlaDefinition sla) {
@@ -305,7 +321,8 @@ public class TestRun {
                 cdcPhases,
                 cdcPhase,
                 requestedSpec,
-                plannedDurationMs);
+                plannedDurationMs,
+                clientKey);
     }
 
     public TestRun withCdcPhases(Map<String, Long> cdcPhases) {
@@ -323,7 +340,8 @@ public class TestRun {
                 cdcPhases,
                 cdcPhase,
                 requestedSpec,
-                plannedDurationMs);
+                plannedDurationMs,
+                clientKey);
     }
 
     public TestRun withCdcPhase(String cdcPhase) {
@@ -341,7 +359,8 @@ public class TestRun {
                 cdcPhases,
                 cdcPhase,
                 requestedSpec,
-                plannedDurationMs);
+                plannedDurationMs,
+                clientKey);
     }
 
     public TestRun withRequestedSpec(Map<String, Object> requestedSpec) {
@@ -359,7 +378,8 @@ public class TestRun {
                 cdcPhases,
                 cdcPhase,
                 requestedSpec,
-                plannedDurationMs);
+                plannedDurationMs,
+                clientKey);
     }
 
     public TestRun withPlannedDurationMs(Long plannedDurationMs) {
@@ -377,7 +397,27 @@ public class TestRun {
                 cdcPhases,
                 cdcPhase,
                 requestedSpec,
-                plannedDurationMs);
+                plannedDurationMs,
+                clientKey);
+    }
+
+    public TestRun withClientKey(String clientKey) {
+        return new TestRun(
+                id,
+                testType,
+                spec,
+                status,
+                results,
+                createdAt,
+                backend,
+                scenarioName,
+                labels,
+                sla,
+                cdcPhases,
+                cdcPhase,
+                requestedSpec,
+                plannedDurationMs,
+                clientKey);
     }
 
     public TestRun withAddedResult(TestResult result) {
@@ -398,7 +438,8 @@ public class TestRun {
                 cdcPhases,
                 cdcPhase,
                 requestedSpec,
-                plannedDurationMs);
+                plannedDurationMs,
+                clientKey);
     }
 
     public TestRun withUpdatedResult(TestResult updatedResult) {
@@ -420,7 +461,8 @@ public class TestRun {
                 cdcPhases,
                 cdcPhase,
                 requestedSpec,
-                plannedDurationMs);
+                plannedDurationMs,
+                clientKey);
     }
 
     public String getId() {
@@ -478,5 +520,9 @@ public class TestRun {
     @JsonIgnore
     public Long getPlannedDurationMs() {
         return plannedDurationMs;
+    }
+
+    public String getClientKey() {
+        return clientKey;
     }
 }

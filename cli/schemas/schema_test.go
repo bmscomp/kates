@@ -412,6 +412,11 @@ func TestSchemasRejectInvalidEnumsTypesAndBounds(t *testing.T) {
 			doc:    `{"scenario": {"name": "s", "phases": [{"name": "p1", "type": "RAMP", "durationMs": 1000, "rampSteps": 1}]}}`,
 		},
 		{
+			name:   "test-request sla beside a scenario",
+			schema: "test-request.v1.schema.json",
+			doc:    `{"sla": {"maxP99LatencyMs": 1}, "scenario": {"name": "s", "phases": [{"name": "p1", "type": "STEADY", "durationMs": 1000}]}}`,
+		},
+		{
 			name:   "flow invalid action enum",
 			schema: "flow.v1.schema.json",
 			doc:    `{"name": "f", "steps": [{"name": "s1", "action": "deploy"}]}`,

@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 import java.util.Set;
 import jakarta.persistence.PersistenceException;
+import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -45,6 +46,8 @@ class TestResourceCreateTest {
     private static final String NOT_STARTED =
             "The Kates API failed to start the test run — see server logs for details";
 
+    private static final HttpHeaders NO_KEY = mock(HttpHeaders.class);
+
     private final InMemoryEngine engine = new InMemoryEngine();
     private final AuditService audit = mock(AuditService.class);
     private TestResource resource;
@@ -59,7 +62,7 @@ class TestResourceCreateTest {
     void aRunTheKatesApiCannotSaveIsAFaultOfTheKatesApi() {
         doThrow(UNREACHABLE).when(engine.repository).save(any());
 
-        assertFaultOfTheKatesApi(resource.createTest(InMemoryEngine.request()));
+        assertFaultOfTheKatesApi(resource.createTest(InMemoryEngine.request(), NO_KEY));
         assertEquals(0, engine.orchestrator.activeTestCount(), "the run gave back its slot");
         verifyNoInteractions(audit);
     }
@@ -68,7 +71,7 @@ class TestResourceCreateTest {
     void aScenarioTheKatesApiCannotSaveIsAFaultOfTheKatesApi() {
         doThrow(UNREACHABLE).when(engine.repository).save(any());
 
-        assertFaultOfTheKatesApi(resource.createTest(scenario()));
+        assertFaultOfTheKatesApi(resource.createTest(scenario(), NO_KEY));
         assertEquals(0, engine.orchestrator.activeTestCount(), "the run gave back its slot");
         verifyNoInteractions(audit);
     }
@@ -78,7 +81,8 @@ class TestResourceCreateTest {
         CreateTestRequest request = InMemoryEngine.request();
         request.setBackend("no-such-backend");
 
-        assertBadRequest("Backend not found: 'no-such-backend'. Available: [fake]", resource.createTest(request));
+        assertBadRequest(
+                "Backend not found: 'no-such-backend'. Available: [fake]", resource.createTest(request, NO_KEY));
         assertEquals(0, engine.orchestrator.activeTestCount());
     }
 
@@ -87,7 +91,8 @@ class TestResourceCreateTest {
         CreateTestRequest request = scenario();
         request.getScenario().setBackend("no-such-backend");
 
-        assertBadRequest("Backend not found: 'no-such-backend'. Available: [fake]", resource.createTest(request));
+        assertBadRequest(
+                "Backend not found: 'no-such-backend'. Available: [fake]", resource.createTest(request, NO_KEY));
         assertEquals(0, engine.orchestrator.activeTestCount());
     }
 
@@ -96,27 +101,28 @@ class TestResourceCreateTest {
         // kates.engine.default-backend names a backend the Kates API does not
         // have, and the request names none, so it cannot be at fault.
         TestOrchestrator misconfigured = mock(TestOrchestrator.class);
-        when(misconfigured.executeTest(any()))
+        when(misconfigured.executeTest(any(), any()))
                 .thenReturn(Result.failure(new UnknownBackendException("nativ", List.of("native", "trogdor"))));
         resource = new TestResource(misconfigured, engine.repository, null);
         resource.auditService = audit;
 
-        assertFaultOfTheKatesApi(resource.createTest(InMemoryEngine.request()));
-        assertFaultOfTheKatesApi(resource.createTest(scenario()));
+        assertFaultOfTheKatesApi(resource.createTest(InMemoryEngine.request(), NO_KEY));
+        assertFaultOfTheKatesApi(resource.createTest(scenario(), NO_KEY));
         verifyNoInteractions(audit);
 
         // A request that names it is the caller's to change, as with any
         // other backend the Kates API does not have.
         CreateTestRequest named = InMemoryEngine.request();
         named.setBackend("nativ");
-        assertBadRequest("Backend not found: 'nativ'. Available: [native, trogdor]", resource.createTest(named));
+        assertBadRequest(
+                "Backend not found: 'nativ'. Available: [native, trogdor]", resource.createTest(named, NO_KEY));
     }
 
     @Test
     void aFullEngineIsStillToBeRetried() {
         engine.fill();
 
-        Response response = resource.createTest(InMemoryEngine.request());
+        Response response = resource.createTest(InMemoryEngine.request(), NO_KEY);
 
         assertEquals(429, response.getStatus());
         assertEquals("60", response.getHeaderString("Retry-After"));
@@ -131,7 +137,7 @@ class TestResourceCreateTest {
         CreateTestRequest request = InMemoryEngine.request();
         request.getSpec().setEnableCrc(true);
 
-        Response response = resource.createTest(request);
+        Response response = resource.createTest(request, NO_KEY);
 
         assertEquals(400, response.getStatus());
         ApiError error = (ApiError) response.getEntity();
@@ -215,7 +221,7 @@ class TestResourceCreateTest {
                 .when(audit)
                 .record(anyString(), anyString(), anyString(), anyString());
 
-        Response response = resource.createTest(InMemoryEngine.request());
+        Response response = resource.createTest(InMemoryEngine.request(), NO_KEY);
 
         assertEquals(202, response.getStatus());
         assertTrue(engine.rows.containsKey(((TestRun) response.getEntity()).getId()));
