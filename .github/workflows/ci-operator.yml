@@ -84,11 +84,11 @@ jobs:
 
       - name: Generated CRDs are fresh
         run: |
-          cargo run --locked --bin crdgen -- --out crds
-          if [ -n "$(git status --porcelain crds)" ]; then
-            git status --porcelain crds
-            git diff crds
-            echo "::error::operator/crds is stale: run cargo run --bin crdgen -- --out crds"
+          cargo run --locked --bin crdgen -- --out chart/crds
+          if [ -n "$(git status --porcelain chart/crds)" ]; then
+            git status --porcelain chart/crds
+            git diff chart/crds
+            echo "::error::operator/chart/crds is stale: run cargo run --bin crdgen -- --out chart/crds"
             exit 1
           fi
 
@@ -108,7 +108,7 @@ jobs:
           set -euo pipefail
           schemas="${RUNNER_TEMP}/schemas"
           mkdir -p "${schemas}"
-          yq -o=json '.spec.versions[0].schema.openAPIV3Schema' operator/crds/katestests.kates.io.yaml \
+          yq -o=json '.spec.versions[0].schema.openAPIV3Schema' operator/chart/crds/katestests.kates.io.yaml \
             | jq '.properties.spec |= walk(if type == "object" and (.properties | type) == "object"
                                            then . + {additionalProperties: false} else . end)' \
             > "${schemas}/katestest_v1alpha1.json"
@@ -146,7 +146,7 @@ jobs:
       # The apiserver is the only CEL compiler, cost and oldSelf-correlatability
       # checker there is.
       - name: The apiserver accepts the CRDs
-        run: kubectl apply --dry-run=server -f operator/crds
+        run: kubectl apply --dry-run=server -f operator/chart/crds
 
   gate:
     name: Gate · Operator

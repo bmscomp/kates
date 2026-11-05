@@ -1,0 +1,192 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: kafkacompliances.kates.io
+spec:
+  group: kates.io
+  names:
+    kind: KafkaCompliance
+    plural: kafkacompliances
+    singular: kafkacompliance
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.verdict
+      name: Verdict
+      type: string
+    - jsonPath: .status.checkedAt
+      name: Checked
+      type: date
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: "A standing compliance check of one Kafka. crd-version: 1"
+        properties:
+          spec:
+            description: A standing compliance check of one Kafka.
+            properties:
+              interval:
+                description: How often to check, such as 30m or 1h.
+                pattern: ^([0-9]+(s|m|h))+$
+                type: string
+              reference:
+                description: A `KafkaReference` `.spec`, inline; its target names the Kafka.
+                properties:
+                  target:
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                    required:
+                    - name
+                    - namespace
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                required:
+                - target
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              suspend:
+                default: false
+                description: Stops new checks without touching what the last one found.
+                type: boolean
+            required:
+            - interval
+            - reference
+            type: object
+          status:
+            nullable: true
+            properties:
+              checkId:
+                description: "`/api/conformity/checks/{id}`; absent when the API kept no report."
+                nullable: true
+                type: string
+              checkedAt:
+                description: >-
+                  Time is a wrapper around time.Time which supports correct marshaling to YAML
+                  and JSON.  Wrappers are provided for many of the factory methods that the time
+                  package offers.
+                format: date-time
+                nullable: true
+                type: string
+              conditions:
+                items:
+                  description: >-
+                    Condition contains details for one aspect of the current state of this API
+                    Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: >-
+                        lastTransitionTime is the last time the condition transitioned from one status
+                        to another. This should be when the underlying condition changed.  If that is not
+                        known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: >-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      type: string
+                    observedGeneration:
+                      description: >-
+                        observedGeneration represents the .metadata.generation that the condition was
+                        set based upon. For instance, if .metadata.generation is currently 12, but the
+                        .status.conditions[x].observedGeneration is 9, the condition is out of date with
+                        respect to the current state of the instance.
+                      format: int64
+                      type: integer
+                    reason:
+                      description: >-
+                        reason contains a programmatic identifier indicating the reason for the
+                        condition's last transition. Producers of specific condition types may define expected
+                        values and meanings for this field, and whether the values are considered a
+                        guaranteed API. The value should be a CamelCase string. This field may not be empty.
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              counts:
+                nullable: true
+                properties:
+                  fail:
+                    format: int64
+                    type: integer
+                  pass:
+                    format: int64
+                    type: integer
+                  unknown:
+                    format: int64
+                    type: integer
+                required:
+                - fail
+                - pass
+                - unknown
+                type: object
+              failed:
+                description: At most 20; the report has the rest.
+                items:
+                  properties:
+                    detail:
+                      nullable: true
+                      type: string
+                    rule:
+                      type: string
+                  required:
+                  - rule
+                  type: object
+                type: array
+              lastHandledReconcileAt:
+                description: The `kates.io/reconcile-at` value last acted on.
+                nullable: true
+                type: string
+              nextCheckAt:
+                description: >-
+                  Time is a wrapper around time.Time which supports correct marshaling to YAML
+                  and JSON.  Wrappers are provided for many of the factory methods that the time
+                  package offers.
+                format: date-time
+                nullable: true
+                type: string
+              observedGeneration:
+                format: int64
+                nullable: true
+                type: integer
+              observedKafkaGeneration:
+                description: The Kafka's `status.observedGeneration` at the last answered check.
+                format: int64
+                nullable: true
+                type: integer
+              verdict:
+                description: PASS, FAIL or UNKNOWN.
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: KafkaCompliance
+        type: object
+        x-kubernetes-validations:
+        - message: "name must be a DNS label (at most 63 lower-case letters, digits and -): it names the stored compliance check"
+          rule: self.metadata.name.matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$')
+    served: true
+    storage: true
+    subresources:
+      status: {}
