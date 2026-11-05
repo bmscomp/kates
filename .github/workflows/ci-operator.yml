@@ -1,0 +1,161 @@
+name: CI · Operator
+
+# The Rust workspace in operator/. Two gates on purpose: a schema edit runs the
+# Rust job, whose crdgen check fails a PR that did not regenerate the CRD, and
+# only a change that reaches a cluster starts Kind.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      e2e: ${{ steps.filter.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'operator/**'
+              - 'charts/kates-operator/**'
+              - 'schemas/test-request.v1.schema.json'
+              - 'rust-toolchain.toml'
+              - 'versions.env'
+              - '.github/workflows/ci-operator.yml'
+            e2e:
+              - 'operator/**'
+              - 'charts/kates-operator/**'
+              - 'charts/kates/**'
+              - 'charts/kafka-cluster/**'
+              - 'config/cluster.yaml'
+              - 'versions.env'
+              - '.github/workflows/ci-operator.yml'
+
+  rust:
+    name: Rust (fmt, clippy, test, deny, crdgen)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: operator
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/load-versions
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
+        with:
+          cache-workspaces: operator
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-deny@${{ env.CARGO_DENY_VERSION }}
+      - run: cargo fmt --all --check
+      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --locked --workspace --all-features
+      - run: cargo deny --all-features check
+
+      # rustls picks a provider from crate features only when exactly one is
+      # on, and both on panics at the first Client::try_default(). The positive
+      # grep stops this passing on a cargo tree output it no longer understands.
+      - name: One crypto provider
+        run: |
+          tree=$(cargo tree --locked --all-features -e features -i rustls)
+          grep -q 'rustls feature "aws_lc_rs"' <<<"${tree}"
+          if grep -q 'rustls feature "ring"' <<<"${tree}"; then
+            echo "::error::rustls has the ring feature on"
+            exit 1
+          fi
+
+      - name: Generated CRDs are fresh
+        run: |
+          cargo run --locked --bin crdgen -- --out crds
+          if [ -n "$(git status --porcelain crds)" ]; then
+            git status --porcelain crds
+            git diff crds
+            echo "::error::operator/crds is stale: run cargo run --bin crdgen -- --out crds"
+            exit 1
+          fi
+
+      - name: Install kubeconform
+        uses: ./.github/actions/install-tools
+        with:
+          kubeconform: "true"
+
+      # No schema catalog publishes CustomResourceDefinition, so kubeconform
+      # cannot read the CRD itself and -ignore-missing-schemas would pass on
+      # nothing; the apiserver judges the CRD in the job below. What it can do
+      # is what a GitOps repository does with the CRD's own schema: refuse a
+      # mistyped key before anything reaches a cluster.
+      - name: The generated schema refuses a mistyped key (kubeconform)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          schemas="${RUNNER_TEMP}/schemas"
+          mkdir -p "${schemas}"
+          yq -o=json '.spec.versions[0].schema.openAPIV3Schema' operator/crds/katestests.kates.io.yaml \
+            | jq '.properties.spec |= walk(if type == "object" and (.properties | type) == "object"
+                                           then . + {additionalProperties: false} else . end)' \
+            > "${schemas}/katestest_v1alpha1.json"
+          validate() {
+            printf 'apiVersion: kates.io/v1alpha1\nkind: KatesTest\nmetadata: {name: ci}\nspec: %s\n' "$1" \
+              | kubeconform -strict -summary -schema-location "${schemas}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" -
+          }
+          validate '{type: LOAD, spec: {numRecords: 1, acks: all}, sla: {maxP99LatencyMs: 100}}'
+          if validate '{type: LOAD, spec: {records: 1}}'; then
+            echo "::error::kubeconform accepted a mistyped key"
+            exit 1
+          fi
+
+  e2e:
+    name: CRDs on Kind
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/load-versions
+
+      # node_image is deliberately not passed, as in integration.yml:
+      # config/cluster.yaml names the image.
+      - name: Create Kind cluster
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          version: ${{ env.KIND_VERSION }}
+          kubectl_version: ${{ env.KUBECTL_VERSION }}
+          cluster_name: ci-test
+          config: config/cluster.yaml
+          wait: 120s
+
+      # The apiserver is the only CEL compiler, cost and oldSelf-correlatability
+      # checker there is.
+      - name: The apiserver accepts the CRDs
+        run: kubectl apply --dry-run=server -f operator/crds
+
+  gate:
+    name: Gate · Operator
+    if: always()
+    needs: [changes, rust, e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/ci-gate
+        with:
+          needs: ${{ toJSON(needs) }}
