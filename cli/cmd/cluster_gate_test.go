@@ -514,6 +514,9 @@ func TestResolveCluster_OfferKindNonTTYFailsWithoutPrompting(t *testing.T) {
 	if !strings.Contains(err.Error(), "kind create cluster") {
 		t.Errorf("error should give the manual command, got: %v", err)
 	}
+	if !strings.Contains(err.Error(), "kubectl taint nodes alpha node-role.kubernetes.io/control-plane:NoSchedule-") {
+		t.Errorf("error should free the control-plane zone, or Kafka stays Pending, got: %v", err)
+	}
 }
 
 // IsInteractive is the single guard everything else relies on.

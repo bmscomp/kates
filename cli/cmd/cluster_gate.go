@@ -222,7 +222,10 @@ func offerKind(d cluster.Decision) (string, error) {
 		how := "Re-run kates deploy in a terminal to be asked."
 		if configExistsFn(cluster.DefaultKindConfig) {
 			how = fmt.Sprintf("Re-run in a terminal to be prompted, or create it directly:\n"+
-				"    kind create cluster --config %s --name %s", cluster.DefaultKindConfig, cluster.DefaultKindClusterName)
+				"    kind create cluster --config %s --name %s\n"+
+				// The first zone is the control-plane node, and Kafka pods pin to each zone.
+				"    kubectl taint nodes %s node-role.kubernetes.io/control-plane:NoSchedule-",
+				cluster.DefaultKindConfig, cluster.DefaultKindClusterName, cluster.KindZones[0])
 		}
 		return "", fmt.Errorf("no reachable Kubernetes cluster.\n"+
 			"  Docker and kind are available — a local %d-zone cluster can be created.\n  %s",
