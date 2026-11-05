@@ -75,7 +75,6 @@
     <section class="hero">
       <div class="wrap hero-grid">
         <div class="hero-copy">
-          <p class="eyebrow">Open source · Apache Kafka · Kubernetes</p>
           <h1>Break your Kafka cluster <span class="accent">before production does.</span></h1>
           <p class="lead">
             You find out how a Kafka cluster handles a broker failure on the day a broker fails,
@@ -88,7 +87,7 @@
             <a class="btn btn-ghost" href="https://bmscomp.github.io/kates/">Read the book</a>
           </div>
           <ul class="hero-points">
-            <li>Repeatable on a local Kind cluster or as pass/fail gates in CI</li>
+            <li>Runs on Kubernetes: repeatable on a local Kind cluster or as pass/fail gates in CI</li>
             <li>Three parts: a Go CLI, a Quarkus API, signed Helm charts</li>
             <li>Apache 2.0 licensed, built in the open on GitHub</li>
           </ul>
@@ -139,7 +138,6 @@ recovery     <span class="num">6.4</span> s      lost records  <span class="num"
     <section class="section" id="why">
       <div class="wrap">
         <div class="section-head">
-          <p class="eyebrow">Why Kates</p>
           <h2>Most teams test Kafka resilience with two terminals and a hunch.</h2>
           <p class="sub">
             A perf-test script in one window, <code>kubectl delete pod</code> in another, and a Grafana board
@@ -177,7 +175,6 @@ recovery     <span class="num">6.4</span> s      lost records  <span class="num"
     <section class="section alt" id="features">
       <div class="wrap">
         <div class="section-head">
-          <p class="eyebrow">What it does</p>
           <h2>One toolkit, from load generation to the audit report.</h2>
         </div>
         <div class="cards three features">
@@ -231,7 +228,6 @@ recovery     <span class="num">6.4</span> s      lost records  <span class="num"
     <section class="section" id="how">
       <div class="wrap how-grid">
         <div class="how-copy">
-          <p class="eyebrow">Quick start</p>
           <h2>From an empty laptop to a graded load test.</h2>
           <p class="sub">
             You need Docker, Kind, kubectl and Helm, and about 16 GB of RAM. Everything else,
@@ -288,7 +284,6 @@ kates gate --min-grade C --records 100000</code></pre>
     <section class="section alt" id="architecture">
       <div class="wrap">
         <div class="section-head">
-          <p class="eyebrow">Architecture</p>
           <h2>Three parts that fit how you already run Kafka.</h2>
           <p class="sub">
             Performance tests work against any Kafka cluster the Kates API can reach. Fault injection
@@ -337,7 +332,7 @@ kates gate --min-grade C --records 100000</code></pre>
             <g class="link" data-a="cli" data-b="api" style="--d:0">
               <path class="edge" pathLength="1" d="M196 182H290" marker-end="url(#arr)" />
               <path class="pkt" pathLength="1" d="M196 182H290" style="--t:1.4s" />
-              <g class="chip" transform="translate(243 162)"><rect x="-48" y="-10" width="96" height="20" rx="4" /><text text-anchor="middle" y="4">REST · API key</text></g>
+              <g class="chip" transform="translate(243 162)"><rect x="-46" y="-10" width="92" height="20" rx="4" /><text text-anchor="middle" y="4">REST · API key</text></g>
             </g>
             <g class="link ok" data-a="api" data-b="cli" data-ph="4" style="--d:0">
               <path class="edge" pathLength="1" d="M290 222H196" marker-end="url(#arr-ok)" />
@@ -596,7 +591,6 @@ kates gate --min-grade C --records 100000</code></pre>
     <section class="section" id="compare">
       <div class="wrap">
         <div class="section-head">
-          <p class="eyebrow">Compared with the usual workflow</p>
           <h2>Benchmark tools measure. Kates measures under failure and keeps score.</h2>
         </div>
         <div class="table-wrap" tabindex="0" aria-label="Comparison of Kates with other Kafka testing tools">
@@ -653,7 +647,6 @@ Error Rate       0.0000%</code></pre>
           </div>
         </div>
         <div class="how-copy">
-          <p class="eyebrow">CI gates</p>
           <h2>Make resilience a build step, not a quarterly exercise.</h2>
           <p class="sub">
             Describe a workload and its SLA in a scenario file. Kates runs it, checks every gate
