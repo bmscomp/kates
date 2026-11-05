@@ -7,14 +7,14 @@ The operator drives a Kates API that is already running, through its REST API. I
 ## Install
 
 ```bash
-helm install kates-operator oci://ghcr.io/bmscomp/charts/kates-operator --version 0.1.0 \
+helm install kates-operator oci://ghcr.io/bmscomp/charts/kates-operator --version 0.1.1 \
   -n kates-operator --create-namespace
 ```
 
 It needs Kubernetes 1.29 or newer and pulls `ghcr.io/bmscomp/kates-operator`, for amd64 and arm64. On a cluster that pulls from a mirror, set `global.imageRegistry` and `global.imagePullSecrets`. The image and the chart are signed with cosign:
 
 ```bash
-cosign verify ghcr.io/bmscomp/kates-operator:0.1.0 \
+cosign verify ghcr.io/bmscomp/kates-operator:0.1.1 \
   --certificate-identity-regexp 'https://github.com/bmscomp/kates/.github/workflows/publish-operator.yml@refs/tags/operator-v.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -38,7 +38,7 @@ helm install kates-operator operator/chart -n kates-operator --create-namespace 
 For the last mode a cluster admin applies the CRDs and the aggregated roles once, and the namespace admin installs with `--skip-crds`:
 
 ```bash
-helm pull oci://ghcr.io/bmscomp/charts/kates-operator --version 0.1.0 --untar
+helm pull oci://ghcr.io/bmscomp/charts/kates-operator --version 0.1.1 --untar
 kubectl apply --server-side -f kates-operator/crds/
 helm template kates-operator ./kates-operator -n team --show-only templates/aggregate-roles.yaml | kubectl apply -f -
 helm install kates-operator ./kates-operator -n team --skip-crds \
@@ -188,7 +188,7 @@ spec:
       zones: {min: 3}
 ```
 
-`spec.reference` is a `KafkaReference` `.spec`, inline, and the API's strict reader checks it. The resource's name becomes the stored check's name, so it must be a DNS label. Intervals under a minute are raised to one minute.
+`spec.reference` is a `KafkaReference` `.spec`, inline, and the API's strict reader checks it. The resource's name becomes the stored check's name, so it must be a DNS label. Intervals under a minute are raised to one minute, and intervals over a year lowered to one year.
 
 A check also runs when the spec changes, and when the Strimzi `Kafka` it names has finished reconciling a change, if that namespace is in `kafka.namespaces`. Any other target is checked on its interval alone, and `KafkaWatched=False` says why. `spec.suspend: true` stops new checks.
 

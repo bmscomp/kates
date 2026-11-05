@@ -13,6 +13,8 @@ use secrecy::SecretString;
 
 pub const SECRET: &str = "kates-connection";
 pub const FALLBACK_DIR: &str = "/etc/kates-operator/connection";
+// Each Secret edit can name a new url, so one namespace could otherwise grow the cache for good.
+const MAX_CLIENTS: usize = 256;
 
 pub struct Connection {
     pub api: Client,
@@ -98,6 +100,9 @@ impl Connections {
         let client = Client::new(&fields.url, fields.ca_bundle.as_deref())
             .map_err(|error| Failure::Invalid(error.to_string()))?
             .observed_by(self.observer.clone());
+        if clients.len() >= MAX_CLIENTS {
+            clients.clear();
+        }
         clients.insert(cache_key, client.clone());
         Ok(client)
     }
@@ -177,5 +182,19 @@ mod tests {
         std::fs::write(dir.join("apiKey"), "second").unwrap();
         assert_eq!(connections.read_files().await.unwrap().key, "second");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_client_cache_stays_bounded() {
+        let connections = Connections::new(PathBuf::new(), std::sync::Arc::new(|_, _, _| {}));
+        for port in 0..=MAX_CLIENTS {
+            let fields = Fields {
+                url: format!("http://kates:{port}"),
+                key: "k".to_owned(),
+                ca_bundle: None,
+            };
+            connections.client(&fields).unwrap();
+        }
+        assert_eq!(connections.clients.lock().unwrap().len(), 1);
     }
 }

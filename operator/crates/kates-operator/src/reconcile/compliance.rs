@@ -23,6 +23,7 @@ const KIND: &str = "KafkaCompliance";
 const NO_CONNECTION_RETRY: Duration = Duration::from_mins(1);
 const WRITE_RETRY: Duration = Duration::from_secs(30);
 const MIN_INTERVAL: Duration = Duration::from_mins(1);
+const MAX_INTERVAL: Duration = Duration::from_hours(24 * 365);
 const MAX_FAILED: usize = 20;
 
 /// # Errors
@@ -165,14 +166,15 @@ fn wait_until(next: Option<&Time>, now: Timestamp) -> Action {
     })
 }
 
-/// `1h`, `30m`, `1h30m`: the shape the CRD's pattern allows, floored so a `0s` cannot spin.
+/// `1h`, `30m`, `1h30m`: the shape the CRD's pattern allows, floored so a `0s` cannot spin, and
+/// capped because the pattern allows any number of digits and a timestamp does not.
 #[must_use]
 pub fn interval(text: &str) -> Duration {
     let mut seconds = 0u64;
     let mut number = 0u64;
     for c in text.chars() {
         if let Some(digit) = c.to_digit(10) {
-            number = number.saturating_mul(10) + u64::from(digit);
+            number = number.saturating_mul(10).saturating_add(u64::from(digit));
             continue;
         }
         let unit = match c {
@@ -183,7 +185,7 @@ pub fn interval(text: &str) -> Duration {
         seconds = seconds.saturating_add(number.saturating_mul(unit));
         number = 0;
     }
-    Duration::from_secs(seconds).max(MIN_INTERVAL)
+    Duration::from_secs(seconds).clamp(MIN_INTERVAL, MAX_INTERVAL)
 }
 
 async fn write(
@@ -511,6 +513,7 @@ mod tests {
         assert_eq!(interval("1h30m"), Duration::from_mins(90));
         assert_eq!(interval("90s"), Duration::from_secs(90));
         assert_eq!(interval("0s"), MIN_INTERVAL);
+        assert_eq!(interval("99999999999999999999999h"), MAX_INTERVAL);
     }
 
     #[test]

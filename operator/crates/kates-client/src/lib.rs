@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use reqwest::header::{AUTHORIZATION, HeaderMap, LOCATION, RETRY_AFTER};
+use reqwest::header::{HeaderMap, LOCATION, RETRY_AFTER};
 use reqwest::{Certificate, Method, Response, StatusCode, redirect};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
@@ -14,6 +14,7 @@ use serde_json::Value;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 // The CLI's figure, above the 35 s snapshot bound of a first report, so the API's own 503s arrive.
 const REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
+const MAX_BODY: usize = 8 * 1024 * 1024;
 
 /// Told of every call: method, route template (never the URL), status (0 for a network error).
 pub type Observer = Arc<dyn Fn(&'static str, &'static str, u16) + Send + Sync>;
@@ -406,7 +407,7 @@ impl Client {
         let mut request = self
             .http
             .request(method, format!("{}{path}", self.base))
-            .header(AUTHORIZATION, format!("Bearer {}", key.expose_secret()));
+            .bearer_auth(key.expose_secret());
         if let Some(idempotency_key) = idempotency_key {
             request = request.header("Idempotency-Key", idempotency_key);
         }
@@ -430,7 +431,8 @@ impl Client {
         let status = response.status();
         let headers = response.headers().clone();
         let host = response.url().host_str().unwrap_or_default().to_owned();
-        let body = response.text().await.unwrap_or_default();
+        let body = capped(response).await.unwrap_or_default();
+        let body = String::from_utf8_lossy(&body);
         Err(classify(status, &headers, &body, &host))
     }
 }
@@ -448,11 +450,30 @@ fn chain(error: &dyn std::error::Error) -> String {
 
 async fn decode<T: serde::de::DeserializeOwned>(response: Response) -> Result<T, Error> {
     let status = response.status().as_u16();
-    response.json().await.map_err(|error| Error::Unavailable {
+    let unavailable = |detail| Error::Unavailable {
         status: Some(status),
         api_message: None,
-        detail: format!("an answer that is not the API's: {}", error.without_url()),
-    })
+        detail: format!("an answer that is not the API's: {detail}"),
+    };
+    let body = capped(response).await.map_err(unavailable)?;
+    serde_json::from_slice(&body).map_err(|error| unavailable(error.to_string()))
+}
+
+// A kates-connection can name any host, and one huge answer would kill the pod every namespace
+// shares.
+async fn capped(mut response: Response) -> Result<Vec<u8>, String> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| error.without_url().to_string())?
+    {
+        if body.len() + chunk.len() > MAX_BODY {
+            return Err(format!("over {MAX_BODY} bytes"));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 fn method_name(method: &Method) -> &'static str {
@@ -651,6 +672,14 @@ mod tests {
             panic!("{proxy:?}");
         };
         assert_eq!(api_message, None);
+    }
+
+    #[tokio::test]
+    async fn an_answer_over_the_cap_is_an_outage() {
+        let error =
+            answering(ResponseTemplate::new(200).set_body_bytes(vec![b' '; MAX_BODY + 1])).await;
+        assert_eq!(error.name(), "Unavailable");
+        assert!(error.to_string().contains("over"), "{error}");
     }
 
     #[tokio::test]
