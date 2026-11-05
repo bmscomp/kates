@@ -3,7 +3,8 @@
 #
 #   KUBECONFIG=<scratch> operator/e2e.sh [namespace] [kafka namespace] [kafka name]
 #
-# The namespace must be watched and hold a working kates-connection. Each check
+# The namespace must be watched and hold a working kates-connection, as
+# operator/e2e-stack.sh leaves it. Each check
 # creates its own resources under a unique name and asserts what the plan says.
 set -uo pipefail
 
