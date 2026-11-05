@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <!-- GitHub Pages serves this site and ignores _headers, so the policy lives here; a meta tag cannot set frame-ancestors. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; connect-src 'self'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'self'; form-action 'self'">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Kates — Kafka testing, chaos and security on Kubernetes</title>
@@ -22,9 +22,8 @@
   <meta name="twitter:description" content="Load tests, fault injection, security audits and CI gates for Apache Kafka on Kubernetes.">
   <meta name="twitter:image" content="https://katesplatform.io/assets/social-preview.png">
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@500;600&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="preload" href="assets/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/eb-garamond-600.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
 
   <script type="application/ld+json">
@@ -62,11 +61,12 @@
         <a href="#compare">Compare</a>
         <a href="#ci">CI gates</a>
         <a href="https://bmscomp.github.io/kates/">Docs</a>
+        <a href="work-with-us.html">Work with us</a>
         <a class="gh" href="https://github.com/bmscomp/kates">
           <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
           GitHub
         </a>
-        <a class="btn btn-primary btn-sm" href="#how">Get started</a>
+        <a class="btn btn-primary btn-sm" href="#how">Quick start</a>
       </nav>
     </div>
   </header>
@@ -74,10 +74,8 @@
   <main id="main">
     <!-- ============ HERO ============ -->
     <section class="hero">
-      <div class="hero-glow" aria-hidden="true"></div>
       <div class="wrap hero-grid">
         <div class="hero-copy">
-          <p class="eyebrow">Open source · Apache Kafka · Kubernetes</p>
           <h1>Break your Kafka cluster <span class="accent">before production does.</span></h1>
           <p class="lead">
             You find out how a Kafka cluster handles a broker failure on the day a broker fails,
@@ -90,7 +88,7 @@
             <a class="btn btn-ghost" href="https://bmscomp.github.io/kates/">Read the book</a>
           </div>
           <ul class="hero-points">
-            <li>Repeatable on a local Kind cluster or as pass/fail gates in CI</li>
+            <li>Runs on Kubernetes: repeatable on a local Kind cluster or as pass/fail gates in CI</li>
             <li>Three parts: a Go CLI, a Quarkus API, signed Helm charts</li>
             <li>Apache 2.0 licensed, built in the open on GitHub</li>
           </ul>
@@ -141,7 +139,6 @@ recovery     <span class="num">6.4</span> s      lost records  <span class="num"
     <section class="section" id="why">
       <div class="wrap">
         <div class="section-head">
-          <p class="eyebrow">Why Kates</p>
           <h2>Most teams test Kafka resilience with two terminals and a hunch.</h2>
           <p class="sub">
             A perf-test script in one window, <code>kubectl delete pod</code> in another, and a Grafana board
@@ -179,7 +176,6 @@ recovery     <span class="num">6.4</span> s      lost records  <span class="num"
     <section class="section alt" id="features">
       <div class="wrap">
         <div class="section-head">
-          <p class="eyebrow">What it does</p>
           <h2>One toolkit, from load generation to the audit report.</h2>
         </div>
         <div class="cards three features">
@@ -194,8 +190,8 @@ recovery     <span class="num">6.4</span> s      lost records  <span class="num"
             <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z" /></svg></div>
             <h3>Fault injection</h3>
             <p class="fig"><b>13</b> disruption types</p>
-            <p>Pod kills, network partitions, CPU, memory and I/O stress, DNS errors, disk fill and node drain, via LitmusChaos or Kubernetes.</p>
-            <p class="meta">Blast-radius guard, dry run, automatic rollback.</p>
+            <p>Pod kills, network partitions, CPU, memory and I/O stress, DNS errors and node drain, via LitmusChaos or Kubernetes.</p>
+            <p class="meta">Eleven run on a default install. Blast-radius guard, dry run, automatic rollback.</p>
           </article>
           <article class="card">
             <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7" /><path d="M21 4v5h-5" /></svg></div>
@@ -233,7 +229,6 @@ recovery     <span class="num">6.4</span> s      lost records  <span class="num"
     <section class="section" id="how">
       <div class="wrap how-grid">
         <div class="how-copy">
-          <p class="eyebrow">Quick start</p>
           <h2>From an empty laptop to a graded load test.</h2>
           <p class="sub">
             You need Docker, Kind, kubectl and Helm, and about 16 GB of RAM. Everything else,
@@ -275,8 +270,8 @@ kates test create --type LOAD --records 100000 --wait
 kates gate --min-grade C --records 100000</code></pre>
           </div>
           <div class="code-block">
-            <div class="code-title">GitHub Actions</div>
-<pre tabindex="0" aria-label="GitHub Actions workflow"><code><span class="k">- uses:</span> bmscomp/kates@v1
+            <div class="code-title">GitHub Actions <button type="button" class="copy" data-copy="#action-example" aria-label="Copy the GitHub Actions step" hidden>Copy</button></div>
+<pre id="action-example" tabindex="0" aria-label="GitHub Actions workflow"><code><span class="k">- uses:</span> bmscomp/kates@v1
   <span class="k">with:</span>
     <span class="k">api-url:</span> ${{ secrets.KATES_API_URL }}
     <span class="k">api-key:</span> ${{ secrets.KATES_API_KEY }}
@@ -290,7 +285,6 @@ kates gate --min-grade C --records 100000</code></pre>
     <section class="section alt" id="architecture">
       <div class="wrap">
         <div class="section-head">
-          <p class="eyebrow">Architecture</p>
           <h2>Three parts that fit how you already run Kafka.</h2>
           <p class="sub">
             Performance tests work against any Kafka cluster the Kates API can reach. Fault injection
@@ -299,15 +293,9 @@ kates gate --min-grade C --records 100000</code></pre>
           </p>
         </div>
 
-        <figure class="arch" data-tui-design="grid">
+        <figure class="arch">
           <div class="arch-winbar">
             <div class="arch-dots" aria-hidden="true"><span></span><span></span><span></span></div>
-            <div class="arch-wintitle" id="arch-wintitle">kates architecture — grid look, C → aurora</div>
-            <div class="arch-designs" role="group" aria-label="TUI design presets">
-              <button type="button" data-set-design="grid" aria-pressed="true">1 · Grid · Aurora</button>
-              <button type="button" data-set-design="panels" aria-pressed="false">2 · Panels · Dracula</button>
-              <button type="button" data-set-design="chips" aria-pressed="false">3 · Classic · Chips</button>
-            </div>
             <button type="button" class="arch-pause" hidden>Pause animation</button>
           </div>
           <div class="arch-tui-head" aria-hidden="true">
@@ -325,9 +313,6 @@ kates gate --min-grade C --records 100000</code></pre>
               <marker id="arr-fault" class="mk-fault" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" /></marker>
               <marker id="arr-ok" class="mk-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" /></marker>
               <clipPath id="p99-clip"><rect x="784" y="190" width="0" height="150" /></clipPath>
-              <pattern id="tui-stripes" width="8" height="22" patternUnits="userSpaceOnUse">
-                <line x1="0" y1="21.5" x2="8" y2="21.5" class="tui-stripe-line" />
-              </pattern>
             </defs>
 
             <rect x="240" y="16" width="704" height="368" rx="6" class="cluster" />
@@ -339,7 +324,7 @@ kates gate --min-grade C --records 100000</code></pre>
             <g class="link" data-a="cli" data-b="api" style="--d:0">
               <path class="edge" pathLength="1" d="M196 182H290" marker-end="url(#arr)" />
               <path class="pkt" pathLength="1" d="M196 182H290" style="--t:1.4s" />
-              <g class="chip" transform="translate(243 162)"><rect x="-48" y="-10" width="96" height="20" rx="4" /><text text-anchor="middle" y="4">REST · API key</text></g>
+              <g class="chip" transform="translate(243 162)"><rect x="-46" y="-10" width="92" height="20" rx="4" /><text text-anchor="middle" y="4">REST · API key</text></g>
             </g>
             <g class="link ok" data-a="api" data-b="cli" data-ph="4" style="--d:0">
               <path class="edge" pathLength="1" d="M290 222H196" marker-end="url(#arr-ok)" />
@@ -372,7 +357,6 @@ kates gate --min-grade C --records 100000</code></pre>
 
             <g class="box box-cli node" data-node="cli" tabindex="0" role="img" aria-label="kates CLI" style="--d:0" data-note="The kates CLI runs on a laptop or a CI runner and only ever talks to the Kates API.">
               <rect class="pane-bg" x="16" y="140" width="180" height="110" rx="6" />
-              <rect class="pane-stripes" x="17" y="141" width="178" height="108" rx="5" fill="url(#tui-stripes)" />
               <rect class="title-cut" x="28" y="131" width="86" height="18" rx="3" />
               <text x="34" y="144" class="t-border-title">kates CLI</text>
               <text x="106" y="176" text-anchor="middle" class="t-title">kates CLI</text>
@@ -382,7 +366,6 @@ kates gate --min-grade C --records 100000</code></pre>
             <g class="stamp" data-ph="4" aria-hidden="true"><circle cx="190" cy="142" r="20" /><text x="190" y="149" text-anchor="middle">A</text></g>
             <g class="box box-api node" data-node="api" tabindex="0" role="img" aria-label="Kates API" style="--d:1" data-note="The Kates API runs the load, drives the faults, grades every run and sends the webhooks.">
               <rect class="pane-bg" x="290" y="140" width="180" height="110" rx="6" />
-              <rect class="pane-stripes" x="291" y="141" width="178" height="108" rx="5" fill="url(#tui-stripes)" />
               <rect class="title-cut" x="302" y="131" width="86" height="18" rx="3" />
               <text x="308" y="144" class="t-border-title">Kates API</text>
               <text x="380" y="176" text-anchor="middle" class="t-title">Kates API</text>
@@ -391,7 +374,6 @@ kates gate --min-grade C --records 100000</code></pre>
             </g>
             <g class="box node" data-node="kafka" tabindex="0" role="img" aria-label="Kafka" style="--d:2" data-note="Kafka managed by Strimzi, one broker per zone: the system under test.">
               <rect class="pane-bg kafka-hit" x="560" y="44" width="180" height="118" rx="6" />
-              <rect class="pane-stripes" x="561" y="45" width="178" height="116" rx="5" fill="url(#tui-stripes)" />
               <rect class="title-cut" x="572" y="35" width="54" height="18" rx="3" />
               <text x="578" y="48" class="t-border-title">Kafka</text>
               <text x="650" y="76" text-anchor="middle" class="t-title">Kafka</text>
@@ -401,17 +383,15 @@ kates gate --min-grade C --records 100000</code></pre>
               <circle class="broker" cx="684" cy="124" r="7" />
               <text x="650" y="150" text-anchor="middle" class="t-sub t-small">brokers-0 · 1 · 2</text>
             </g>
-            <g class="box node" data-node="litmus" tabindex="0" role="img" aria-label="LitmusChaos" style="--d:3" data-note="LitmusChaos carries out the 13 disruption types against the brokers, then lets them recover.">
+            <g class="box node" data-node="litmus" tabindex="0" role="img" aria-label="LitmusChaos" style="--d:3" data-note="LitmusChaos carries out 11 disruption types against the brokers on a default install, then lets them recover.">
               <rect class="pane-bg litmus-hit" x="560" y="206" width="180" height="68" rx="6" />
-              <rect class="pane-stripes" x="561" y="207" width="178" height="66" rx="5" fill="url(#tui-stripes)" />
               <rect class="title-cut" x="572" y="197" width="102" height="18" rx="3" />
               <text x="578" y="210" class="t-border-title">LitmusChaos</text>
               <text x="650" y="236" text-anchor="middle" class="t-title">LitmusChaos</text>
-              <text x="650" y="256" text-anchor="middle" class="t-sub">13 disruption types</text>
+              <text x="650" y="256" text-anchor="middle" class="t-sub">11 disruption types</text>
             </g>
             <g class="box node" data-node="pg" tabindex="0" role="img" aria-label="PostgreSQL" style="--d:4" data-note="PostgreSQL keeps every run, so last month's numbers are there to compare with today's.">
               <rect class="pane-bg" x="560" y="298" width="180" height="62" rx="6" />
-              <rect class="pane-stripes" x="561" y="299" width="178" height="60" rx="5" fill="url(#tui-stripes)" />
               <rect class="title-cut" x="572" y="289" width="94" height="18" rx="3" />
               <text x="578" y="302" class="t-border-title">PostgreSQL</text>
               <text x="650" y="324" text-anchor="middle" class="t-title">PostgreSQL</text>
@@ -419,7 +399,6 @@ kates gate --min-grade C --records 100000</code></pre>
             </g>
             <g class="box node" data-node="mon" tabindex="0" role="img" aria-label="Prometheus and Grafana" style="--d:5" data-note="Prometheus scrapes the Kates API and Kafka; 12 Grafana dashboards and the alert rules come with the charts.">
               <rect class="pane-bg" x="770" y="44" width="160" height="316" rx="6" />
-              <rect class="pane-stripes" x="771" y="45" width="158" height="314" rx="5" fill="url(#tui-stripes)" />
               <rect class="title-cut" x="782" y="35" width="72" height="18" rx="3" />
               <text x="788" y="48" class="t-border-title">Grafana</text>
               <text x="850" y="76" text-anchor="middle" class="t-title">Grafana</text>
@@ -501,7 +480,7 @@ kates gate --min-grade C --records 100000</code></pre>
             <g class="box node" data-node="litmus" tabindex="0" role="img" aria-label="LitmusChaos" style="--d:3">
               <rect class="pane-bg litmus-hit" x="64" y="500" width="232" height="80" rx="6" />
               <text x="180" y="534" text-anchor="middle" class="t-title">LitmusChaos</text>
-              <text x="180" y="558" text-anchor="middle" class="t-sub">13 disruption types</text>
+              <text x="180" y="558" text-anchor="middle" class="t-sub">11 disruption types</text>
             </g>
             <g class="box node" data-node="pg" tabindex="0" role="img" aria-label="PostgreSQL" style="--d:4">
               <rect class="pane-bg" x="64" y="620" width="232" height="62" rx="6" />
@@ -526,23 +505,13 @@ kates gate --min-grade C --records 100000</code></pre>
           <p class="arch-step"></p>
           <div class="arch-keyhints" aria-hidden="true">
             <span><b>hover</b> inspect node</span>
-            <span class="sep">│</span>
-            <span><b>T</b> next look</span>
-            <span class="sep">│</span>
-            <span><b>C</b> next colors</span>
           </div>
           <figcaption aria-live="polite">The CLI never touches Kafka directly: the API inside the cluster runs the load, drives the faults, grades the result and keeps the history.</figcaption>
         </figure>
 
-        <figure class="kz" data-phase="0" data-tui-design="grid">
+        <figure class="kz" data-phase="0">
           <div class="arch-winbar">
             <div class="arch-dots" aria-hidden="true"><span></span><span></span><span></span></div>
-            <div class="arch-wintitle" id="kz-wintitle">kates kafka tui — grid look, C → aurora</div>
-            <div class="arch-designs" role="group" aria-label="TUI design presets">
-              <button type="button" data-set-design="grid" aria-pressed="true">1 · Grid · Aurora</button>
-              <button type="button" data-set-design="panels" aria-pressed="false">2 · Panels · Dracula</button>
-              <button type="button" data-set-design="chips" aria-pressed="false">3 · Classic · Chips</button>
-            </div>
             <button type="button" class="arch-pause" hidden>Pause animation</button>
           </div>
           <div class="arch-tui-head">
@@ -573,40 +542,35 @@ kates gate --min-grade C --records 100000</code></pre>
           </div>
           <div class="arch-keyhints" aria-hidden="true">
             <span><b>★</b> partition leader</span>
-            <span class="sep">│</span>
-            <span><b>T</b> next look</span>
-            <span class="sep">│</span>
-            <span><b>C</b> next colors</span>
           </div>
           <figcaption><b>Healthy.</b> ISR back to 3, preferred leader restored. Recovered in 6.4 s, 0 records lost.</figcaption>
         </figure>
+      </div>
+    </section>
 
+    <!-- ============ CLI ============ -->
+    <section class="section" id="cli">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Watch the run from your terminal.</h2>
+        </div>
         <div class="screens">
           <figure>
-            <img src="assets/kates-lab-panels-dracula.png" width="1024" height="669" alt="kates lab interactive performance tuning in the Panels look with Dracula colors" loading="lazy">
-            <figcaption><b><code>kates lab</code> · Panels look &amp; Dracula colors.</b> Tune producer parameters, run load iterations, compare P99 latency and throughput deltas, and switch looks (<code>T</code>) or color palettes (<code>C</code>) live.</figcaption>
+            <img src="assets/kates-dashboard-grid-aurora.png" width="1024" height="669" alt="kates dashboard showing cluster health, active workloads and completed runs" loading="lazy">
+            <figcaption><b><code>kates dashboard</code>.</b> Live view of API and Kafka broker health, under-replicated partitions, active workloads, completed runs, and real-time throughput and P99.</figcaption>
           </figure>
           <figure>
-            <img src="assets/kates-lab-classic-aurora.png" width="1024" height="669" alt="kates lab interactive performance tuning in the Classic look with Aurora colors" loading="lazy">
-            <figcaption><b><code>kates lab</code> · Classic look &amp; Aurora colors.</b> The same interactive tuning session rendered in the Classic borderless layout with the Aurora palette; persist your favorite with <code>kates theme set</code>.</figcaption>
-          </figure>
-          <figure>
-            <img src="assets/kates-dashboard-grid-aurora.png" width="1024" height="669" alt="kates dashboard live cluster and test monitor in the Grid look with Aurora colors" loading="lazy">
-            <figcaption><b><code>kates dashboard</code> · Grid look &amp; Aurora colors.</b> Live 1s-refreshing view of API and Kafka broker health, under-replicated partitions, active workloads, completed runs, and real-time throughput/P99 sparklines.</figcaption>
-          </figure>
-          <figure>
-            <img src="assets/kates-ctx-profiles-chips.png" width="1024" height="316" alt="kates ctx profiles set interactive selector in the Chips look" loading="lazy">
-            <figcaption><b><code>kates ctx profiles set</code> · Chips look.</b> Scope the CLI to the command groups you need—<code>performance</code>, <code>integrity</code>, <code>chaos</code>, <code>topology</code>, <code>security</code>, or <code>deploy</code>—per context.</figcaption>
+            <img src="assets/kates-lab-panels-dracula.png" width="1024" height="669" alt="kates lab tuning producer parameters and comparing load iterations" loading="lazy">
+            <figcaption><b><code>kates lab</code>.</b> Tune producer parameters, run load iterations, and compare P99 latency and throughput between them.</figcaption>
           </figure>
         </div>
       </div>
     </section>
 
     <!-- ============ COMPARE ============ -->
-    <section class="section" id="compare">
+    <section class="section alt" id="compare">
       <div class="wrap">
         <div class="section-head">
-          <p class="eyebrow">Compared with the usual workflow</p>
           <h2>Benchmark tools measure. Kates measures under failure and keeps score.</h2>
         </div>
         <div class="table-wrap" tabindex="0" aria-label="Comparison of Kates with other Kafka testing tools">
@@ -634,11 +598,11 @@ kates gate --min-grade C --records 100000</code></pre>
     </section>
 
     <!-- ============ CI GATES ============ -->
-    <section class="section alt" id="ci">
+    <section class="section" id="ci">
       <div class="wrap how-grid reverse">
         <div class="how-code">
           <div class="code-block">
-            <div class="code-title">scenario.yaml</div>
+            <div class="code-title">scenario.yaml <button type="button" class="copy" data-copy="#scenario-example" aria-label="Copy the scenario file" hidden>Copy</button></div>
 <pre id="scenario-example" tabindex="0" aria-label="Example scenario file"><code><span class="k">name:</span> checkout-peak
 <span class="k">type:</span> LOAD
 <span class="k">spec:</span>
@@ -663,7 +627,6 @@ Error Rate       0.0000%</code></pre>
           </div>
         </div>
         <div class="how-copy">
-          <p class="eyebrow">CI gates</p>
           <h2>Make resilience a build step, not a quarterly exercise.</h2>
           <p class="sub">
             Describe a workload and its SLA in a scenario file. Kates runs it, checks every gate
@@ -687,14 +650,18 @@ Error Rate       0.0000%</code></pre>
         <img src="assets/kates-logo.svg" width="72" height="72" alt="">
         <h2>Try the failure before it tries you.</h2>
         <p class="sub">Kates is free and open source. Install it, point it at a cluster, and read the first graded report.</p>
-        <div class="cta-row center">
-          <a class="btn btn-primary" href="https://github.com/bmscomp/kates">Star on GitHub</a>
-          <a class="btn btn-ghost" href="https://bmscomp.github.io/kates/">Read the book</a>
-          <a class="btn btn-ghost" href="https://artifacthub.io/packages/search?repo=kates">Helm charts on Artifact Hub</a>
+        <div class="install">
+          <code id="install-command">brew install bmscomp/tap/kates</code>
+          <button type="button" class="copy" data-copy="#install-command" aria-label="Copy the install command" hidden>Copy</button>
         </div>
-        <p class="install"><code>brew install bmscomp/tap/kates</code></p>
+        <div class="cta-row center">
+          <a class="btn btn-primary" href="#how">Quick start</a>
+          <a class="btn btn-ghost" href="https://bmscomp.github.io/kates/">Read the book</a>
+        </div>
+        <p class="cta-links"><a href="https://github.com/bmscomp/kates">Star on GitHub</a> · <a href="https://artifacthub.io/packages/search?repo=kates">Helm charts on Artifact Hub</a></p>
       </div>
     </section>
+    <p id="copy-status" class="sr-only" role="status"></p>
   </main>
 
   <footer class="footer">
@@ -707,21 +674,22 @@ Error Rate       0.0000%</code></pre>
       </div>
       <nav class="footer-links" aria-label="Footer">
         <div>
-          <h4>Project</h4>
+          <h3>Project</h3>
           <a href="https://github.com/bmscomp/kates">Source code</a>
           <a href="https://github.com/bmscomp/kates/releases/latest">Releases</a>
           <a href="https://github.com/bmscomp/kates/blob/main/CONTRIBUTING.md">Contributing</a>
           <a href="https://github.com/bmscomp/kates/blob/main/LICENSE">License</a>
+          <a href="work-with-us.html">Work with us</a>
         </div>
         <div>
-          <h4>Learn</h4>
+          <h3>Learn</h3>
           <a href="https://bmscomp.github.io/kates/">The book</a>
           <a href="https://bmscomp.github.io/kates/10-cli-reference.html">CLI reference</a>
           <a href="https://bmscomp.github.io/kates/11-api-reference.html">API reference</a>
           <a href="https://bmscomp.github.io/kates/14-recipes.html">Recipes</a>
         </div>
         <div>
-          <h4>Ecosystem</h4>
+          <h3>Ecosystem</h3>
           <a href="https://strimzi.io/">Strimzi</a>
           <a href="https://litmuschaos.io/">LitmusChaos</a>
           <a href="https://kafka.apache.org/">Apache Kafka</a>

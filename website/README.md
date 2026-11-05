@@ -6,14 +6,14 @@ site links to it.
 
 ```
 website/
-├── index.html      the one page
+├── index.html      the main page
+├── work-with-us.html  business enquiries, linked from the menu and footer
 ├── styles.css      the Paper theme (light, EB Garamond headings) and the layout
-├── themes/         alternative palettes (navy, phosphor, ember, slate); add one <link> after styles.css to switch
 ├── site.js         mobile menu, footer year and the animated figures
 ├── CNAME           custom domain (katesplatform.io) for GitHub Pages
 ├── _headers        security and cache headers (Cloudflare Pages, Netlify)
 ├── robots.txt, sitemap.xml
-└── assets/         logo, wordmark, screenshots, social preview (copied from docs/)
+└── assets/         logo, wordmark, screenshots, social preview (copied from docs/), self-hosted fonts
 ```
 
 ## Preview locally
@@ -26,8 +26,9 @@ cd website && python3 -m http.server 8000
 ## Deploy
 
 The site is deployed from this folder by `.github/workflows/website.yml`, which validates
-the HTML on every pull request and publishes to Cloudflare Pages on a push to `main`.
-Setup, once:
+the HTML on every pull request. On a push to `main` it publishes to GitHub Pages, which
+serves the live site (see below), and to Cloudflare Pages if its secrets are set.
+Cloudflare setup, once:
 
 1. Create a Cloudflare Pages project named `kates-website` (direct upload, no Git
    integration: the workflow uploads the folder).

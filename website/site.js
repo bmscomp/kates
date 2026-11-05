@@ -76,41 +76,6 @@ function holdControl(figure) {
   var steps = ['Steady load: measuring the baseline', 'Injecting POD_KILL through LitmusChaos',
     'Broker down: ISR shrinks, P99 climbs', 'Broker back: recovery time measured', 'Run graded A and stored; the CLI exits 0'];
   var btns = arch.querySelectorAll('.arch-tl button'), bar = arch.querySelector('.arch-tl-bar span'), step = arch.querySelector('.arch-step');
-  var kzFig = document.querySelector('.kz');
-  var designBtns = document.querySelectorAll('[data-set-design]');
-  var winTitle = document.getElementById('arch-wintitle'), kzWinTitle = document.getElementById('kz-wintitle');
-  var designOrder = ['grid', 'panels', 'chips'];
-  var designTitles = {
-    grid: 'kates architecture — grid look, C → aurora',
-    panels: 'kates architecture — T → panels, C → dracula',
-    chips: 'kates architecture — classic look, C → chips / aurora'
-  };
-  var kzDesignTitles = {
-    grid: 'kates kafka tui — grid look, C → aurora',
-    panels: 'kates kafka tui — T → panels, C → dracula',
-    chips: 'kates kafka tui — classic look, C → chips / aurora'
-  };
-  function setDesign(name) {
-    arch.setAttribute('data-tui-design', name);
-    if (kzFig) kzFig.setAttribute('data-tui-design', name);
-    if (winTitle && designTitles[name]) winTitle.textContent = designTitles[name];
-    if (kzWinTitle && kzDesignTitles[name]) kzWinTitle.textContent = kzDesignTitles[name];
-    designBtns.forEach(function (b) {
-      b.setAttribute('aria-pressed', b.getAttribute('data-set-design') === name ? 'true' : 'false');
-    });
-  }
-  designBtns.forEach(function (b) {
-    b.addEventListener('click', function () { setDesign(b.getAttribute('data-set-design')); });
-  });
-  document.addEventListener('keydown', function (e) {
-    if (arch.classList.contains('paused') && (!kzFig || kzFig.classList.contains('paused'))) return;
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
-    if (e.key === 'T' || e.key === 'C') {
-      var cur = arch.getAttribute('data-tui-design') || 'grid';
-      var idx = (designOrder.indexOf(cur) + 1) % designOrder.length;
-      setDesign(designOrder[idx]);
-    }
-  });
   var clip = arch.querySelector('#p99-clip rect'), head = arch.querySelector('.p99-head'), val = arch.querySelector('.p99');
   var X0 = 784, W = 132;
   function ms(p) { // illustrative P99 in ms, matching the hero terminal: 17.8 baseline, 41.2 with a broker down
@@ -139,14 +104,17 @@ function holdControl(figure) {
     bar.style.width = p * 100 + '%';
   }
   btns.forEach(function (b, k) {
-    b.addEventListener('click', function () { t = k / N * D; if (reduce) render((k + 0.99) / N); });
+    b.addEventListener('click', function () { t = k / N * D; render(reduce ? (k + 0.99) / N : t / D); });
   });
   if (reduce) return render(0.99);
   holdControl(arch);
+  render(0);
   requestAnimationFrame(function tick(now) {
-    if (last && !arch.classList.contains('paused') && !arch.classList.contains('held')) t = (t + now - last) % D;
+    if (!arch.classList.contains('paused') && !arch.classList.contains('held')) {
+      if (last) t = (t + now - last) % D;
+      render(t / D);
+    }
     last = now;
-    render(t / D);
     requestAnimationFrame(tick);
   });
 })();
@@ -173,7 +141,7 @@ function holdControl(figure) {
     lanes[1].classList.toggle('idle', down);
     lanes[2].classList.toggle('busy', down);
   }
-  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return set(2);
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return set(4);
   var ph = 0, on = true;
   if ('IntersectionObserver' in window) {
     new IntersectionObserver(function (entries) {
@@ -184,4 +152,23 @@ function holdControl(figure) {
   set(0);
   holdControl(kz);
   setInterval(function () { if (on && !kz.classList.contains('held')) set(ph = (ph + 1) % steps.length); }, 2800);
+})();
+
+// Copy buttons stay hidden without the clipboard API, so none can offer what won't work.
+(function () {
+  if (!navigator.clipboard) return;
+  var status = document.getElementById('copy-status');
+  document.querySelectorAll('[data-copy]').forEach(function (btn) {
+    var timer;
+    function report(message) {
+      btn.textContent = status.textContent = message;
+      clearTimeout(timer);
+      timer = setTimeout(function () { btn.textContent = 'Copy'; status.textContent = ''; }, 2000);
+    }
+    btn.hidden = false;
+    btn.addEventListener('click', function () {
+      var text = document.querySelector(btn.getAttribute('data-copy')).textContent.trim();
+      navigator.clipboard.writeText(text).then(function () { report('Copied'); }, function () { report('Failed'); });
+    });
+  });
 })();
