@@ -66,7 +66,7 @@ p code, li code, td code, th code, h2 code, figcaption code {
   padding: 0.1em 0.4em;
   border-radius: 6px;
 }
-h1, h2, h3, h4 { color: var(--heading); margin: 0 0 0.5em; line-height: 1.15; letter-spacing: -0.02em; }
+h1, h2, h3 { color: var(--heading); margin: 0 0 0.5em; line-height: 1.15; letter-spacing: -0.02em; }
 h1 { font-size: clamp(2.2rem, 5.2vw, 3.6rem); font-weight: 600; }
 h2 { font-size: clamp(1.7rem, 3.4vw, 2.5rem); font-weight: 600; }
 h3 { font-size: 1.2rem; font-weight: 600; }
@@ -696,7 +696,7 @@ h1, h2, .brand-name { font-family: "EB Garamond", Georgia, serif; letter-spacing
 .footer-inner { display: grid; grid-template-columns: 1.3fr 2fr; gap: 48px; }
 .footer-brand p { color: var(--on-ink-muted); max-width: 40ch; font-size: 0.95rem; margin-top: 16px; }
 .footer-links { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
-.footer-links h4 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--on-ink-muted); margin-bottom: 14px; }
+.footer-links h3 { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--on-ink-muted); margin-bottom: 14px; }
 .footer-links a { display: block; color: var(--on-ink); font-size: 0.95rem; margin-bottom: 10px; }
 .footer-legal { margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--on-ink-rule); display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; color: var(--on-ink-muted); font-size: 0.82rem; }
 

@@ -25,8 +25,9 @@ cd website && python3 -m http.server 8000
 ## Deploy
 
 The site is deployed from this folder by `.github/workflows/website.yml`, which validates
-the HTML on every pull request and publishes to Cloudflare Pages on a push to `main`.
-Setup, once:
+the HTML on every pull request. On a push to `main` it publishes to GitHub Pages, which
+serves the live site (see below), and to Cloudflare Pages if its secrets are set.
+Cloudflare setup, once:
 
 1. Create a Cloudflare Pages project named `kates-website` (direct upload, no Git
    integration: the workflow uploads the folder).
