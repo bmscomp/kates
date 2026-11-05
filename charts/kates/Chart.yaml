@@ -2,13 +2,14 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Minor: postgresql.allowLibcChange, a new value.
-version: 0.18.0
+# Patch: appVersion and the image tag move to 1.38.0, the tag the v1.38.0
+# release publishes.
+version: 0.18.1
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
 # image.tag in values.yaml pinned to that release.
-appVersion: "1.37.0"
+appVersion: "1.38.0"
 keywords:
   - kafka
   - testing
@@ -27,6 +28,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "appVersion 1.38.0 and the image tag move to 1.38.0. The image takes #607: POST /api/tests honours an Idempotency-Key, a flat request carries an sla, and /api/health lists capabilities. It adds migration V29 (client_key on test runs), which runs on upgrade."
     - kind: security
       description: "ACTION REQUIRED for a release with bundled PostgreSQL that keeps the default image. postgresql.image.tag moves from the moving Debian tag 16 to 16.15-alpine, which has no OS findings under Trivy where Debian has 338, among them libxml2's CVE-2026-6653, which Debian does not plan to fix. Alpine and Debian sort text differently, so the upgrade refuses a release whose data was written on the other libc, and the new check-libc init container refuses it where lookup sees nothing (helm template, Argo CD, a retained volume). Stay on Debian with postgresql.image.tag=16.15, or follow Change the PostgreSQL libc in the upgrade playbook, which uses the new postgresql.allowLibcChange"
     - kind: added
