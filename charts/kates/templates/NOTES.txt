@@ -48,7 +48,7 @@
   Status:
     RBAC:       {{ if .Values.rbac.create }}enabled{{ else }}disabled{{ end }}
     Engine:     {{ .Values.engine.defaultBackend }}
-    Database:   {{ if .Values.postgresql.enabled }}bundled PostgreSQL{{ else if .Values.externalDatabase.enabled }}external{{ else }}none{{ end }}
+    Database:   {{ if .Values.postgresql.enabled }}bundled PostgreSQL{{ else if .Values.cnpg.enabled }}CloudNativePG{{ else if .Values.externalDatabase.enabled }}external{{ else }}none{{ end }}
     Replicas:   {{ if .Values.autoscaling.enabled }}auto ({{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }}){{ else }}{{ .Values.replicaCount }}{{ end }}
 
 {{- if .Values.metrics.serviceMonitor.enabled }}

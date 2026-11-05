@@ -71,6 +71,58 @@ The default deployment uses NodePort for all services (Grafana on 30080, Kafka U
 
 The Kates API keeps every run in PostgreSQL. The `kates` chart runs its own PostgreSQL on a 1 GiB [PersistentVolumeClaim](appendix-a-glossary.md#gl-persistentvolumeclaim) on the cluster's default StorageClass, so runs survive pod restarts; there is no emptyDir mode. For production, point the chart at an external database instead, with `postgresql.enabled: false` and `externalDatabase`, as `values-prod.yaml` does. [Architecture & Design](02-architecture.md) describes what else the Kates API keeps, and [Run Retention](#run-retention) how old runs are pruned.
 
+### A Database That Survives a Node
+
+The bundled PostgreSQL does not recover alone from a node crash: its StatefulSet waits for a pod it cannot confirm dead. To survive one, run PostgreSQL through [CloudNativePG](https://cloudnative-pg.io) with `cnpg.enabled`. Install the operator first, once, with cluster-admin. Give it two replicas on different nodes, because the operator is what performs the failover: on a kind cluster with one replica on the lost node, the failover took 366 s.
+
+```yaml
+# cnpg-operator.yaml
+replicaCount: 2
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: cloudnative-pg
+tolerations:
+  - key: node.kubernetes.io/not-ready
+    operator: Exists
+    effect: NoExecute
+    tolerationSeconds: 30
+  - key: node.kubernetes.io/unreachable
+    operator: Exists
+    effect: NoExecute
+    tolerationSeconds: 30
+```
+
+```bash
+helm upgrade --install cnpg cloudnative-pg \
+  --repo https://cloudnative-pg.github.io/charts \
+  --version 0.29.1 -n cnpg-system --create-namespace -f cnpg-operator.yaml --wait
+helm upgrade --install kates charts/kates -n kates \
+  --set postgresql.enabled=false --set cnpg.enabled=true
+```
+
+This gives three instances, each required on its own node, so `cnpg.instances` must not exceed the nodes you have. With the operator set up as above, killing the node under the primary brought database reads back through the same Kates API pod in 83 s. The primary stays writable with no standby left, so a double failure can lose the last writes. No backups are configured; set them up through the operator.
+
+To move an existing install, dump the data first, because the upgrade starts an empty database. Run this in the release's namespace with its usual values:
+
+```bash
+kubectl scale deployment/kates --replicas=0
+kubectl exec kates-postgresql-0 -- pg_dump -U kates --clean --if-exists \
+  --no-owner --no-privileges kates > kates.sql
+helm upgrade kates charts/kates --reuse-values \
+  --set postgresql.enabled=false --set cnpg.enabled=true --set migration.enabled=false
+kubectl wait --for=condition=Ready cluster.postgresql.cnpg.io/kates-db --timeout=300s
+kubectl scale deployment/kates --replicas=0
+(echo 'SET ROLE kates;'; cat kates.sql) | kubectl exec -i kates-db-1 -c postgres -- \
+  psql -d kates -q -v ON_ERROR_STOP=1
+kubectl scale deployment/kates --replicas=1
+```
+
+The old PersistentVolumeClaim stays until you delete it.
+
 For Kafka broker storage, always use persistent volumes — even in development. Kafka's log retention depends on data being durable, and losing broker data mid-test invalidates results.
 
 ## Resource Sizing

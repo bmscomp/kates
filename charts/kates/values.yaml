@@ -579,8 +579,8 @@ metrics:
 
 # -- Bundled PostgreSQL configuration.
 # A self-contained single-instance StatefulSet on the official `postgres`
-# image (no Bitnami). For production HA, set enabled=false and point
-# externalDatabase at a managed cluster (CloudNativePG recommended).
+# image (no Bitnami). It does not recover alone from a node crash: for
+# production HA, set enabled=false and use cnpg below.
 postgresql:
   # -- Deploy bundled PostgreSQL
   enabled: true
@@ -640,10 +640,30 @@ postgresql:
     # -- Minimum pool size
     minSize: "5"
 
+# -- Replicated PostgreSQL through CloudNativePG, which survives a node crash.
+# Needs the operator installed first. Set postgresql.enabled=false with it; the
+# database and owner names come from externalDatabase.database and .username,
+# whose enabled stays false. No backups are configured: see the operator's docs.
+cnpg:
+  # -- Render a CloudNativePG Cluster and connect the API to its primary
+  enabled: false
+  # -- PostgreSQL instances, each on its own node
+  instances: 3
+  storage:
+    # -- Volume size of each instance
+    size: 10Gi
+    # -- Storage class; the cluster's default when empty
+    storageClass: ""
+  # -- Requests and limits of each instance
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
 # -- External database configuration (when postgresql.enabled=false).
-# Recommended for production HA: run a CloudNativePG `Cluster` (official
-# postgres images, streaming replication, backups) and point host/port at its
-# `-rw` service, e.g. host: kates-db-rw.database.svc — no Bitnami involved.
 externalDatabase:
   # -- Enable external database
   enabled: false

@@ -47,6 +47,15 @@ spec:
         - port: 5432
           protocol: TCP
     {{- end }}
+    {{- if .Values.cnpg.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ include "kates.cnpg.fullname" . }}
+      ports:
+        - port: 5432
+          protocol: TCP
+    {{- end }}
     {{- if .Values.externalDatabase.enabled }}
     - to:
         - ipBlock:
