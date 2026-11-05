@@ -292,15 +292,9 @@ kates gate --min-grade C --records 100000</code></pre>
           </p>
         </div>
 
-        <figure class="arch" data-tui-design="grid">
+        <figure class="arch">
           <div class="arch-winbar">
             <div class="arch-dots" aria-hidden="true"><span></span><span></span><span></span></div>
-            <div class="arch-wintitle" id="arch-wintitle">kates architecture — grid look</div>
-            <div class="arch-designs" role="group" aria-label="TUI design presets">
-              <button type="button" data-set-design="grid" aria-pressed="true">1 · Grid · Aurora</button>
-              <button type="button" data-set-design="panels" aria-pressed="false">2 · Panels · Dracula</button>
-              <button type="button" data-set-design="chips" aria-pressed="false">3 · Classic · Chips</button>
-            </div>
             <button type="button" class="arch-pause" hidden>Pause animation</button>
           </div>
           <div class="arch-tui-head" aria-hidden="true">
@@ -318,9 +312,6 @@ kates gate --min-grade C --records 100000</code></pre>
               <marker id="arr-fault" class="mk-fault" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" /></marker>
               <marker id="arr-ok" class="mk-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" /></marker>
               <clipPath id="p99-clip"><rect x="784" y="190" width="0" height="150" /></clipPath>
-              <pattern id="tui-stripes" width="8" height="22" patternUnits="userSpaceOnUse">
-                <line x1="0" y1="21.5" x2="8" y2="21.5" class="tui-stripe-line" />
-              </pattern>
             </defs>
 
             <rect x="240" y="16" width="704" height="368" rx="6" class="cluster" />
@@ -365,7 +356,6 @@ kates gate --min-grade C --records 100000</code></pre>
 
             <g class="box box-cli node" data-node="cli" tabindex="0" role="img" aria-label="kates CLI" style="--d:0" data-note="The kates CLI runs on a laptop or a CI runner and only ever talks to the Kates API.">
               <rect class="pane-bg" x="16" y="140" width="180" height="110" rx="6" />
-              <rect class="pane-stripes" x="17" y="141" width="178" height="108" rx="5" fill="url(#tui-stripes)" />
               <rect class="title-cut" x="28" y="131" width="86" height="18" rx="3" />
               <text x="34" y="144" class="t-border-title">kates CLI</text>
               <text x="106" y="176" text-anchor="middle" class="t-title">kates CLI</text>
@@ -375,7 +365,6 @@ kates gate --min-grade C --records 100000</code></pre>
             <g class="stamp" data-ph="4" aria-hidden="true"><circle cx="190" cy="142" r="20" /><text x="190" y="149" text-anchor="middle">A</text></g>
             <g class="box box-api node" data-node="api" tabindex="0" role="img" aria-label="Kates API" style="--d:1" data-note="The Kates API runs the load, drives the faults, grades every run and sends the webhooks.">
               <rect class="pane-bg" x="290" y="140" width="180" height="110" rx="6" />
-              <rect class="pane-stripes" x="291" y="141" width="178" height="108" rx="5" fill="url(#tui-stripes)" />
               <rect class="title-cut" x="302" y="131" width="86" height="18" rx="3" />
               <text x="308" y="144" class="t-border-title">Kates API</text>
               <text x="380" y="176" text-anchor="middle" class="t-title">Kates API</text>
@@ -384,7 +373,6 @@ kates gate --min-grade C --records 100000</code></pre>
             </g>
             <g class="box node" data-node="kafka" tabindex="0" role="img" aria-label="Kafka" style="--d:2" data-note="Kafka managed by Strimzi, one broker per zone: the system under test.">
               <rect class="pane-bg kafka-hit" x="560" y="44" width="180" height="118" rx="6" />
-              <rect class="pane-stripes" x="561" y="45" width="178" height="116" rx="5" fill="url(#tui-stripes)" />
               <rect class="title-cut" x="572" y="35" width="54" height="18" rx="3" />
               <text x="578" y="48" class="t-border-title">Kafka</text>
               <text x="650" y="76" text-anchor="middle" class="t-title">Kafka</text>
@@ -396,7 +384,6 @@ kates gate --min-grade C --records 100000</code></pre>
             </g>
             <g class="box node" data-node="litmus" tabindex="0" role="img" aria-label="LitmusChaos" style="--d:3" data-note="LitmusChaos carries out 11 disruption types against the brokers on a default install, then lets them recover.">
               <rect class="pane-bg litmus-hit" x="560" y="206" width="180" height="68" rx="6" />
-              <rect class="pane-stripes" x="561" y="207" width="178" height="66" rx="5" fill="url(#tui-stripes)" />
               <rect class="title-cut" x="572" y="197" width="102" height="18" rx="3" />
               <text x="578" y="210" class="t-border-title">LitmusChaos</text>
               <text x="650" y="236" text-anchor="middle" class="t-title">LitmusChaos</text>
@@ -404,7 +391,6 @@ kates gate --min-grade C --records 100000</code></pre>
             </g>
             <g class="box node" data-node="pg" tabindex="0" role="img" aria-label="PostgreSQL" style="--d:4" data-note="PostgreSQL keeps every run, so last month's numbers are there to compare with today's.">
               <rect class="pane-bg" x="560" y="298" width="180" height="62" rx="6" />
-              <rect class="pane-stripes" x="561" y="299" width="178" height="60" rx="5" fill="url(#tui-stripes)" />
               <rect class="title-cut" x="572" y="289" width="94" height="18" rx="3" />
               <text x="578" y="302" class="t-border-title">PostgreSQL</text>
               <text x="650" y="324" text-anchor="middle" class="t-title">PostgreSQL</text>
@@ -412,7 +398,6 @@ kates gate --min-grade C --records 100000</code></pre>
             </g>
             <g class="box node" data-node="mon" tabindex="0" role="img" aria-label="Prometheus and Grafana" style="--d:5" data-note="Prometheus scrapes the Kates API and Kafka; 12 Grafana dashboards and the alert rules come with the charts.">
               <rect class="pane-bg" x="770" y="44" width="160" height="316" rx="6" />
-              <rect class="pane-stripes" x="771" y="45" width="158" height="314" rx="5" fill="url(#tui-stripes)" />
               <rect class="title-cut" x="782" y="35" width="72" height="18" rx="3" />
               <text x="788" y="48" class="t-border-title">Grafana</text>
               <text x="850" y="76" text-anchor="middle" class="t-title">Grafana</text>
@@ -523,15 +508,9 @@ kates gate --min-grade C --records 100000</code></pre>
           <figcaption aria-live="polite">The CLI never touches Kafka directly: the API inside the cluster runs the load, drives the faults, grades the result and keeps the history.</figcaption>
         </figure>
 
-        <figure class="kz" data-phase="0" data-tui-design="grid">
+        <figure class="kz" data-phase="0">
           <div class="arch-winbar">
             <div class="arch-dots" aria-hidden="true"><span></span><span></span><span></span></div>
-            <div class="arch-wintitle" id="kz-wintitle">kates kafka tui — grid look</div>
-            <div class="arch-designs" role="group" aria-label="TUI design presets">
-              <button type="button" data-set-design="grid" aria-pressed="true">1 · Grid · Aurora</button>
-              <button type="button" data-set-design="panels" aria-pressed="false">2 · Panels · Dracula</button>
-              <button type="button" data-set-design="chips" aria-pressed="false">3 · Classic · Chips</button>
-            </div>
             <button type="button" class="arch-pause" hidden>Pause animation</button>
           </div>
           <div class="arch-tui-head">
@@ -565,30 +544,30 @@ kates gate --min-grade C --records 100000</code></pre>
           </div>
           <figcaption><b>Healthy.</b> ISR back to 3, preferred leader restored. Recovered in 6.4 s, 0 records lost.</figcaption>
         </figure>
+      </div>
+    </section>
 
+    <!-- ============ CLI ============ -->
+    <section class="section" id="cli">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Watch the run from your terminal.</h2>
+        </div>
         <div class="screens">
           <figure>
-            <img src="assets/kates-lab-panels-dracula.png" width="1024" height="669" alt="kates lab interactive performance tuning in the Panels look with Dracula colors" loading="lazy">
-            <figcaption><b><code>kates lab</code> · Panels look &amp; Dracula colors.</b> Tune producer parameters, run load iterations, compare P99 latency and throughput deltas, and switch looks (<code>T</code>) or color palettes (<code>C</code>) live.</figcaption>
+            <img src="assets/kates-dashboard-grid-aurora.png" width="1024" height="669" alt="kates dashboard showing cluster health, active workloads and completed runs" loading="lazy">
+            <figcaption><b><code>kates dashboard</code>.</b> Live view of API and Kafka broker health, under-replicated partitions, active workloads, completed runs, and real-time throughput and P99.</figcaption>
           </figure>
           <figure>
-            <img src="assets/kates-lab-classic-aurora.png" width="1024" height="669" alt="kates lab interactive performance tuning in the Classic look with Aurora colors" loading="lazy">
-            <figcaption><b><code>kates lab</code> · Classic look &amp; Aurora colors.</b> The same interactive tuning session rendered in the Classic borderless layout with the Aurora palette; persist your favorite with <code>kates theme set</code>.</figcaption>
-          </figure>
-          <figure>
-            <img src="assets/kates-dashboard-grid-aurora.png" width="1024" height="669" alt="kates dashboard live cluster and test monitor in the Grid look with Aurora colors" loading="lazy">
-            <figcaption><b><code>kates dashboard</code> · Grid look &amp; Aurora colors.</b> Live 1s-refreshing view of API and Kafka broker health, under-replicated partitions, active workloads, completed runs, and real-time throughput/P99 sparklines.</figcaption>
-          </figure>
-          <figure>
-            <img src="assets/kates-ctx-profiles-chips.png" width="1024" height="316" alt="kates ctx profiles set interactive selector in the Chips look" loading="lazy">
-            <figcaption><b><code>kates ctx profiles set</code> · Chips look.</b> Scope the CLI to the command groups you need—<code>performance</code>, <code>integrity</code>, <code>chaos</code>, <code>topology</code>, <code>security</code>, or <code>deploy</code>—per context.</figcaption>
+            <img src="assets/kates-lab-panels-dracula.png" width="1024" height="669" alt="kates lab tuning producer parameters and comparing load iterations" loading="lazy">
+            <figcaption><b><code>kates lab</code>.</b> Tune producer parameters, run load iterations, and compare P99 latency and throughput between them.</figcaption>
           </figure>
         </div>
       </div>
     </section>
 
     <!-- ============ COMPARE ============ -->
-    <section class="section" id="compare">
+    <section class="section alt" id="compare">
       <div class="wrap">
         <div class="section-head">
           <h2>Benchmark tools measure. Kates measures under failure and keeps score.</h2>
@@ -618,7 +597,7 @@ kates gate --min-grade C --records 100000</code></pre>
     </section>
 
     <!-- ============ CI GATES ============ -->
-    <section class="section alt" id="ci">
+    <section class="section" id="ci">
       <div class="wrap how-grid reverse">
         <div class="how-code">
           <div class="code-block">

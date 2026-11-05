@@ -76,31 +76,6 @@ function holdControl(figure) {
   var steps = ['Steady load: measuring the baseline', 'Injecting POD_KILL through LitmusChaos',
     'Broker down: ISR shrinks, P99 climbs', 'Broker back: recovery time measured', 'Run graded A and stored; the CLI exits 0'];
   var btns = arch.querySelectorAll('.arch-tl button'), bar = arch.querySelector('.arch-tl-bar span'), step = arch.querySelector('.arch-step');
-  var kzFig = document.querySelector('.kz');
-  var designBtns = document.querySelectorAll('[data-set-design]');
-  var winTitle = document.getElementById('arch-wintitle'), kzWinTitle = document.getElementById('kz-wintitle');
-  var designTitles = {
-    grid: 'kates architecture — grid look',
-    panels: 'kates architecture — panels look',
-    chips: 'kates architecture — classic look'
-  };
-  var kzDesignTitles = {
-    grid: 'kates kafka tui — grid look',
-    panels: 'kates kafka tui — panels look',
-    chips: 'kates kafka tui — classic look'
-  };
-  function setDesign(name) {
-    arch.setAttribute('data-tui-design', name);
-    if (kzFig) kzFig.setAttribute('data-tui-design', name);
-    if (winTitle && designTitles[name]) winTitle.textContent = designTitles[name];
-    if (kzWinTitle && kzDesignTitles[name]) kzWinTitle.textContent = kzDesignTitles[name];
-    designBtns.forEach(function (b) {
-      b.setAttribute('aria-pressed', b.getAttribute('data-set-design') === name ? 'true' : 'false');
-    });
-  }
-  designBtns.forEach(function (b) {
-    b.addEventListener('click', function () { setDesign(b.getAttribute('data-set-design')); });
-  });
   var clip = arch.querySelector('#p99-clip rect'), head = arch.querySelector('.p99-head'), val = arch.querySelector('.p99');
   var X0 = 784, W = 132;
   function ms(p) { // illustrative P99 in ms, matching the hero terminal: 17.8 baseline, 41.2 with a broker down
