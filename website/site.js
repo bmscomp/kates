@@ -79,16 +79,15 @@ function holdControl(figure) {
   var kzFig = document.querySelector('.kz');
   var designBtns = document.querySelectorAll('[data-set-design]');
   var winTitle = document.getElementById('arch-wintitle'), kzWinTitle = document.getElementById('kz-wintitle');
-  var designOrder = ['grid', 'panels', 'chips'];
   var designTitles = {
-    grid: 'kates architecture — grid look, C → aurora',
-    panels: 'kates architecture — T → panels, C → dracula',
-    chips: 'kates architecture — classic look, C → chips / aurora'
+    grid: 'kates architecture — grid look',
+    panels: 'kates architecture — panels look',
+    chips: 'kates architecture — classic look'
   };
   var kzDesignTitles = {
-    grid: 'kates kafka tui — grid look, C → aurora',
-    panels: 'kates kafka tui — T → panels, C → dracula',
-    chips: 'kates kafka tui — classic look, C → chips / aurora'
+    grid: 'kates kafka tui — grid look',
+    panels: 'kates kafka tui — panels look',
+    chips: 'kates kafka tui — classic look'
   };
   function setDesign(name) {
     arch.setAttribute('data-tui-design', name);
@@ -101,15 +100,6 @@ function holdControl(figure) {
   }
   designBtns.forEach(function (b) {
     b.addEventListener('click', function () { setDesign(b.getAttribute('data-set-design')); });
-  });
-  document.addEventListener('keydown', function (e) {
-    if (arch.classList.contains('paused') && (!kzFig || kzFig.classList.contains('paused'))) return;
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
-    if (e.key === 'T' || e.key === 'C') {
-      var cur = arch.getAttribute('data-tui-design') || 'grid';
-      var idx = (designOrder.indexOf(cur) + 1) % designOrder.length;
-      setDesign(designOrder[idx]);
-    }
   });
   var clip = arch.querySelector('#p99-clip rect'), head = arch.querySelector('.p99-head'), val = arch.querySelector('.p99');
   var X0 = 784, W = 132;
@@ -139,14 +129,17 @@ function holdControl(figure) {
     bar.style.width = p * 100 + '%';
   }
   btns.forEach(function (b, k) {
-    b.addEventListener('click', function () { t = k / N * D; if (reduce) render((k + 0.99) / N); });
+    b.addEventListener('click', function () { t = k / N * D; render(reduce ? (k + 0.99) / N : t / D); });
   });
   if (reduce) return render(0.99);
   holdControl(arch);
+  render(0);
   requestAnimationFrame(function tick(now) {
-    if (last && !arch.classList.contains('paused') && !arch.classList.contains('held')) t = (t + now - last) % D;
+    if (!arch.classList.contains('paused') && !arch.classList.contains('held')) {
+      if (last) t = (t + now - last) % D;
+      render(t / D);
+    }
     last = now;
-    render(t / D);
     requestAnimationFrame(tick);
   });
 })();
@@ -173,7 +166,7 @@ function holdControl(figure) {
     lanes[1].classList.toggle('idle', down);
     lanes[2].classList.toggle('busy', down);
   }
-  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return set(2);
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return set(4);
   var ph = 0, on = true;
   if ('IntersectionObserver' in window) {
     new IntersectionObserver(function (entries) {

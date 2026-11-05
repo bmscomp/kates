@@ -8,12 +8,11 @@ site links to it.
 website/
 ├── index.html      the one page
 ├── styles.css      the Paper theme (light, EB Garamond headings) and the layout
-├── themes/         alternative palettes (navy, phosphor, ember, slate); add one <link> after styles.css to switch
 ├── site.js         mobile menu, footer year and the animated figures
 ├── CNAME           custom domain (katesplatform.io) for GitHub Pages
 ├── _headers        security and cache headers (Cloudflare Pages, Netlify)
 ├── robots.txt, sitemap.xml
-└── assets/         logo, wordmark, screenshots, social preview (copied from docs/)
+└── assets/         logo, wordmark, screenshots, social preview (copied from docs/), self-hosted fonts
 ```
 
 ## Preview locally
