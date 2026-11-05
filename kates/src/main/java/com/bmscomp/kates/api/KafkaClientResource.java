@@ -217,6 +217,10 @@ public class KafkaClientResource {
             topicService.createTopic(request.name(), partitions, rf, request.configs());
             var detail = topicService.describeCreatedTopic(request.name());
             return Response.status(201).entity(detail).build();
+        } catch (IllegalArgumentException e) {
+            return Response.status(400)
+                    .entity(ApiError.of(400, "Bad Request", e.getMessage()))
+                    .build();
         } catch (Exception e) {
             return Response.serverError()
                     .entity(ApiError.of(500, "Kafka Error", e.getMessage()))

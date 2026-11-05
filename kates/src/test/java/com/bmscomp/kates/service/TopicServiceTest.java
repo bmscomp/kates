@@ -66,6 +66,24 @@ class TopicServiceTest {
     }
 
     @Test
+    void createTopicRefusesAReplicationFactorThatWouldWrap() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> topicService.createTopic("test-topic", 1, Short.MAX_VALUE + 1, null));
+        assertThrows(IllegalArgumentException.class, () -> topicService.createTopic("test-topic", 1, -2, null));
+        verify(mockClient, never()).createTopics(any());
+    }
+
+    @Test
+    void createTopicKeepsTheBrokerDefaultReplicationFactor() {
+        CreateTopicsResult result = mock(CreateTopicsResult.class);
+        when(result.all()).thenReturn(KafkaFuture.completedFuture(null));
+        when(mockClient.createTopics(any())).thenReturn(result);
+
+        assertDoesNotThrow(() -> topicService.createTopic("test-topic", 1, -1, null));
+    }
+
+    @Test
     void deleteTopicSucceeds() {
         DeleteTopicsResult result = mock(DeleteTopicsResult.class);
         when(result.all()).thenReturn(KafkaFuture.completedFuture(null));
