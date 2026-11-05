@@ -347,6 +347,29 @@ kates health
 Run the image command above, then `kates version`. The first names the Kates API's image, and the second reports only the CLI you typed it into, so the two can differ without anything being wrong.
 :::
 
+### Change the PostgreSQL libc
+
+From chart 0.18.0 the bundled PostgreSQL runs on `postgres:16.15-alpine`, where a release installed earlier runs on Debian. Alpine uses musl and Debian uses glibc, and the two sort text differently. On data written by the other libc, PostgreSQL starts normally, but its text indexes miss rows. So the chart refuses the upgrade, and a `check-libc` init container refuses the same data where Helm can't see it: under Argo CD, or on a volume kept from an earlier install.
+
+To stay on Debian, add `--set-string postgresql.image.tag=16.15` to the upgrade. To move to Alpine, take a backup and allow a short outage, then keep the Kates API down while you rebuild the indexes:
+
+```bash
+# Nothing writes to the database from here on
+kubectl scale deployment kates -n kates --replicas=0
+
+# Start the database on Alpine; a mirror's image name goes here
+kubectl set image statefulset kates-postgresql -n kates \
+  postgresql=postgres:16.15-alpine
+kubectl rollout status statefulset kates-postgresql -n kates --timeout=300s
+
+# Rebuild every index, then clear the glibc version musl has no value for
+kubectl exec -n kates kates-postgresql-0 -- reindexdb -U kates --all
+kubectl exec -n kates kates-postgresql-0 -- psql -U kates -d kates \
+  -c 'UPDATE pg_database SET datcollversion = NULL'
+```
+
+Then run Step 2 with `--set postgresql.allowLibcChange=true` added. The flag tells `check-libc` to accept the rebuilt data, and the upgrade brings the Kates API back. Leave the flag out of later upgrades.
+
 ### Upgrade a Kind Cluster's Local Image
 
 On a Kind cluster, `kates deploy` runs a local native image pinned with `pullPolicy: Never` instead of a published tag. It is `kates:native-local`, built from your working tree, or else the `kates:native` that `make kates-native` pulled from the registry or built. Neither tag changes from one build to the next. There, check out the new version, build `kates:native-local` from it, and roll the Deployment onto that tag with an annotation that carries the image ID; a release that ran `kates:native` moves to it. Without the annotation the rendered Deployment is identical and nothing restarts:

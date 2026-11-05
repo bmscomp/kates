@@ -292,6 +292,12 @@ jobs:
             exit 1
           fi
           echo "OK: an existing database Secret reaches the API, PostgreSQL and the backup"
+          # The init container is what protects a release lookup cannot see.
+          pg=$(helm template kates charts/kates/ --show-only templates/postgresql.yaml)
+          if ! grep -q 'name: check-libc' <<< "$pg" || ! grep -q 'image: "postgres:16.15-alpine"' <<< "$pg"; then
+            echo "::error::PostgreSQL lost its pinned Alpine image or its check-libc init container"
+            exit 1
+          fi
 
       # networkPolicy.kafka.namespace went unread for releases: the policy
       # always allowed `kafka`, kept Trogdor's 8889 to `monitoring` and had no

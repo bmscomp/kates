@@ -2,8 +2,8 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Minor: cnpg, a new value block.
-version: 0.17.0
+# Minor: postgresql.allowLibcChange, a new value.
+version: 0.18.0
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -27,6 +27,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: security
+      description: "ACTION REQUIRED for a release with bundled PostgreSQL that keeps the default image. postgresql.image.tag moves from the moving Debian tag 16 to 16.15-alpine, which has no OS findings under Trivy where Debian has 338, among them libxml2's CVE-2026-6653, which Debian does not plan to fix. Alpine and Debian sort text differently, so the upgrade refuses a release whose data was written on the other libc, and the new check-libc init container refuses it where lookup sees nothing (helm template, Argo CD, a retained volume). Stay on Debian with postgresql.image.tag=16.15, or follow Change the PostgreSQL libc in the upgrade playbook, which uses the new postgresql.allowLibcChange"
     - kind: added
       description: "cnpg.enabled renders a CloudNativePG Cluster and connects the API to its primary, so the database survives a node crash. It needs the operator installed first and postgresql.enabled=false. Off by default."
     - kind: added

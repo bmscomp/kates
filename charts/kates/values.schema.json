@@ -585,6 +585,7 @@
                         "tag": { "type": "string" }
                     }
                 },
+                "allowLibcChange": { "type": "boolean" },
                 "auth": {
                     "type": "object",
                     "properties": {
