@@ -1,0 +1,133 @@
+name: Publish · Operator
+
+# The operator's image and chart, on an operator-v<version> tag. It lives apart
+# from release.yml on purpose: the operator ships on its own versions, and a
+# v* Kates release never sees it.
+
+on:
+  push:
+    tags:
+      - "operator-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-operator-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/bmscomp/kates-operator
+  CHART_REGISTRY: oci://ghcr.io/bmscomp/charts
+  # github.ref, so a signature names this tag, as publish-charts.yml's do.
+  IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/publish-operator.yml@${{ github.ref }}
+  ISSUER: https://token.actions.githubusercontent.com
+
+jobs:
+  check:
+    name: Tag matches the chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: version
+        run: |
+          set -euo pipefail
+          version=${GITHUB_REF_NAME#operator-v}
+          chart=$(yq .version operator/chart/Chart.yaml)
+          app=$(yq .appVersion operator/chart/Chart.yaml)
+          if [ "${version}" != "${chart}" ] || [ "${version}" != "${app}" ]; then
+            echo "::error::tag ${version}, chart ${chart}, appVersion ${app}: all three must match"
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+  build:
+    name: Build (${{ matrix.arch }})
+    needs: check
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - {arch: amd64, runner: ubuntu-latest}
+          - {arch: arm64, runner: ubuntu-24.04-arm}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: operator/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          push: true
+          tags: ${{ env.IMAGE }}:sha-${{ github.sha }}-${{ matrix.arch }}
+          provenance: mode=max
+          sbom: true
+
+  publish:
+    name: Merge, sign, push the chart
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # cosign keyless signing
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/load-versions
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Helm logs in
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: helm registry login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin <<<"${TOKEN}"
+
+      - name: Merge and sign the image
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create -t "${IMAGE}:${VERSION}" \
+            "${IMAGE}:sha-${GITHUB_SHA}-amd64" "${IMAGE}:sha-${GITHUB_SHA}-arm64"
+          digest=$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          cosign sign --yes "${IMAGE}@${digest}"
+          cosign verify "${IMAGE}@${digest}" --certificate-identity "${IDENTITY}" \
+            --certificate-oidc-issuer "${ISSUER}" > /dev/null
+
+      - name: Push and sign the chart
+        run: |
+          set -euo pipefail
+          # helm package is not reproducible: a re-run would replace a digest
+          # someone may already pin, so a published version is never pushed again.
+          if helm show chart "${CHART_REGISTRY}/kates-operator" --version "${VERSION}" > /dev/null 2>&1; then
+            echo "kates-operator ${VERSION} is already published"
+            exit 0
+          fi
+          helm package operator/chart --destination .build/
+          out=$(helm push ".build/kates-operator-${VERSION}.tgz" "${CHART_REGISTRY}" 2>&1)
+          echo "${out}"
+          digest=$(sed -n 's/^Digest: //p' <<<"${out}")
+          repo=ghcr.io/bmscomp/charts/kates-operator
+          cosign sign --yes "${repo}@${digest}"
+          cosign verify "${repo}@${digest}" --certificate-identity "${IDENTITY}" \
+            --certificate-oidc-issuer "${ISSUER}" > /dev/null

@@ -15,6 +15,8 @@ schemars = "1"
 serde = { version = "1", features = ["derive"] }
 serde-saphyr = "2"
 serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }

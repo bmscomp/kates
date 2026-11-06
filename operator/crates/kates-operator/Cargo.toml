@@ -1,0 +1,41 @@
+[package]
+name = "kates-operator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+telemetry = ["dep:opentelemetry-otlp"]
+
+[dependencies]
+kates-client = { path = "../kates-client" }
+kates-crds = { path = "../kates-crds" }
+futures = "0.3"
+http = "1"
+jiff = "0.2"
+json-patch = "4"
+kube-lease-manager = "0.13"
+secrecy = "0.10"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+# k8s-openapi refuses to build unless the binary names a Kubernetes version.
+k8s-openapi.workspace = true
+kube.workspace = true
+opentelemetry = { version = "0.33", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["grpc-tonic", "tls-aws-lc", "trace"], optional = true }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace"] }
+prometheus-client = "0.25"
+rustls = "0.23"
+tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tracing = "0.1"
+tracing-opentelemetry = { version = "0.34", default-features = false }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+[dev-dependencies]
+tower-test = "0.4"
+
+[lints]
+workspace = true

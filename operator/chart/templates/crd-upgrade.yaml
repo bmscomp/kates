@@ -1,0 +1,83 @@
+{{- if and .Values.crdUpgrade.enabled .Values.rbac.clusterRoles.create }}
+{{- $name := printf "kates-operator-crd-upgrade-%s" .Release.Namespace | trunc 63 | trimSuffix "-" }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kates-operator-crd-upgrade
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    resourceNames: ["katestests.kates.io", "kafkacompliances.kates.io"]
+    verbs: ["get", "create", "patch"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: kates-operator-crd-upgrade
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kates-operator-crd-upgrade
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- toYaml (merge (dict "app.kubernetes.io/component" "crd-upgrade" "app.kubernetes.io/managed-by" .Release.Service) .Values.podLabels) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: kates-operator-crd-upgrade
+      {{- include "kates-operator.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- include "kates-operator.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: crd-upgrade
+          image: {{ include "kates-operator.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["crds", "apply"]
+          securityContext:
+            {{- include "kates-operator.securityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.crdUpgrade.resources | nindent 12 }}
+{{- end }}

@@ -1,0 +1,17 @@
+apiVersion: v2
+name: kates-operator
+description: Kates runs and compliance checks as Kubernetes resources, driving an existing Kates API
+type: application
+version: 0.1.1
+appVersion: "0.1.1"
+kubeVersion: ">=1.29.0-0"
+home: https://github.com/bmscomp/kates
+sources:
+  - https://github.com/bmscomp/kates
+maintainers:
+  - name: bmscomp
+    url: https://github.com/bmscomp
+keywords:
+  - kafka
+  - kates
+  - operator

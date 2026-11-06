@@ -1,0 +1,12 @@
+apiVersion: kates.io/v1alpha1
+kind: KatesTest
+metadata:
+  name: load-gate
+spec:
+  type: LOAD
+  spec:
+    numRecords: 5000
+    recordSize: 256
+    acks: all
+  sla:
+    minRecordsProcessed: 1000

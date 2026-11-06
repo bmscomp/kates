@@ -1,0 +1,110 @@
+{{- $name := include "kates-operator.fullname" . -}}
+{{- $clusterScoped := .Values.rbac.clusterRoles.create -}}
+{{- if not $clusterScoped }}
+{{- if or .Values.watchNamespaces .Values.watchAnyNamespace }}
+{{- fail "rbac.clusterRoles.create=false installs in the release namespace alone: leave watchNamespaces and watchAnyNamespace unset" }}
+{{- end }}
+{{- if .Values.kafka.namespaces }}
+{{- fail "rbac.clusterRoles.create=false takes no kafka.namespaces: a Kafka namespace's Role is that namespace's admin's to apply, and compliance then runs on its interval" }}
+{{- end }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kates-operator
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+rules:
+  {{- include "kates-operator.rules" . | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kates-operator
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kates-operator
+subjects:
+  - kind: ServiceAccount
+    name: kates-operator
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kates-operator-namespaced-{{ .Release.Namespace }}
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+rules:
+  {{- include "kates-operator.rules" . | nindent 2 }}
+  {{- if .Values.watchAnyNamespace }}
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkas"]
+    verbs: ["get", "list", "watch"]
+  {{- end }}
+{{- if .Values.watchAnyNamespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kates-operator-namespaced-{{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: kates-operator
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+{{- $root := . }}
+{{- range ternary .Values.watchNamespaces (list .Release.Namespace) (gt (len .Values.watchNamespaces) 0) }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ . }}
+  labels:
+    {{- include "kates-operator.labels" $root | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kates-operator-namespaced-{{ $root.Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: kates-operator
+    namespace: {{ $root.Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kates-operator-leader-election
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kates-operator-leader-election
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kates-operator-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: kates-operator
+    namespace: {{ .Release.Namespace }}

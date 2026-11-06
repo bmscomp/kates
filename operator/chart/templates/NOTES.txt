@@ -1,0 +1,10 @@
+kates-operator reconciles KatesTest and KafkaCompliance in: {{ include "kates-operator.namespaces" . }}
+
+Each of those namespaces needs a Secret named kates-connection (keys url, apiKey, optional caBundle):
+
+  kubectl create secret generic kates-connection -n <namespace> \
+    --from-literal=url=http://kates.kates.svc:8080 --from-literal=apiKey=<a key with read, test:run>
+
+Then:
+
+  kubectl get katestests,kafkacompliances -A

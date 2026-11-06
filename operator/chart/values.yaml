@@ -1,0 +1,99 @@
+# The Kates operator. It drives a Kates API that is already running and never
+# installs one. A resource reads its API and key from the Secret
+# kates-connection in its own namespace (keys url, apiKey, optional caBundle).
+
+global:
+  # -- Registry prepended to the image, with a slash, for clusters that pull
+  # from a mirror.
+  imageRegistry: ""
+  # -- Pull secrets for that registry, as names or {name: …}.
+  imagePullSecrets: []
+
+image:
+  repository: ghcr.io/bmscomp/kates-operator
+  # -- Empty: the chart's appVersion.
+  tag: ""
+  # -- sha256:… pins by content and wins over the tag.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# -- Pull secrets of this chart's pods.
+imagePullSecrets: []
+
+# -- Namespaces whose resources this release reconciles. Empty: its own.
+watchNamespaces: []
+# -- Reconcile every namespace, with a ClusterRoleBinding.
+watchAnyNamespace: false
+
+kafka:
+  # -- Namespaces whose Strimzi Kafkas trigger a compliance check when they
+  # change. Empty: checks run on their interval only.
+  namespaces: []
+
+rbac:
+  clusterRoles:
+    # -- false renders nothing cluster-scoped, for a namespace admin: apply the
+    # CRDs and aggregate-roles.yaml once as a cluster admin, and install with
+    # --skip-crds. Not with watchNamespaces or watchAnyNamespace.
+    create: true
+  aggregateRoles:
+    # -- Fold the kinds into the built-in view, edit and admin roles.
+    create: true
+  # -- Render the Role that lets the operator read Kafkas in kafka.namespaces.
+  # false: someone with rights there applies it from helm template --show-only.
+  kafkaNamespaceRole: true
+
+connection:
+  # -- Lend every watched namespace the Secret below when it has no
+  # kates-connection of its own. With watchAnyNamespace that lends this key to
+  # every user who can create a KatesTest.
+  fallback: false
+  # -- The fallback Secret (keys url, apiKey, optional caBundle). This chart
+  # never renders it, so no key sits in Helm values.
+  existingSecret: kates-operator-connection
+
+crdUpgrade:
+  # -- Apply the CRDs from a pre-install and pre-upgrade hook, never over a
+  # newer version. Off with rbac.clusterRoles.create=false.
+  enabled: true
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
+
+# -- 2 only shortens the gap after a crash: one pod holds the Lease.
+replicas: 1
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 48Mi
+  limits:
+    memory: 128Mi
+
+# -- text or json.
+logFormat: json
+
+tracing:
+  # -- OTLP endpoint; empty sends no traces.
+  endpoint: ""
+
+networkPolicy:
+  enabled: true
+  # -- Namespace allowed to scrape metrics on 8080.
+  monitoringNamespace: monitoring
+  # -- Extra egress rules, for a Kates URL on a port other than 8080 or 443.
+  egressRules: []
+
+monitoring:
+  # -- Render a PodMonitor. Needs the Prometheus Operator's CRDs.
+  enabled: false
+
+# -- Labels added to the pods; the chart's own win on a clash.
+podLabels: {}
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

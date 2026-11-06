@@ -6,7 +6,7 @@ name: CI · Operator
 
 on:
   push:
-    branches: [main]
+    branches: [main, operator]
   pull_request:
     branches: [main]
 
@@ -44,6 +44,7 @@ jobs:
               - 'charts/kates/**'
               - 'charts/kafka-cluster/**'
               - 'config/cluster.yaml'
+              - 'scripts/deploy-kafka-generic.sh'
               - 'versions.env'
               - '.github/workflows/ci-operator.yml'
 
@@ -84,11 +85,11 @@ jobs:
 
       - name: Generated CRDs are fresh
         run: |
-          cargo run --locked --bin crdgen -- --out crds
-          if [ -n "$(git status --porcelain crds)" ]; then
-            git status --porcelain crds
-            git diff crds
-            echo "::error::operator/crds is stale: run cargo run --bin crdgen -- --out crds"
+          cargo run --locked --bin crdgen -- --out chart/crds
+          if [ -n "$(git status --porcelain chart/crds)" ]; then
+            git status --porcelain chart/crds
+            git diff chart/crds
+            echo "::error::operator/chart/crds is stale: run cargo run --bin crdgen -- --out chart/crds"
             exit 1
           fi
 
@@ -108,7 +109,7 @@ jobs:
           set -euo pipefail
           schemas="${RUNNER_TEMP}/schemas"
           mkdir -p "${schemas}"
-          yq -o=json '.spec.versions[0].schema.openAPIV3Schema' operator/crds/katestests.kates.io.yaml \
+          yq -o=json '.spec.versions[0].schema.openAPIV3Schema' operator/chart/crds/katestests.kates.io.yaml \
             | jq '.properties.spec |= walk(if type == "object" and (.properties | type) == "object"
                                            then . + {additionalProperties: false} else . end)' \
             > "${schemas}/katestest_v1alpha1.json"
@@ -123,14 +124,28 @@ jobs:
           fi
 
   e2e:
-    name: CRDs on Kind
+    name: E2E on Kind
     needs: changes
     if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/load-versions
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      # deploy-kafka-generic.sh detects the cluster with it.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Build kates CLI
+        working-directory: cli
+        run: go build -o ../build/kates .
 
       # node_image is deliberately not passed, as in integration.yml:
       # config/cluster.yaml names the image.
@@ -146,7 +161,25 @@ jobs:
       # The apiserver is the only CEL compiler, cost and oldSelf-correlatability
       # checker there is.
       - name: The apiserver accepts the CRDs
-        run: kubectl apply --dry-run=server -f operator/crds
+        run: kubectl apply --dry-run=server -f operator/chart/crds
+
+      - name: Build the operator image
+        run: |
+          docker build -f operator/Dockerfile -t kates-operator:ci .
+          kind load docker-image kates-operator:ci --name ci-test
+
+      - name: Deploy Kafka, Kates and the operator
+        run: operator/e2e-stack.sh docker.io/library/kates-operator:ci
+
+      - name: Run the e2e checks
+        run: operator/e2e.sh payments kafka krafter
+
+      - name: Show the stack
+        if: failure()
+        run: |
+          kubectl get pods -A
+          kubectl -n kates logs deploy/kates -c kates --tail=50 || true
+          kubectl -n kates-operator logs deploy/kates-operator --tail=50 || true
 
   gate:
     name: Gate · Operator

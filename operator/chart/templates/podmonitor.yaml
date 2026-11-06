@@ -1,0 +1,15 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kates-operator
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "kates-operator.selectorLabels" . | nindent 6 }}
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+{{- end }}
