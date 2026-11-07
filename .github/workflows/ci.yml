@@ -57,6 +57,8 @@ jobs:
               - 'Dockerfile.legacy-kafka'
               # ...and the tester's Kafka CLI and jar overrides against it.
               - 'tester/**'
+              # ...and the Docker Compose quickstart's Kafka and Postgres pins.
+              - 'docker-compose.yml'
             yaml:
               - 'config/**'
 
