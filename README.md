@@ -54,6 +54,38 @@ Most teams validate Kafka resilience by running `kafka-producer-perf-test` in on
 
 ## Quick start
 
+Pick the setup that matches what you want to try:
+
+- **Docker Compose (< 1 GB RAM, no Kubernetes):** starts a single-broker KRaft Kafka cluster, PostgreSQL and the GraalVM native Kates API (with the `kates` CLI bundled inside the container) for performance benchmarks, data-integrity checks, CI quality gates and broker security audits — or points at an existing Kafka broker.
+- **Multi-zone Kubernetes lab on Kind (~16 GB RAM):** builds the full stack with Strimzi, rack-aware brokers across three zones, LitmusChaos fault injection, Prometheus and twelve Grafana dashboards.
+
+### Try it in 60 seconds (Docker Compose)
+
+Needs only Docker with `docker compose` on macOS or Linux (amd64 or arm64). Download [`docker-compose.yml`](docker-compose.yml) — or run from a checkout — and start the stack:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/bmscomp/kates/main/docker-compose.yml
+docker compose up -d --wait
+
+# Check health, run a 50,000-record load test, enforce a CI grade and audit the broker
+docker compose exec kates kates health
+docker compose exec kates kates test create --type LOAD --records 50000 --wait
+docker compose exec kates kates gate --min-grade C --records 50000
+docker compose exec kates kates security audit
+```
+
+Once the images are cached, the stack starts in under ten seconds, idles at about 450 MB of RAM across all three containers and stays under 800 MB during benchmarks. Interactive terminal views work inside the container too (`docker compose exec kates kates kafka tui`, `docker compose exec kates kates dashboard`), or directly from a host CLI (`brew install bmscomp/tap/kates`) against `http://localhost:8080`, where API-key auth is off for local evaluation (`KATES_PORT` changes the host port).
+
+To test an existing broker instead, pass `KATES_KAFKA_BOOTSTRAP_SERVERS=host.docker.internal:9092` (and `KATES_REPLICATION_FACTOR=3 KATES_MIN_INSYNC_REPLICAS=2` on a multi-broker cluster). Fault injection (`kates disruption`, `kates resilience`) requires Kubernetes — use the Kind lab below.
+
+Tear down the containers and volumes when finished:
+
+```bash
+docker compose down -v
+```
+
+### Multi-zone Kubernetes lab (Kind)
+
 This path builds the whole stack on a local Kind cluster. You need:
 
 - a clone of this repository, for the `make` targets, which are read relative to the working directory, so run every command from the repository root;

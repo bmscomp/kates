@@ -705,6 +705,38 @@ else
   echo "OK: kates-tester ships the Kafka ${tester_kafka} CLI, and its jar overrides are written for it."
 fi
 
+# The Docker Compose quickstart pins Apache Kafka and PostgreSQL to the same
+# versions as the repo's Kafka pin and charts/kates/values.yaml so local
+# evaluation never drifts behind the charts.
+COMPOSE_YAML="docker-compose.yml"
+KATES_VALUES_YAML="charts/kates/values.yaml"
+compose_kafka=$(grep -Eo 'apache/kafka:[0-9]+\.[0-9]+\.[0-9]+' "$COMPOSE_YAML" | head -1 | cut -d: -f2 || true)
+compose_pg=$(grep -Eo 'postgres:[0-9]+\.[0-9]+(-alpine)?' "$COMPOSE_YAML" | head -1 | cut -d: -f2 || true)
+chart_pg=$(awk '
+  /^postgresql:/          { in_pg = 1; next }
+  in_pg && /^[^[:space:]]/ { in_pg = 0 }
+  in_pg && /^  image:/    { in_img = 1; next }
+  in_img && /^  [a-z]/    { in_img = 0 }
+  in_img && /^    tag:/   { gsub(/^[[:space:]]*tag:[[:space:]]*"?/, ""); gsub(/"?[[:space:]]*$/, ""); print; exit }
+' "$KATES_VALUES_YAML")
+echo ""
+echo "Docker Compose quickstart:"
+printf '  %-46s %s\n' "${COMPOSE_YAML} apache/kafka:" "${compose_kafka:-<unset>}"
+printf '  %-46s %s\n' "${COMPOSE_YAML} postgres:"     "${compose_pg:-<unset>}"
+printf '  %-46s %s\n' "${KATES_VALUES_YAML} postgresql.image.tag:" "${chart_pg:-<unset>}"
+if [[ -z "$compose_kafka" || -z "$compose_pg" || -z "$chart_pg" ]]; then
+  echo "ERROR: could not read one of the Docker Compose or PostgreSQL image pins" >&2
+  fail=1
+elif [[ "$compose_kafka" != "$env_kafka_version" ]]; then
+  echo "DRIFT: ${COMPOSE_YAML} runs apache/kafka:${compose_kafka}, the Kafka pin is ${env_kafka_version}." >&2
+  fail=1
+elif [[ "$compose_pg" != "$chart_pg" ]]; then
+  echo "DRIFT: ${COMPOSE_YAML} runs postgres:${compose_pg}, ${KATES_VALUES_YAML} runs postgres:${chart_pg}." >&2
+  fail=1
+else
+  echo "OK: ${COMPOSE_YAML} agrees with Kafka ${env_kafka_version} and PostgreSQL ${chart_pg}."
+fi
+
 check_workflows || fail=1
 
 exit "$fail"
