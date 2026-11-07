@@ -493,9 +493,11 @@ cli-install:  ## Build and install CLI on this machine (CLI_INSTALL_DIR to choos
 	  fi; \
 	fi
 	sudo cp cli/dist/kates $(CLI_INSTALL_PATH)
-	sudo xattr -dr com.apple.provenance $(CLI_INSTALL_PATH) 2>/dev/null || true
-	sudo xattr -dr com.apple.quarantine $(CLI_INSTALL_PATH) 2>/dev/null || true
-	sudo codesign -f -s - $(CLI_INSTALL_PATH)
+	@if [ "$$(uname -s)" = "Darwin" ]; then \
+	  sudo xattr -dr com.apple.provenance $(CLI_INSTALL_PATH) 2>/dev/null || true; \
+	  sudo xattr -dr com.apple.quarantine $(CLI_INSTALL_PATH) 2>/dev/null || true; \
+	  sudo codesign -f -s - $(CLI_INSTALL_PATH); \
+	fi
 	@echo "✅ Installed:"
 	@# Run the file just written, by absolute path. Asking `kates` would
 	@# report whatever PATH resolves to, which is exactly the thing this

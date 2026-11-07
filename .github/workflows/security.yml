@@ -68,7 +68,6 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      issues: write # notify-scheduled-failure
     strategy:
       fail-fast: false
       matrix:
@@ -92,29 +91,52 @@ jobs:
         run: |
           set -euo pipefail
           case "${IMAGE}" in
-            kates)        tag=$(awk '/repository: ghcr.io\/bmscomp\/kates$/ {getline; print $2}' "${REF}" | tr -d '"'); ref="ghcr.io/bmscomp/kates:${tag}" ;;
+            kates)        tag=$(awk '/repository: ghcr.io\/bmscomp\/kates$/ {found=1; next} found && /^[[:space:]]*tag:/ {print $2; exit}' "${REF}" | tr -d '"'); ref="ghcr.io/bmscomp/kates:${tag}" ;;
             connect)      ref=$(grep -m1 '^image:' "${REF}" | awk '{print $2}' | tr -d '"') ;;
             kates-tester) ref=$(grep -m1 'ghcr.io/bmscomp/kates-tester:' "${REF}" | sed -E 's/.*(ghcr.io\/bmscomp\/kates-tester:[^"]+).*/\1/') ;;
           esac
-          if [ -z "${ref}" ] || [[ "${ref}" != *:* ]]; then
-            echo "::error::could not resolve the ${IMAGE} image from ${REF}"
+          tag_part="${ref##*:}"
+          if [ -z "${ref}" ] || [[ "${ref}" != *:* ]] || [ -z "${tag_part}" ] || [[ "${tag_part}" == -* ]]; then
+            echo "::error::could not resolve a valid ${IMAGE} image tag from ${REF} (got '${ref}')"
             exit 1
           fi
           echo "ref=${ref}" | tee -a "$GITHUB_OUTPUT"
 
-      - name: Scan (Trivy)
+      # Same policy as ci.yml and the publish-*.yml workflows: HIGH is reported
+      # in the log, CRITICAL fails the weekly rescan.
+      - name: Report HIGH and CRITICAL vulnerabilities (Trivy)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
           image-ref: ${{ steps.pin.outputs.ref }}
           scanners: vuln
           severity: CRITICAL,HIGH
+          exit-code: "0"
+          ignore-unfixed: true
+          trivyignores: .trivyignore.yaml
+
+      - name: Gate on CRITICAL vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.pin.outputs.ref }}
+          scanners: vuln
+          severity: CRITICAL
           exit-code: "1"
           ignore-unfixed: true
           trivyignores: .trivyignore.yaml
 
-      - name: Open an issue for a failed weekly scan
-        if: failure() && github.event_name == 'schedule'
-        uses: ./.github/actions/notify-scheduled-failure
+  notify-failure:
+    name: Open an issue for a failed weekly scan
+    needs: [rescan-released]
+    if: always() && needs.rescan-released.result == 'failure' && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/notify-scheduled-failure
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
