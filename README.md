@@ -14,6 +14,7 @@
     <a href="https://github.com/bmscomp/kates/releases/latest"><img src="https://img.shields.io/github/v/release/bmscomp/kates?label=release&logo=github" alt="Latest release" /></a>
     <a href="https://github.com/marketplace/actions/kates-quality-gate"><img src="https://img.shields.io/badge/marketplace-kates--quality--gate-blue?logo=githubactions&logoColor=white" alt="GitHub Marketplace" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/bmscomp/kates" alt="License" /></a>
+    <a href="https://katesplatform.io/"><img src="https://img.shields.io/badge/site-katesplatform.io-0F172A" alt="Kates website" /></a>
     <a href="https://bmscomp.github.io/kates/"><img src="https://img.shields.io/badge/docs-the%20book-1A5BCC" alt="The Kates book" /></a>
   </p>
 </div>
@@ -22,7 +23,7 @@ You find out how a Kafka cluster handles a broker failure on the day a broker fa
 
 Performance tests work against any Kafka cluster the Kates API can reach; fault injection targets Strimzi-managed brokers, by default the cluster `krafter` in namespace `kafka`. Kates has three parts: the `kates` CLI (Go), the Kates API (Quarkus) that runs the tests and faults and keeps the results in PostgreSQL, and the signed Helm charts that install Kafka and everything around it.
 
-**[The book](https://bmscomp.github.io/kates/)** · [Why Kates](#why-kates) · [Quick start](#quick-start) · [CLI at a glance](#cli-at-a-glance) · [GitHub Action](#github-action) · [Architecture](#architecture) · [Documentation](#documentation) · [Helm charts](#helm-charts) · [Building from source](#building-from-source) · [Contributing](#contributing)
+**[Website](https://katesplatform.io/)** · **[The book](https://bmscomp.github.io/kates/)** · [Why Kates](#why-kates) · [Quick start](#quick-start) · [CLI at a glance](#cli-at-a-glance) · [GitHub Action](#github-action) · [Architecture](#architecture) · [Documentation](#documentation) · [Helm charts](#helm-charts) · [Building from source](#building-from-source) · [Contributing](#contributing)
 
 <p align="center">
   <img src="docs/assets/demo.gif" width="900" alt="Animated terminal demo of kates health, kates test create --type LOAD --records 100000 --wait, kates gate --min-grade C, and kates security audit running against a live Kafka cluster" />
@@ -31,7 +32,7 @@ Performance tests work against any Kafka cluster the Kates API can reach; fault 
 ## What it does
 
 - **Performance tests.** Eight workload types (`LOAD`, `STRESS`, `SPIKE`, `ENDURANCE`, `VOLUME`, `CAPACITY`, `ROUND_TRIP`, `INTEGRITY`); `kates test types` lists every type the Kates API accepts. The default `native` benchmark backend runs Kafka producers and consumers inside the Kates API on virtual threads; `--backend trogdor` hands the workload to a Trogdor coordinator you run yourself. Reports give throughput, latency percentiles (`P50`, `P95`, `P99`) and error rate, and export as CSV, JUnit XML, Markdown, HTML or latency heatmaps.
-- **Fault injection.** Thirteen disruption types, from broker pod kills and network partitions to CPU, memory and I/O stress, DNS errors, disk fill and node drain (`kates disruption types`). The default install runs eleven of them through LitmusChaos. Network latency and disk fill time out, because the `kates-chaos` chart ships no Litmus experiment for them (see `experiments.definitions` in its values). The direct Kubernetes chaos provider covers eight.
+- **Fault injection.** Thirteen disruption types, from broker pod kills and network partitions to CPU, memory and I/O stress, DNS errors, disk fill and node drain (`kates disruption types`), run through LitmusChaos (eleven out of the box) or directly through the Kubernetes API (eight); [Chaos in practice](docs/book/07-chaos-practice.md) covers provider support and adding custom Litmus experiments.
 - **Resilience runs and disruption plans.** `kates resilience run` pairs one load test with one fault and reports the before/after change and the recovery time. `kates disruption run` executes multi-step disruption plans; `kates disruption playbook list` shows the built-in playbooks. Plans get blast-radius checks, a dry run, ISR and consumer-lag tracking, and an A–F SLA grade against absolute latency, throughput and recovery-time thresholds.
 - **Security audit.** `kates security audit` grades broker configuration A–F. Related commands map the checks to CIS, SOC 2 and PCI DSS, save a baseline and report drift from it.
 - **CI gates.** `kates gate --min-grade B` runs a load test and exits non-zero below the performance grade, `kates test apply -f <scenario> --wait` fails when a scenario violates its SLA gates, and `kates security gate` does the same for the security grade. Finished tests can notify webhooks (`kates webhook add`).
@@ -281,7 +282,7 @@ make kates-local               # JVM image kates:local (quicker to build), loade
 ```
 
 - `make` on its own lists every target.
-- On Linux, `make cli-install` ends with a `codesign` error, a macOS-only step, after the binary is already installed. The binary works, but the target stops before checking whether another `kates` comes earlier on your `PATH`.
+- On macOS, `make cli-install` also strips quarantine attributes and ad-hoc signs the installed binary so Gatekeeper does not block it.
 - On Apple Silicon, local `./mvnw` builds need Rosetta 2 (`softwareupdate --install-rosetta`): the gRPC code generator this Quarkus version uses ships only an x86-64 macOS binary. Docker builds are not affected.
 - `(cd kates && ./mvnw quarkus:dev)` runs the backend with API-key authentication off, but it still needs a reachable PostgreSQL (`QUARKUS_DATASOURCE_JDBC_URL`) and Kafka (`KATES_KAFKA_BOOTSTRAP_SERVERS`).
 - Both Dockerfiles take the repository root as build context, as in `docker build -f kates/Dockerfile.native -t kates:native-local .`.
