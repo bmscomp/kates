@@ -222,6 +222,11 @@
       // the fitted diagram becomes a thumbnail that points to Expand.
       width = size.w <= column * FIT_SLACK ? column : room;
       oversized = size.w > room * FIT_LIMIT;
+      // Tells whoever renders the book which diagram to redraw narrower
+      if (oversized && !figure.classList.contains("is-oversized")) {
+        const id = figure.closest("[id^='fig-']")?.id || titleFor(figure);
+        console.warn(`kates-diagram: ${id} is ${Math.round(size.w)}px wide, a thumbnail in a ${Math.round(room)}px column`);
+      }
     } else if (size.w > column * FIT_SLACK) {
       width = size.w; // fits at full size once it takes some of the margin
     } else {

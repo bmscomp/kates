@@ -22,36 +22,48 @@ Kates measures a Kafka cluster by loading it and breaking it on purpose, so its 
 
 Kates has two halves: the `kates` CLI on your machine, and the [Kates API](appendix-a-glossary.md#gl-kates-api) in the cluster, as one Deployment beside the Kafka cluster it tests. The Kates API generates the load, asks for the faults, grades disruption plans and keeps every run in [PostgreSQL](appendix-a-glossary.md#gl-postgresql). Around them, `kates deploy` installs Kafka, PostgreSQL, LitmusChaos, Prometheus and Grafana.
 
-The diagram shows the main parts of a default `kates deploy` and who calls whom. Solid arrows are the default paths; the dashed ones are the [Trogdor](appendix-a-glossary.md#gl-trogdor) path, which `kates deploy` doesn't set up.
+Two diagrams show the main parts of a default `kates deploy`: the first how the CLI reaches the cluster, the second who calls whom inside it. The CLI calls the Kates API over REST, with the URL and API key of your [CLI context](appendix-a-glossary.md#gl-cli-context):
+
+```mermaid
+%%| label: fig-architecture-cli
+%%| fig-cap: "The CLI on your machine drives the Kates API in the cluster over REST."
+%%| fig-alt: "Flowchart in two groups. On your machine, the kates CLI, which holds the commands, Lab and kates mcp, calls the Kates API pod in the Kubernetes cluster over REST with an API key."
+flowchart TB
+    subgraph Machine["Your machine"]
+        CLI["kates CLI<br/>commands, Lab,<br/>kates mcp"]
+    end
+    subgraph Cluster["Kubernetes cluster"]
+        API["Kates API pod<br/>REST and gRPC"]
+    end
+    CLI -->|"REST, API key"| API
+```
+
+For the commands that install and reach the stack, such as `kates deploy` and `kates ports`, the CLI runs `kubectl` and `helm` against your current Kubernetes context instead. The [Commands](10-cli-reference.md#commands) table in CLI Reference says which command takes which path.
+
+In the cluster, the Kates API generates load on Kafka, keeps runs in PostgreSQL and asks LitmusChaos for faults. Solid arrows are the default paths; the dashed ones are the [Trogdor](appendix-a-glossary.md#gl-trogdor) path, which `kates deploy` doesn't set up:
 
 ```mermaid
 %%| label: fig-architecture-parts
-%%| fig-cap: "The CLI on your machine drives the Kates API in the cluster, which generates load on Kafka, keeps runs in PostgreSQL and asks LitmusChaos for faults."
-%%| fig-alt: "Flowchart in two groups. On your machine, the kates CLI calls the Kates API over REST with an API key. In the cluster, the Kates API stores runs in PostgreSQL, produces to and consumes from the Kafka cluster krafter, and creates ChaosEngine resources that LitmusChaos turns into faults on Kafka. A dashed path runs from the Kates API through an optional Trogdor coordinator to Kafka. Prometheus scrapes the Kates API and Kafka."
-flowchart LR
-    subgraph Machine["Your machine"]
-        CLI["kates CLI<br/>commands, Lab, kates mcp"]
-    end
-    subgraph Cluster["Kubernetes cluster"]
-        API["Kates API pod<br/>REST and gRPC, native benchmark backend, chaos provider"]
-        PG[("PostgreSQL")]
-        KAFKA["Kafka cluster krafter"]
-        LIT["LitmusChaos"]
-        TROG["Trogdor coordinator<br/>optional, not installed"]
-        PROM["Prometheus and Grafana"]
-    end
-    CLI -->|"REST, API key"| API
-    API -->|"runs and results"| PG
-    API -->|"producers, consumers, AdminClient"| KAFKA
-    API -->|"ChaosEngine resources"| LIT
-    LIT -->|"faults"| KAFKA
-    API -.->|"trogdor benchmark backend"| TROG
-    TROG -.-> KAFKA
+%%| fig-cap: "In the cluster, the Kates API generates load on Kafka, keeps runs in PostgreSQL and asks LitmusChaos for faults."
+%%| fig-alt: "Flowchart. Prometheus and Grafana scrape the Kates API pod and the Kafka cluster krafter. The Kates API stores runs in PostgreSQL, runs producers, consumers and an AdminClient against krafter, and creates ChaosEngine resources that LitmusChaos turns into faults on krafter. A dashed path runs from the Kates API through an optional Trogdor coordinator to krafter."
+flowchart TB
+    PROM["Prometheus<br/>and Grafana"]
+    API["Kates API pod<br/>native benchmark backend,<br/>chaos provider"]
+    PG[("PostgreSQL")]
+    LIT["LitmusChaos"]
+    TROG["Trogdor coordinator<br/>optional, not installed"]
+    KAFKA["Kafka cluster<br/>krafter"]
     PROM -->|"scrapes"| API
+    API -->|"runs and<br/>results"| PG
+    API -->|"ChaosEngine<br/>resources"| LIT
+    API -.->|"trogdor<br/>backend"| TROG
+    API -->|"producers,<br/>consumers,<br/>AdminClient"| KAFKA
+    LIT -->|"faults"| KAFKA
+    TROG -.-> KAFKA
     PROM -->|"scrapes"| KAFKA
 ```
 
-Read it from the left. The CLI calls the Kates API over REST, with the URL and API key of your [CLI context](appendix-a-glossary.md#gl-cli-context). For the commands that install and reach the stack, such as `kates deploy` and `kates ports`, it runs `kubectl` and `helm` against your current Kubernetes context instead. The [Commands](10-cli-reference.md#commands) table in CLI Reference says which command takes which path. In the cluster, the Kates API talks to [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test, as an ordinary Kafka client, and keeps each run in PostgreSQL. On the default [chaos provider](appendix-a-glossary.md#gl-chaos-provider), it creates [LitmusChaos](appendix-a-glossary.md#gl-litmuschaos) resources for every fault except `POD_DELETE`, `NETWORK_PARTITION`, `ROLLING_RESTART` and `SCALE_DOWN`, which it injects itself through the Kubernetes API. [Prometheus](appendix-a-glossary.md#gl-prometheus) scrapes the [brokers](appendix-a-glossary.md#gl-broker) and the Kates API, and the Kates API reads Prometheus back for a disruption plan's broker metrics.
+The Kates API talks to [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test, as an ordinary Kafka client, and keeps each run in PostgreSQL. On the default [chaos provider](appendix-a-glossary.md#gl-chaos-provider), it creates [LitmusChaos](appendix-a-glossary.md#gl-litmuschaos) resources for every fault except `POD_DELETE`, `NETWORK_PARTITION`, `ROLLING_RESTART` and `SCALE_DOWN`, which it injects itself through the Kubernetes API. [Prometheus](appendix-a-glossary.md#gl-prometheus) scrapes the [brokers](appendix-a-glossary.md#gl-broker) and the Kates API, and the Kates API reads Prometheus back for a disruption plan's broker metrics.
 
 Each part in the table runs in one place. The namespaces are those of the default [isolated topology](appendix-a-glossary.md#gl-isolated-topology). With `--topology single`, every in-cluster part except Trogdor shares the `kates-stack` namespace; [Single-Namespace vs Multi-Namespace](12-deployment.md#single-namespace-vs-multi-namespace) compares the two layouts.
 
@@ -179,7 +191,7 @@ The diagram shows how a plan reaches its faults. Look at the provider setting: o
 %%| label: fig-architecture-disruption-engine
 %%| fig-cap: "A disruption plan's orchestrator checks the plan with the safety guard and hands every fault to the one chaos provider that kates.chaos.provider selects."
 %%| fig-alt: "Flowchart. The disruption orchestrator calls the safety guard and the setting kates.chaos.provider, which selects the litmus-crd provider by default, the kubernetes provider, or the hybrid provider, which picks one of the two. The litmus-crd provider hands POD_DELETE, NETWORK_PARTITION, ROLLING_RESTART and SCALE_DOWN to the kubernetes provider."
-graph LR
+graph TB
     DO["Disruption orchestrator"] --> DSG["Safety guard"]
     DO --> CP{{kates.chaos.provider}}
     CP -->|"litmus-crd, the default"| LCP["litmus-crd provider"]
