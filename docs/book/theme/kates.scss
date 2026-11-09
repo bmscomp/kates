@@ -505,6 +505,12 @@ kbd {
   }
 }
 
+// The command index (10-cli-reference.md, "Commands"): a family's name wraps
+// between its words, not inside one, as Quarto's .table a would have it
+#commands > table.table a {
+  word-break: normal;
+}
+
 // Headings already carry weight; keep their code at heading size
 #quarto-document-content :is(h1, h2, h3, h4) code:not(.sourceCode) {
   font-size: 0.82em;

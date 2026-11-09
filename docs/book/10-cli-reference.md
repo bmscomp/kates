@@ -1,5 +1,6 @@
 ---
-toc-depth: 4
+toc-depth: 3
+toc-expand: 2
 ---
 
 # CLI Reference
@@ -216,16 +217,16 @@ Find your question in the table below, then follow the family's link, or a comma
 | Family | Commands | The question it answers | What it talks to |
 |:-----|:--------|:--------|:---------|
 | [Context Management](#context-management) | [`ctx set`](#context-management), [`use`](#context-management), [`show`](#context-management), [`export`](#context-management), [`import`](#context-management), [`profiles`](#context-management) | Which Kates API do your commands call, and with which key? | Local files: `~/.kates.yaml` |
-| [Health, Status & Diagnostics](#health-status--diagnostics) | [`health`](#health), [`status`](#status), [`version`](#version), [`doctor`](#doctor) | Is the Kates API up, does it reach Kafka, and is the cluster ready to test? | Kates API; `doctor dns` and `doctor network` use `kubectl` alone |
+| [Health, Status & Diagnostics](#health-status--diagnostics) | [`health`](#health), [`status`](#status), [`version`](#version), [`doctor`](#doctor), [`doctor dns`](#doctor-dns), [`doctor network`](#doctor-network) | Is the Kates API up, does it reach Kafka, and is the cluster ready to test? | Kates API; `doctor dns` and `doctor network` use `kubectl` alone |
 | [Cluster Commands](#cluster-commands) | [`cluster info`](#cluster-info), [`check`](#cluster-check), [`topology`](#cluster-topology), [`alerts`](#cluster-alerts), [`watch`](#cluster-watch), [`topics`](#cluster-topics-groups-and-broker-configs), [`groups`](#cluster-topics-groups-and-broker-configs), [`broker configs`](#cluster-topics-groups-and-broker-configs); [`diff`](#diff) | What does the Kafka cluster look like, and is it healthy? | Kates API |
 | [Compliance](#compliance) | [`compliance check`](#compliance-check), [`lint`](#compliance-lint), [`fmt`](#compliance-fmt) | Is the cluster still built the way a reference file declares? | Kates API for `check`; `lint` and `fmt` work on local files |
 | [Evidence for Auditors](#evidence-for-auditors) | [`evidence export`](#evidence-export) | What did Kates test and record in a period, and can an auditor tell nothing changed since? | Kates API; the pack is a directory you keep |
 | [Test Commands](#test-commands) | [`test list`](#test-list), [`create`](#test-create), [`get`](#test-get), [`delete`](#test-delete), [`cancel`](#test-cancel), [`cleanup`](#test-cleanup), [`prune`](#test-prune), [`watch`](#test-watch), [`apply`](#test-apply), [`lint`](#test-lint), [`scaffold`](#test-scaffold), [`compare`](#test-compare), [`summary`](#test-summary), [`flame`](#test-flame); [`scenario-diff`](#scenario-diff) | How do you start a performance test, follow it and find it again? | Kates API; `test lint` and `test scaffold` work locally |
 | [Report Commands](#report-commands) | [`report show`](#report-show), [`summary`](#report-summary), [`export`](#report-export), [`diff`](#report-diff), [`compare`](#report-compare), [`brokers`](#report-brokers) | What did a run measure, and how does it compare with another run? | Kates API |
 | [Trend Analysis](#trend-analysis) | [`trend`](#trend) | How has one metric moved across a test type's runs over recent days? | Kates API |
-| [Disruption Commands](#disruption-commands) | [`disruption run`](#disruption-run), [`list`](#disruption-list), [`status`](#disruption-status), [`timeline`](#disruption-timeline), [`types`](#disruption-types), [`kafka-metrics`](#disruption-kafka-metrics), [`watch`](#disruption-watch), [`playbook list`](#disruption-playbook-list), [`playbook show`](#disruption-playbook-show), [`playbook run`](#disruption-playbook-run) | What happens to the cluster when a fault hits it, and how fast does it recover? | Kates API |
+| [Disruption Commands](#disruption-commands) | [`disruption run`](#disruption-run), [`list`](#disruption-list), [`status`](#disruption-status), [`timeline`](#disruption-timeline), [`types`](#disruption-types), [`kafka-metrics`](#disruption-kafka-metrics), [`watch`](#disruption-watch), [`playbook list`](#disruption-playbook-list), [`playbook show`](#disruption-playbook-show), [`playbook run`](#disruption-playbook-run), [`lint`](#disruption-lint) | What happens to the cluster when a fault hits it, and how fast does it recover? | Kates API; `disruption lint` works on local files |
 | [Chaos Experiment History](#chaos-experiment-history) | [`chaos list`](#chaos-list), [`show`](#chaos-show) | Which disruption plans ran recently, how did each end, and what SLA grade, if any, did it get? | Kates API |
-| [Resilience](#resilience) | [`resilience run`](#resilience) | How much does one fault hurt a test while it runs? | Kates API |
+| [Resilience](#resilience) | [`resilience run`](#resilience), [`lint`](#resilience-lint) | How much does one fault hurt a test while it runs? | Kates API; `resilience lint` works on local files |
 | [Schedule Commands](#schedule-commands) | [`schedule list`](#schedule-list), [`get`](#schedule-get), [`create`](#schedule-create), [`delete`](#schedule-delete) | How do you run the same test on a cron schedule? | Kates API |
 | [Observability & Monitoring](#observability--monitoring) | [`dashboard`](#dashboard), [`top`](#top) | What is running right now, and how is it doing? | Kates API |
 | [Interactive Lab](#interactive-lab) | [`lab`](#interactive-lab) | Which settings work best, when you try them one run at a time? | Kates API |
@@ -244,6 +245,7 @@ Find your question in the table below, then follow the family's link, or a comma
 | [Badge Generation](#badge-generation) | [`badge`](#badge-generation) | What badge shows the latest run's grade, P99 or throughput? | Kates API |
 | [Webhook Notifications](#webhook-notifications) | [`webhook list`](#webhook-list), [`add`](#webhook-add), [`remove`](#webhook-remove) | Which URLs hear about it when a test finishes? | Kates API |
 | [MCP Server for AI Agents](#mcp-server-for-ai-agents) | [`mcp`](#mcp) | How does an AI agent read test runs, disruptions, security posture and cluster state? | Kates API, which the command serves to the agent over stdin and stdout |
+| [Language Server for IDEs](#language-server-for-ides) | [`lsp`](#lsp) | How does an editor check a Kates YAML file as you type it? | Local files; the Kates API of the active context, for live names and pre-flight checks |
 | [Developer & Help Commands](#developer--help-commands) | [`docs`](#docs), [`tldr`](#tldr), [`audit`](#audit), [`changelog`](#changelog), [`watch`](#watch), [`look`](#look), [`theme`](#theme), [`plugin`](#plugin) | How does a command work, what does the audit log record, and how do you change how the CLI looks or add a command? | Nothing for `docs`, `tldr`, `look` and `theme`; `audit`, `changelog` and `watch` read the Kates API |
 
 Contexts, profiles and snapshots are files in your home directory, so they stay on the machine that made them. To move your contexts to another machine, print them with `kates ctx export --reveal`, keys in clear, and load the file there with `kates ctx import --file`.
