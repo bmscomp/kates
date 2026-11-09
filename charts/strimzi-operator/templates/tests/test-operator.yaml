@@ -10,7 +10,7 @@ be deleted from under each other's `helm test`.
 {{- $testRole := printf "%s-%s" $testSA .Release.Namespace }}
 {{- /* Under namespacedRbac the installer may not create ClusterRoles: the test
 reads its own namespace through a Role, and finds the CRDs by discovery. */}}
-{{- $testRoleKind := ternary "Role" "ClusterRole" .Values.namespacedRbac.enabled }}
+{{- $roleKind := ternary "Role" "ClusterRole" .Values.namespacedRbac.enabled }}
 {{- $podLabels := include "strimzi-operator.podLabels" (dict "ctx" . "labels" (include "strimzi-operator.labels" .)) }}
 apiVersion: v1
 kind: ServiceAccount
@@ -25,7 +25,7 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: {{ $testRoleKind }}
+kind: {{ $roleKind }}
 metadata:
   name: {{ $testRole }}
   {{- if .Values.namespacedRbac.enabled }}
@@ -53,7 +53,7 @@ rules:
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: {{ $testRoleKind }}Binding
+kind: {{ $roleKind }}Binding
 metadata:
   name: {{ $testRole }}
   {{- if .Values.namespacedRbac.enabled }}
@@ -67,7 +67,7 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: {{ $testRoleKind }}
+  kind: {{ $roleKind }}
   name: {{ $testRole }}
 subjects:
   - kind: ServiceAccount
