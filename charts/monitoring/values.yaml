@@ -18,6 +18,13 @@ global:
   # -- Pull secrets for every pod; `- name: secret` or `- secret`
   imagePullSecrets: []
 
+# -- cluster (empty: global.rbacScope, then cluster) or namespace. In
+# namespace scope the release creates nothing cluster-scoped, so a namespace
+# admin installs it; that needs the subchart switches in values-namespace.yaml
+# (install with -f values-namespace.yaml), and the chart refuses without them.
+rbac:
+  scope: ""
+
 # -- Extra labels on this chart's own pod (the Helm test). The chart's labels
 # win on a clash. The wrapped stack's pods take theirs from each component's
 # key: kube-prometheus-stack.grafana.podLabels,

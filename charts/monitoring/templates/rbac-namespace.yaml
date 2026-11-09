@@ -1,0 +1,148 @@
+{{- /*
+rbac.scope=namespace: nothing cluster-scoped. kube-prometheus-stack has no
+namespaced mode for the operator's and Prometheus's RBAC, so values-namespace.yaml
+turns its ClusterRoles off (global.rbac.create=false) and these Roles replace
+them: the same rules minus nodes and storage classes, with the verbs spelled
+out, since a namespace admin can grant only verbs it holds and `admin` holds
+no "*" on core or apps resources, no write on endpoints or endpoint slices
+(only the kubelet Service, off here, writes them) and nothing on
+services/finalizers (only the OwnerReferencesPermissionEnforcement admission
+plugin asks for it).
+*/ -}}
+{{- if eq (.Values.rbac.scope | default (.Values.global).rbacScope | default "cluster") "namespace" }}
+{{- $kps := index .Subcharts "kube-prometheus-stack" }}
+{{- $v := $kps.Values }}
+{{- $ksm := index $v "kube-state-metrics" }}
+{{- $bad := list }}
+{{- if $v.crds.enabled }}{{ $bad = append $bad "crds.enabled" }}{{ end }}
+{{- if $v.global.rbac.create }}{{ $bad = append $bad "global.rbac.create" }}{{ end }}
+{{- if $v.prometheusOperator.admissionWebhooks.enabled }}{{ $bad = append $bad "prometheusOperator.admissionWebhooks.enabled" }}{{ end }}
+{{- if $v.prometheusOperator.kubeletService.enabled }}{{ $bad = append $bad "prometheusOperator.kubeletService.enabled" }}{{ end }}
+{{- if not ($v.prometheusOperator.namespaces).releaseNamespace }}{{ $bad = append $bad "prometheusOperator.namespaces.releaseNamespace" }}{{ end }}
+{{- if $v.nodeExporter.enabled }}{{ $bad = append $bad "nodeExporter.enabled" }}{{ end }}
+{{- if $v.windowsMonitoring.enabled }}{{ $bad = append $bad "windowsMonitoring.enabled" }}{{ end }}
+{{- if and $v.kubeStateMetrics.enabled $ksm.rbac.create $ksm.rbac.useClusterRole }}{{ $bad = append $bad "kube-state-metrics.rbac.useClusterRole" }}{{ end }}
+{{- if and $v.grafana.enabled $v.grafana.rbac.create (not $v.grafana.rbac.namespaced) }}{{ $bad = append $bad "grafana.rbac.namespaced" }}{{ end }}
+{{- if $bad }}
+{{- fail (printf "monitoring: rbac.scope=namespace but kube-prometheus-stack would still create cluster-scoped objects or need cluster-wide access (%s). Install with -f values-namespace.yaml, which sets every one of them, or use rbac.scope=cluster." (join ", " $bad)) }}
+{{- end }}
+{{- $ns := .Release.Namespace }}
+{{- if $v.prometheusOperator.enabled }}
+{{- $name := include "kube-prometheus-stack.operator.fullname" $kps }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kates-monitoring.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [monitoring.coreos.com]
+    resources:
+      - alertmanagers
+      - alertmanagers/finalizers
+      - alertmanagers/status
+      - alertmanagerconfigs
+      - prometheuses
+      - prometheuses/finalizers
+      - prometheuses/status
+      - prometheusagents
+      - prometheusagents/finalizers
+      - prometheusagents/status
+      - thanosrulers
+      - thanosrulers/finalizers
+      - thanosrulers/status
+      - scrapeconfigs
+      - scrapeconfigs/status
+      - servicemonitors
+      - servicemonitors/status
+      - podmonitors
+      - podmonitors/status
+      - probes
+      - probes/status
+      - prometheusrules
+      - prometheusrules/status
+    verbs: ["*"]
+  - apiGroups: [apps]
+    resources: [statefulsets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [configmaps, secrets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list, delete]
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [get, create, update, delete]
+  - apiGroups: [""]
+    resources: [endpoints]
+    verbs: [get]
+  # A Role's rule on namespaces reaches only its own namespace object
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, watch]
+  - apiGroups: ["", events.k8s.io]
+    resources: [events]
+    verbs: [patch, create]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, list, watch]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kates-monitoring.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kube-prometheus-stack.operator.serviceAccountName" $kps }}
+    namespace: {{ $ns }}
+{{- end }}
+{{- if $v.prometheus.enabled }}
+{{- $name := printf "%s-prometheus" (include "kube-prometheus-stack.fullname" $kps) }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kates-monitoring.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [services, endpoints, pods]
+    verbs: [get, list, watch]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kates-monitoring.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kube-prometheus-stack.prometheus.serviceAccountName" $kps }}
+    namespace: {{ $ns }}
+{{- end }}
+{{- end }}

@@ -45,6 +45,7 @@ Grafana is exposed as a NodePort on `30080` by default (dev convenience).
 | `test.resources` | requests `25m`/`32Mi`, limits `100m`/`64Mi` | The test pod's resources |
 | `kube-prometheus-stack.*.resources` | requests and a memory limit on every container | See [Pod security](#pod-security-and-resources) |
 | `kube-prometheus-stack.nodeExporter.enabled` | `true` | node-exporter; host-level, see [Pod security](#pod-security-and-resources) |
+| `rbac.scope` | `""` (`global.rbacScope`, then `cluster`) | `namespace`: nothing cluster-scoped, so a namespace admin installs the release; install with `-f values-namespace.yaml`, see [Namespace scope](#namespace-scope). The chart refuses `namespace` while a subchart value would still create a cluster-scoped object |
 
 Own keys are validated by `values.schema.json`; subchart keys are validated by kube-prometheus-stack itself.
 
@@ -74,6 +75,44 @@ Grafana's `initChownData` init container (root, `CAP_CHOWN`) is off: with
 persistence on, Grafana's fsGroup makes the volume writable on storage that
 honours fsGroup. Turn it back on only for storage that does not, in a
 namespace that allows it.
+
+## Namespace scope
+
+`rbac.scope=namespace` (or `global.rbacScope`) installs the stack as a
+namespace admin, someone bound to the built-in `admin` ClusterRole by a
+RoleBinding in one namespace, and the release creates nothing cluster-scoped.
+A parent chart cannot template its subchart's values, so the
+kube-prometheus-stack switches live in the `values-namespace.yaml` overlay,
+and the chart fails, naming the overlay, when `rbac.scope` says namespace but
+the subchart would still render a cluster-scoped object:
+
+```bash
+helm install mon oci://ghcr.io/bmscomp/charts/kates-monitoring -n team-a \
+  --skip-crds -f values-namespace.yaml
+```
+
+The operator watches the release namespace only, and this chart renders
+Roles for it and for Prometheus in place of kube-prometheus-stack's
+ClusterRoles (`global.rbac.create=false`). kube-state-metrics and Grafana use
+their own namespaced RBAC.
+
+**A cluster admin does two things once**, before the first such install: apply
+the `monitoring.coreos.com` CRDs (`charts/crds/crds` inside the
+kube-prometheus-stack package), and aggregate every verb on
+`monitoring.coreos.com` into `admin` (the `ClusterRole` in the overlay's
+header). Without the second the namespace admin can neither create a
+Prometheus nor grant the operator its Role: "attempting to grant RBAC
+permissions not currently held". kube-prometheus-stack's own
+`createAggregateClusterRoles` leaves out the `/status` and `/finalizers`
+subresources the operator writes.
+
+What namespace scope gives up: node-exporter and every node, kubelet,
+cAdvisor and control-plane target (API server, etcd, scheduler, controller
+manager, CoreDNS, kube-proxy) with their default rules and boards; monitors,
+rules and kube-state-metrics series from other namespaces; boards delivered
+into other namespaces (the Grafana sidecar watches its own); the admission
+webhook that validates PrometheusRules; and the ChaosEngine state series, so
+the chaos board and chaos alerts read nothing.
 
 ## kube-state-metrics and the ChaosEngine
 
