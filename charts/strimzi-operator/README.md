@@ -62,16 +62,16 @@ kubectl get deploy strimzi-cluster-operator -n strimzi-operator \
 | `values-dev.yaml` | Dev — `logLevel: DEBUG` |
 | `values-prod.yaml` | Prod **uplift** — hardening, PDB, `productionMode`, and the drain cleaner (two replicas, cert-manager certificate). It also enables upstream's operator NetworkPolicy, whose `egress: [{}]` admits every destination and so lifts the egress limits of `operatorPolicy` (policies add up); add `--set strimzi-kafka-operator.operatorNetworkPolicy.enabled=false` after the overlay to keep them. Read the header. |
 | `values-generic.yaml` | Unknown clusters — documents DNS-domain injection and registry redirection |
-| `values-namespaced-rbac.yaml` | An operator a **namespace admin** installs, with no cluster-scoped object: `namespacedRbac.enabled: true` and every cluster-scoped switch off. See [Without ClusterRoles](#without-clusterroles). |
+| `values-namespace.yaml` | An operator a **namespace admin** installs, with no cluster-scoped object: `rbac.scope: namespace` and every cluster-scoped switch off. See [Without ClusterRoles](#without-clusterroles). |
 | `values-namespace-scope.yaml` | An **additional** operator, co-located with the Kafka namespace it watches: `watchAnyNamespace: false`, `createGlobalResources: false`, `crdUpgrade.enabled: false`, `globalBindings.enabled: true`, dashboards and drain cleaner off (once per Kubernetes cluster), kind-sized. Never for the primary. |
 
 ## Without ClusterRoles
 
-`values-namespaced-rbac.yaml` is for a team that may not create ClusterRoles: a namespace admin installs the operator into the Kafka namespace, where it watches only that namespace (add others to `strimzi-kafka-operator.watchNamespaces`; the Roles go there too). Nothing this release creates is cluster-scoped.
+`values-namespace.yaml` is for a team that may not create ClusterRoles: a namespace admin installs the operator into the Kafka namespace, where it watches only that namespace (add others to `strimzi-kafka-operator.watchNamespaces`; the Roles go there too). Nothing this release creates is cluster-scoped.
 
 ```bash
 helm upgrade --install strimzi-operator charts/strimzi-operator -n team-a --skip-crds \
-  -f charts/strimzi-operator/values-namespaced-rbac.yaml
+  -f charts/strimzi-operator/values-namespace.yaml
 helm upgrade --install kafka charts/kafka-cluster -n team-a --set kafka.rack=null
 ```
 
@@ -92,7 +92,7 @@ Left out, because only a cluster grant gives them: rack awareness (the operator 
 | `crdUpgrade.backoffLimit` | `3` | Job retries before the install/upgrade aborts |
 | `crdUpgrade.ttlSecondsAfterFinished` | `300` | Retention of a **failed** Job for log inspection. A successful Job is deleted immediately by Helm's `hook-succeeded` policy, so this only governs the failure path. |
 | `globalBindings.enabled` | `false` | Render `ClusterRoleBinding`s named `strimzi-cluster-operator-<namespace>-{global,kafka-broker-delegation,kafka-client-delegation}` binding this release's ServiceAccount to the primary's `strimzi-cluster-operator-global`, `strimzi-kafka-broker` and `strimzi-kafka-client` ClusterRoles. On for additional operators (`createGlobalResources: false` skips upstream's fixed-name copies). |
-| `namespacedRbac.enabled` | `false` | Render the operator's rights as `Role`s and `RoleBinding`s in each watched namespace and nothing cluster-scoped. The Roles carry the rules of upstream's own `strimzi-cluster-operator-namespaced`, `-watched`, `-leader-election` and `strimzi-entity-operator` ClusterRoles, rendered from the subchart rather than copied. Refuses to render while `watchAnyNamespace`, `rbac.create`, `createGlobalResources`, `createAggregateRoles`, `crdUpgrade`, `globalBindings` or `drainCleaner` is on. |
+| `rbac.scope` | `""` (`global.rbacScope`, then `cluster`) | Render the operator's rights as `Role`s and `RoleBinding`s in each watched namespace and nothing cluster-scoped. The Roles carry the rules of upstream's own `strimzi-cluster-operator-namespaced`, `-watched`, `-leader-election` and `strimzi-entity-operator` ClusterRoles, rendered from the subchart rather than copied. `namespace` refuses to render while `watchAnyNamespace`, `rbac.create`, `createGlobalResources`, `createAggregateRoles`, `crdUpgrade`, `globalBindings` or `drainCleaner` is on. |
 | `operatorPolicy.enabled` | `true` | Render the Cluster Operator's NetworkPolicy in the release namespace: probe/metrics ingress on 8080, egress to DNS, the API server and every `strimzi.io/kind` pod in the watched namespaces (all namespaces under `watchAnyNamespace`) on 9090–9093, 8443 and 8083. `charts/kafka-cluster` 0.4 wrote this policy into the operator namespace; while such a release still owns the object, this chart skips it and NOTES say so. kafka-cluster 1.0 no longer renders it. |
 | `productionMode` | `false` | Refuse unsafe production settings (a single drain-cleaner replica) |
 | `drainCleaner.enabled` | `false` | The [Strimzi Drain Cleaner](https://github.com/strimzi/drain-cleaner): a validating webhook that turns node-drain evictions of Kafka pods into operator-driven rolls. **One per Kubernetes cluster** — enable it on the primary operator's release only. Moved here from kafka-cluster 0.4. |

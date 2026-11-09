@@ -117,13 +117,14 @@ globalBindings:
 # rules of upstream's own ClusterRoles (rendered from the subchart, not copied).
 # Needs the CRDs installed once by an admin, and leaves out what only a cluster
 # grant gives: rack awareness, NodePort addresses, volume-expansion checks.
-# values-namespaced-rbac.yaml sets everything this needs.
-namespacedRbac:
-  # -- Render the operator's RBAC as Roles and RoleBindings, and nothing
-  # cluster-scoped. Refuses to render unless the cluster-scoped switches
+# values-namespace.yaml sets everything this needs.
+rbac:
+  # -- cluster (empty: global.rbacScope, then cluster) or namespace: the
+  # operator's RBAC as Roles and RoleBindings, and nothing cluster-scoped.
+  # namespace refuses to render unless the cluster-scoped switches
   # (watchAnyNamespace, rbac.create, createGlobalResources,
   # createAggregateRoles, crdUpgrade, globalBindings, drainCleaner) are off.
-  enabled: false
+  scope: ""
 
 # ── Operator NetworkPolicy (kates-owned) ─────────────────────────────────────
 # The policy kafka-cluster 0.4 wrote into the operator's namespace

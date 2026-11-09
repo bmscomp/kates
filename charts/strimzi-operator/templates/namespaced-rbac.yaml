@@ -1,4 +1,4 @@
-{{- if .Values.namespacedRbac.enabled }}
+{{- if (eq (include "strimzi-operator.namespaced" .) "true") }}
 {{- $op := index .Values "strimzi-kafka-operator" -}}
 {{- /*
 The operator's rights as Roles, for an install by someone who may not create
@@ -26,7 +26,7 @@ too: an admin installs them once.
 {{- if .Values.globalBindings.enabled }}{{ $offenders = append $offenders "globalBindings.enabled=false" }}{{ end -}}
 {{- if .Values.drainCleaner.enabled }}{{ $offenders = append $offenders "drainCleaner.enabled=false" }}{{ end -}}
 {{- if $offenders }}
-{{- fail (printf "strimzi-operator: namespacedRbac.enabled creates no cluster-scoped object, so it also needs %s. values-namespaced-rbac.yaml sets them." (join ", " $offenders)) -}}
+{{- fail (printf "strimzi-operator: rbac.scope=namespace creates no cluster-scoped object, so it also needs %s. values-namespace.yaml sets them." (join ", " $offenders)) -}}
 {{- end }}
 {{- $sub := index .Subcharts "strimzi-kafka-operator" -}}
 {{- $subValues := merge (dict "rbac" (dict "create" true) "createGlobalResources" true) (deepCopy $sub.Values) -}}
@@ -43,7 +43,7 @@ too: an admin installs them once.
 {{- range $r := $roles }}
 {{- $rendered := include (printf "%s%s" $upstream $r.file) $subCtx | fromYaml }}
 {{- if ne $rendered.metadata.name $r.role }}
-{{- fail (printf "strimzi-operator: upstream's %s no longer renders the ClusterRole %s (got %q); namespacedRbac needs updating for this Strimzi version." $r.file $r.role $rendered.metadata.name) }}
+{{- fail (printf "strimzi-operator: upstream's %s no longer renders the ClusterRole %s (got %q); rbac.scope=namespace needs updating for this Strimzi version." $r.file $r.role $rendered.metadata.name) }}
 {{- end }}
 {{- range $ns := $r.namespaces }}
 ---

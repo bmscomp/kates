@@ -23,6 +23,14 @@ schema, the README rename table, and the `--set strimzi-kafka-operator.*` UX
 this chart is built around.
 */}}
 
+{{/*
+"true" when rbac.scope (else global.rbacScope, else cluster) is namespace: the
+operator's rights become Roles and nothing cluster-scoped renders.
+*/}}
+{{- define "strimzi-operator.namespaced" -}}
+{{- if eq ((.Values.rbac).scope | default (.Values.global).rbacScope | default "cluster") "namespace" -}}true{{- end -}}
+{{- end }}
+
 {{- define "strimzi-operator.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}

@@ -2,7 +2,7 @@
 # Usage, as a namespace admin:
 #   helm upgrade --install strimzi-operator charts/strimzi-operator \
 #     -n <kafka-namespace> --skip-crds \
-#     -f charts/strimzi-operator/values-namespaced-rbac.yaml
+#     -f charts/strimzi-operator/values-namespace.yaml
 # --skip-crds: Helm 4 applies the subchart's crds/ even when they exist.
 #
 # BEFORE IT, ONCE, A CLUSTER ADMIN:
@@ -35,8 +35,8 @@
 #   • the drain cleaner, a cluster-wide webhook.
 # There must be no other operator watching this namespace.
 
-namespacedRbac:
-  enabled: true
+rbac:
+  scope: namespace
 
 crdUpgrade:
   enabled: false
