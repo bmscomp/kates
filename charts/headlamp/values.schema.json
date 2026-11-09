@@ -5,7 +5,8 @@
         "global": {
             "type": "object",
             "properties": {
-                "imageRegistry": { "type": "string" }
+                "imageRegistry": { "type": "string" },
+                "rbacScope": { "type": "string", "enum": ["", "cluster", "namespace"], "description": "Default rbac.scope of every chart in an umbrella release." }
             }
         },
         "replicaCount": { "type": "integer", "minimum": 1 },
@@ -40,6 +41,7 @@
         "rbac": {
             "type": "object",
             "properties": {
+                "scope": { "type": "string", "enum": ["", "cluster", "namespace"], "description": "cluster (empty: global.rbacScope, then cluster) or namespace: a Role, nothing cluster-scoped." },
                 "create": { "type": "boolean" },
                 "rules": { "type": "array", "items": { "type": "object" } }
             }

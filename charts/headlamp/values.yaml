@@ -29,6 +29,11 @@ serviceAccount:
 
 rbac:
   create: true
+  # -- cluster (empty: global.rbacScope, then cluster): a ClusterRole, Headlamp
+  # shows the whole cluster. namespace: a Role in the release namespace, without
+  # the cluster-scoped resources below, so a namespace admin installs it and
+  # Headlamp shows that namespace only.
+  scope: ""
   rules:
     - apiGroups: [""]
       resources:
