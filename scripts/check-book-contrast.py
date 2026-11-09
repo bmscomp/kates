@@ -151,15 +151,8 @@ def pairs(syntax):
     for style, colour in syntax:
         out.append(("code", f"syntax: {style}", colour, ["$code-block-bg"], TEXT))
     for name in CALLOUTS:
-        c = f"$callout-color-{name}"
-        body = page + [(c, "$kates-callout-tint")]
-        header = body + [(c, "$kates-callout-header-tint")]
-        out += [
-            ("callouts", f"{name}: text", "$body-color", body, TEXT),
-            ("callouts", f"{name}: title", "$kates-heading", header, TEXT),
-            ("callouts", f"{name}: links", "$kates-link", body, TEXT),
-            ("callouts", f"{name}: icon and rule", c, header, NON_TEXT),
-        ]
+        # A callout has no tint of its own: its text is the page's
+        out.append(("callouts", f"{name}: icon and rule", f"$callout-color-{name}", page, NON_TEXT))
     hot = page + ["$kates-gloss-hot"]
     tool = SCSS_ALPHAS["navigation-tool"]
     out += [

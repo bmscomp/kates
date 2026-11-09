@@ -149,7 +149,9 @@ def refs(e):
         parts.append(f'[{ch}]({target}): ' + ', '.join(link(f, ch, s, a) for s, a in secs))
     return '; '.join(parts) if parts else 'Not used in a chapter yet.'
 
-lines = ['# Index {.unnumbered}', '',
+# search: false keeps the page's run-on entries out of the book's search,
+# where they ranked above the sections they point to.
+lines = ['---', 'search: false', '---', '', '# Index {.unnumbered}', '',
          '::: {.content-visible when-format="pdf"}', '```{=latex}', '\\printindex', '```', ':::', '',
          '::: {.content-visible when-format="html"}',
          'Every term the book teaches, with the sections that teach it: the ones that use the term more than once or name it in their heading, by chapter and in reading order. The [Glossary](appendix-a-glossary.md) defines each term; this page says where to read about it. The PDF edition lists the same entries by page number.', '']

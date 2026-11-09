@@ -240,6 +240,31 @@
     }
   }
 
+  // ── A part's own page ─────────────────────────────────────────────────────
+  // Its title "Part II — Performance Testing" opens the part as a printed
+  // book does: "Part II" in small capitals over the part's name.
+  const title = main.querySelector(".quarto-title h1.title");
+  const opening = title && title.textContent.trim().match(/^(Part\s+[IVXLC]+)\s+[—–-]\s+(.+)$/);
+  if (opening) {
+    const label = document.createElement("span");
+    label.className = "kates-part-label";
+    label.textContent = opening[1];
+    title.replaceChildren(label, " ", opening[2]);
+    document.body.classList.add("kates-part-page");
+  }
+
+  // ── The two search buttons ────────────────────────────────────────────────
+  // Quarto names both "Search": the header's, on phones, and the sidebar's,
+  // which its search script draws once the page has loaded.
+  document.querySelector("#quarto-header .quarto-search-button")
+    ?.setAttribute("aria-label", "Search the book");
+  window.addEventListener("load", () => {
+    const button = document.querySelector("#quarto-sidebar .aa-DetachedSearchButton");
+    if (!button) return;
+    button.setAttribute("aria-label", "Search the book, or press /");
+    button.title = "Search the book (/)";
+  }, { once: true });
+
   // ── What each chapter answers, from its part page ─────────────────────────
   // Every part page lists its chapters as "[Title](file): question? About N
   // minutes." Those words go under the chapter being read, and under the

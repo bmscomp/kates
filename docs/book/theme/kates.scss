@@ -44,7 +44,6 @@ $kates-panel-small-size: 15px;
 $kates-panel-label-size: 1.05rem;
 
 // Callouts and the chapter table of contents
-$callout-border-width: 4px;
 $callout-margin-top: 1.5rem;
 $callout-margin-bottom: 1.5rem;
 $toc-font-size: 0.82rem;
@@ -196,6 +195,27 @@ $kates-margin-box: ":is(#quarto-margin-sidebar, #quarto-toc-toggle > .quarto-sid
   .chapter-number {
     color: $kates-link;
   }
+}
+
+// A part's own page (theme/reader.html marks it): more air above, "Part II"
+// in small capitals over the part's name, and a hairline before the text
+.kates-part-page .quarto-title-block {
+  padding: clamp(1.5rem, 5vh, 4rem) 0 1.75rem;
+  margin-bottom: 2rem;
+  border-bottom: 1px solid $kates-border;
+
+  .quarto-title h1.title {
+    font-size: clamp(2.4rem, 1.8rem + 2.4vw, 3.6rem);
+  }
+}
+
+.kates-part-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: $kates-link;
+  font-size: 0.5em;
+  letter-spacing: 0.08em;
+  font-variant-caps: all-small-caps;
 }
 
 // The title breadcrumb repeats the H1 below it, so show only the part name,
@@ -634,14 +654,28 @@ div.sourceCode pre.sourceCode {
 
 // ── Callouts ────────────────────────────────────────────────────────────────
 
-div.callout {
-  border-radius: $border-radius-lg;
-  border-color: $kates-border;
+// An aside, as a printed book sets one: a rule in the callout's colour above,
+// a hairline below, and the text on the column's edges, with no box, side
+// bar or tint. The icon's shape tells the kinds apart as well as its colour.
+div.callout.callout {
+  border: 0;
+  border-top: 1px solid $kates-border;
+  border-bottom: 1px solid $kates-border;
+  border-radius: 0;
+  background-color: transparent;
   box-shadow: none;
   overflow: hidden;
 
-  .callout-header {
+  > .callout-header {
+    padding: 0.7rem 0 0;
+    background-color: transparent;
+    color: $kates-heading;
     font-weight: 600;
+    opacity: 1;
+  }
+
+  .callout-body {
+    padding: 0 0 0.2rem;
   }
 
   .callout-body-container > :last-child {
@@ -663,12 +697,7 @@ div.callout {
 
 @each $name, $color in ("note": $callout-color-note, "tip": $callout-color-tip, "warning": $callout-color-warning, "caution": $callout-color-caution, "important": $callout-color-important) {
   div.callout-#{$name}.callout {
-    background-color: rgba($color, $kates-callout-tint);
-  }
-
-  div.callout-#{$name}.callout-style-default > .callout-header {
-    background-color: rgba($color, $kates-callout-header-tint);
-    color: $kates-heading;
+    border-top-color: $color;
   }
 }
 
@@ -1228,7 +1257,6 @@ dialog.kates-diagram-viewer {
   padding: 1.15rem 1.35rem;
   background-color: $kates-surface;
   border: 1px solid $kates-border;
-  border-left: 4px solid $kates-link;
   border-radius: $border-radius-lg;
   clear: both;
 }
@@ -1300,9 +1328,10 @@ dialog.kates-diagram-viewer {
 // Five bands that all grow with the window: an edge, the navigation, the text
 // and its two outsets, the contents, an edge. The text column is its own
 // measure, 30 times the text's size (about 75 characters a line), so
-// running text fills it; what the window has over goes to the outsets. A table, a code block or a diagram steps out into
-// the outsets, equally on both sides, only when the column is too narrow for
-// it, and only as far as it needs: theme/reader.html marks it .kates-wide
+// running text fills it; what the window has over goes to the outsets. A
+// table, a code block or a diagram steps out into the outsets, equally on
+// both sides, only when the column is too narrow for it, and only as far as
+// it needs: theme/reader.html marks it .kates-wide
 // and gives it --kates-out. The rest keep to the column, under their
 // headings. diagrams.html then lays a diagram out in its cell's wider room,
 // and one wider still reaches on into the right margin ("Diagrams"); a

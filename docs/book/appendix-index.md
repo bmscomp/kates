@@ -1,3 +1,7 @@
+---
+search: false
+---
+
 # Index {.unnumbered}
 
 ::: {.content-visible when-format="pdf"}
