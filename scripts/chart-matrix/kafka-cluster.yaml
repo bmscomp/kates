@@ -667,8 +667,18 @@ renders:
         kind: Schedule
         path: metadata/annotations/kates.io~1volume-data
         equals: fs-backup
+  - name: namespace rbac scope
+    set: [rbac.scope=namespace]
+    assert:
+      - why: "a namespace admin installs it: no rack, so Strimzi binds the brokers to no ClusterRole"
+        kind: Kafka
+        path: spec/kafka/rack
+        exists: false
 
 rails:
+  - name: a NodePort listener in namespace rbac scope
+    want: "rbac.scope=namespace with NodePort listener"
+    set: [rbac.scope=namespace, kafka.externalAccess.type=nodeport]
   - name: a 0.4 client namespace with no client to place
     want: "no networkPolicy.clients entry is called \"connect\""
     set: [networkPolicies.connectNamespace=connect]

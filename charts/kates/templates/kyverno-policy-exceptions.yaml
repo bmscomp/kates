@@ -1,6 +1,6 @@
 {{- /* Exceptions to this chart's own ClusterPolicy, in other namespaces: like
        the policy, nothing under rbac.scope=namespace. */}}
-{{- if and .Values.kyvernoPolicy.enabled .Values.kyvernoPolicy.policyExceptions.enabled (ne .Values.rbac.scope "namespace") (.Capabilities.APIVersions.Has "kyverno.io/v2") }}
+{{- if and .Values.kyvernoPolicy.enabled .Values.kyvernoPolicy.policyExceptions.enabled (ne (include "kates.rbacScope" .) "namespace") (.Capabilities.APIVersions.Has "kyverno.io/v2") }}
 {{- range $ns := .Values.kyvernoPolicy.policyExceptions.namespaces }}
 {{- range $policy := $.Values.kyvernoPolicy.policyExceptions.exemptPolicies }}
 ---

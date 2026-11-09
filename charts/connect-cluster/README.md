@@ -242,6 +242,7 @@ The test connectors expect the platform's demo PostgreSQL; `values-prod.yaml` tu
 | `autoscaling.*` | off, 3–10, CPU 80% | |
 | `kafkaUser.*` | off | managed principal |
 | `secretSync.*` | on (job) | cross-namespace credentials |
+| `rbac.scope` | `""` (`global.rbacScope`, then `cluster`) | `namespace`: nothing cluster-scoped, so a namespace admin installs the release. Drops `rack` (Strimzi binds rack-aware workers to a ClusterRole) and the PriorityClass |
 | `rbac.secretNames`, `rbac.allSecrets` | `[]`, `false` | see [Secrets](#secrets) |
 | `serviceAccount.*` | created | the test pods' account; annotations also go on the workers' |
 | `restApi.service`, `restApi.ingress` | ClusterIP 8083, no ingress | |

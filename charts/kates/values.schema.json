@@ -2,6 +2,7 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
+        "global": { "type": "object", "properties": { "rbacScope": { "type": "string", "enum": ["", "cluster", "namespace"], "description": "Default rbac.scope of every chart in an umbrella release." } } },
         "productionMode": {
             "type": "boolean",
             "description": "Enable production guard rails: rendering fails if insecure defaults would reach the cluster"
@@ -65,7 +66,7 @@
             "type": "object",
             "properties": {
                 "create": { "type": "boolean" },
-                "scope": { "type": "string", "enum": [ "cluster", "namespace" ] },
+                "scope": { "type": "string", "enum": [ "", "cluster", "namespace" ] },
                 "kafkaNamespaceRole": { "type": "boolean" },
                 "nodeReads": { "type": "boolean" },
                 "directChaos": { "type": "boolean" },

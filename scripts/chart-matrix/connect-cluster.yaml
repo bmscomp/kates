@@ -498,6 +498,15 @@ renders:
         count: 0
       - kind: PrometheusRule
         count: 0
+  - name: namespace rbac scope
+    set: [rbac.scope=namespace, priorityClass.create=true]
+    assert:
+      - why: "no rack, so Strimzi binds the workers to no ClusterRole"
+        kind: KafkaConnect
+        path: spec/rack
+        exists: false
+      - kind: PriorityClass
+        count: 0
 
 rails:
   - name: tracing jaeger (removed from the v1 API, C3)

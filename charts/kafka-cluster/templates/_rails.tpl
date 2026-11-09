@@ -109,6 +109,15 @@ and say what to do, instead of producing a Kafka that is NotReady an hour later
 {{- /* Floating tags */ -}}
 {{- include "kafka-common.rails.noFloatingTag" (dict "chart" "kafka-cluster" "images" (dict "kafka.image" $v.kafka.image "tieredStorage.image" (ternary $v.tieredStorage.image "" $r.tiered) "testImages.kafka" $v.testImages.kafka "testImages.kubectl" $v.testImages.kubectl)) -}}
 
+{{- /* rbac.scope=namespace: Strimzi binds the brokers to a ClusterRole for a NodePort listener */ -}}
+{{- if eq ($v.rbac.scope | default ($v.global).rbacScope | default "cluster") "namespace" -}}
+{{- range $r.listeners -}}
+{{- if eq .type "nodeport" -}}
+{{- fail (printf "kafka-cluster: rbac.scope=namespace with NodePort listener %q: Strimzi gives the brokers a ClusterRoleBinding to read their node's address. Use loadbalancer, ingress or an internal listener, or rbac.scope=cluster." .name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- /* Production */ -}}
 {{- if $prod -}}
 {{- range $r.listeners -}}

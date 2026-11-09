@@ -14,6 +14,21 @@ The Strimzi operator must be running (install `oci://ghcr.io/bmscomp/charts/stri
 
 Any namespace works: Kafka and Kates both run in the release namespace, and the umbrella points Kates at it (the `kates.kafka.*`, `kates.trogdor.coordinatorUrl` and `kates.networkPolicy.kafka.namespace` rows below) and admits Kates to the brokers from it. The kates chart's own defaults name namespace `kafka`, where `kates deploy` installs Kafka. Nothing in the umbrella installs a Trogdor coordinator.
 
+## Cluster or namespace install
+
+One key picks who can install the release: `global.rbacScope`. Every subchart reads it as the default of its own `rbac.scope`.
+
+| `global.rbacScope` | Installed by | Cluster-scoped RBAC | Left out |
+|---|---|---|---|
+| `cluster` (default) | a cluster admin | the `kates` ClusterRole; Strimzi's ClusterRoleBindings for broker and worker rack awareness | nothing |
+| `namespace` | a namespace admin | none | rack awareness (Kafka, Connect, MirrorMaker 2), NodePort listeners (refused), Kyverno ClusterPolicies and Connect's PriorityClass, Kates' chaos and disruption |
+
+```bash
+helm install platform oci://ghcr.io/bmscomp/charts/kates-platform -n team-a --set global.rbacScope=namespace
+```
+
+Either way a cluster admin installs the Strimzi operator first, cluster-wide. For a namespace install the team also needs the Strimzi kinds in `admin`: install the operator with `--set strimzi-kafka-operator.createAggregateRoles=true`. Kafka UI, Apicurio Registry and CDC PostgreSQL never need a cluster grant, so they have no switch. The standalone charts take the same key as `rbac.scope`.
+
 ## Key values
 
 | Key | Default | Description |
@@ -29,6 +44,7 @@ Any namespace works: Kafka and Kates both run in the release namespace, and the 
 | `kates.trogdor.coordinatorUrl` | `http://trogdor-coordinator.{{ .Release.Namespace }}.svc:8889` | A Trogdor coordinator next to Kafka, if you run one |
 | `kates.networkPolicy.kafka.namespace` | `{{ .Release.Namespace }}` | Namespace the Kates NetworkPolicy allows egress to for the brokers and Trogdor, and the one the Kates API's chaos, topology, cluster alerts and compliance act in |
 | `kafka-cluster.networkPolicy.clients` | `kates` from the release namespace | Overrides the platform profile's `kates` grant (namespace `kates`); a list set here replaces it |
+| `global.rbacScope` | `cluster` | The install mode of the release, every subchart's `rbac.scope` default: `cluster` needs a cluster admin; `namespace` leaves nothing cluster-scoped. See [Cluster or namespace install](#cluster-or-namespace-install) |
 | `kates.rbac.cdcSecretNamespaces` | `[]` | Namespaces where the Kates API may read the `postgresql` Secret; INTEGRATION_CDC needs its database's namespace here, since the kates ClusterRole grants nothing on Secrets |
 | `apicurio-registry.enabled` | `false` | Deploy Apicurio Registry (KafkaSQL storage against the `kafka-cluster` subchart) |
 | `mirror-maker2.enabled` | `false` | Deploy MirrorMaker 2 (needs a real `mirrors[].source`) |

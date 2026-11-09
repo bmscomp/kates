@@ -362,6 +362,7 @@ The chart refuses, with the reason and the fix:
 | `kyvernoPolicy.mutate` | `false` | Inject the security contexts |
 | `kyvernoPolicy.excludeStrimziPods` | `true` | Strimzi pods are left out of mutation and capability checks |
 | `kyvernoPolicy.policyExceptions` | off | `PolicyException`s for `namespaces` and `exemptRules` |
+| `rbac.scope` | `""` (`global.rbacScope`, then `cluster`) | `namespace`: nothing cluster-scoped, so a namespace admin installs the release. Drops `kafka.rack` (Strimzi binds rack-aware brokers to a ClusterRole) and the Kyverno ClusterPolicy, and refuses a NodePort listener (same binding) |
 | `rbac.create` | `true` | `<clusterName>-admin` ServiceAccount with a read Role (plus `rbac.extraRules`) |
 | `externalSecrets.*` | off | SecretStore, PushSecret, ExternalSecret wiring |
 

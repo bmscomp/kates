@@ -664,6 +664,13 @@ kyvernoPolicy:
 rbac:
   create: true
   extraRules: []
+  # -- cluster (empty: global.rbacScope, then cluster) or namespace. In
+  # namespace scope the release leaves nothing cluster-scoped behind, so a
+  # namespace admin installs it: no rack awareness and no
+  # NodePort listener (for either, Strimzi binds the brokers to a ClusterRole),
+  # no Kyverno ClusterPolicy.
+  scope: ""
+
 
 serviceAccount:
   annotations: {}

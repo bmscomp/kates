@@ -164,7 +164,7 @@ built as one map and merged with templateExtra, never written beside it.
       "logging" .Values.logging
       "loggingConfigMap" (printf "%s-logging" $fullname)
       "tracing" .Values.tracing
-      "rack" .Values.rack
+      "rack" (ternary dict .Values.rack (eq ((.Values.rbac).scope | default (.Values.global).rbacScope | default "cluster") "namespace"))
       "metrics" (dict
           "enabled" (.Values.metrics.enabled | default false)
           "type" .Values.metrics.type
