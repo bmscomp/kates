@@ -50,6 +50,23 @@ helm upgrade --install chaos ./kates-chaos \
 | `values-kind.yaml` | Local Kind / dev | `pullPolicy: IfNotPresent` |
 | `values-generic.yaml` | Production K8s | `pullPolicy: Always`, NetworkPolicy + Kyverno on |
 
+## Cluster or namespace
+
+`rbac.scope` (default `cluster`, also from `global.rbacScope`) picks the install. `values-namespace.yaml` sets `namespace`: nothing cluster-scoped, so a namespace admin installs Litmus (`operatorMode: namespaced`) and runs chaos in that one namespace, where Kafka and Kates run too.
+
+```bash
+helm upgrade --install chaos charts/kates-chaos -n team-a --skip-crds -f charts/kates-chaos/values-namespace.yaml
+```
+
+A cluster admin first installs the Litmus CRDs and lets `admin` manage them (a ClusterRole on `chaosengines`, `chaosexperiments`, `chaosresults` labelled `rbac.authorization.k8s.io/aggregate-to-admin: "true"`). A cluster admin first grants, once and inside the namespace only, a Role with `escalate` and `bind` on `roles`: Kubernetes refuses a Role holding rules its creator lacks, and Litmus' own Role names rules a namespace `admin` does not hold.
+
+```bash
+kubectl -n team-a create role rbac-delegate --verb=escalate,bind --resource=roles.rbac.authorization.k8s.io
+kubectl -n team-a create rolebinding <who>-rbac-delegate --role=rbac-delegate --serviceaccount=team-a:<who>
+```
+
+Left out: chaos in other namespaces, node chaos, the Kyverno ClusterPolicy. The chart refuses `rbac.scope=namespace` with node chaos, another target namespace or a non-namespaced Litmus. Verified on kind 1.37: a ServiceAccount bound to `admin` plus that Role installed the chart, its Helm tests passed, and a `pod-delete` ChaosEngine finished `Completed`/`Pass`.
+
 ## Configuration Reference
 
 ### Core

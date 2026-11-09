@@ -1,0 +1,30 @@
+# kates-chaos — Without ClusterRoles
+# Usage, as a namespace admin, chaos and its targets in one namespace:
+#   helm upgrade --install chaos charts/kates-chaos -n <ns> --skip-crds \
+#     -f charts/kates-chaos/values-namespace.yaml
+# Kafka and the app that starts chaos (Kates) run in the same namespace.
+# --skip-crds: Helm 4 applies litmus-core's crds/ even when they exist.
+#
+# BEFORE IT, ONCE, A CLUSTER ADMIN grants, in the namespace only, escalate and
+# bind on roles (Litmus' Role names rules a namespace admin does not hold):
+#   kubectl -n <ns> create role rbac-delegate --verb=escalate,bind \
+#     --resource=roles.rbac.authorization.k8s.io
+#   kubectl -n <ns> create rolebinding <who>-rbac-delegate --role=rbac-delegate \
+#     --serviceaccount=<ns>:<who>
+# and installs the Litmus CRDs (chaosengines,
+# chaosexperiments, chaosresults .litmuschaos.io) and lets the team create
+# them, e.g. a ClusterRole with those resources labelled
+# rbac.authorization.k8s.io/aggregate-to-admin: "true".
+#
+# What only a cluster grant gives is left out: chaos outside this namespace,
+# node chaos (drain, node CPU/IO), and the Kyverno ClusterPolicy.
+
+rbac:
+  scope: namespace
+  # Empty: target and coordinator are the release namespace.
+  targetNamespaces: []
+  nodeChaos:
+    enabled: false
+
+litmus-core:
+  operatorMode: namespaced

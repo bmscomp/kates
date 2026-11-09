@@ -97,6 +97,11 @@ serviceAccount:
 #                 and read ChaosResults (used by an app that orchestrates chaos)
 rbac:
   enabled: true
+  # -- cluster (empty: global.rbacScope, then cluster) or namespace: nothing
+  # cluster-scoped, so a namespace admin installs the release. Litmus then runs
+  # namespaced, chaos targets only the release namespace, and node chaos and
+  # the Kyverno ClusterPolicy are off. values-namespace.yaml sets it all.
+  scope: ""
   targetNamespaces:
     - name: kafka
       role: target

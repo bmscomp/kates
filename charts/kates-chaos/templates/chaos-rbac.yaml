@@ -1,6 +1,16 @@
 {{- if .Values.rbac.enabled }}
 {{- $sa := include "kates-chaos.serviceAccountName" . }}
 {{- $targets := include "kates-chaos.targetNamespaces" . | fromYamlArray }}
+{{- if include "kates-chaos.namespaced" . }}
+{{- /* Only Roles in the release namespace: Litmus watches only it, and node chaos needs nodes. */}}
+{{- $refused := list }}
+{{- if .Values.rbac.nodeChaos.enabled }}{{ $refused = append $refused "rbac.nodeChaos.enabled=false" }}{{ end }}
+{{- if ne (index .Values "litmus-core" "operatorMode") "namespaced" }}{{ $refused = append $refused "litmus-core.operatorMode=namespaced" }}{{ end }}
+{{- range $targets }}{{ if ne .name $.Release.Namespace }}{{ $refused = append $refused (printf "rbac.targetNamespaces only %s (not %s)" $.Release.Namespace .name) }}{{ end }}{{ end }}
+{{- if $refused }}
+{{- fail (printf "kates-chaos: rbac.scope=namespace creates nothing cluster-scoped, so it also needs %s. values-namespace.yaml sets them." (join ", " $refused)) }}
+{{- end }}
+{{- end }}
 {{- range $t := $targets }}
 {{- if eq ($t.role | default "target") "target" }}
 ---
@@ -105,9 +115,12 @@ subjects:
 ---
 # ── Coordinator namespace {{ $t.name }}: create engines + read results ────────
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: {{ ternary "Role" "ClusterRole" (eq (include "kates-chaos.namespaced" $) "true") }}
 metadata:
   name: {{ include "kates-chaos.fullname" $ }}-coordinator-{{ $t.name }}
+  {{- if (include "kates-chaos.namespaced" $) }}
+  namespace: {{ $t.name }}
+  {{- end }}
   labels:
     {{- include "kates-chaos.labels" $ | nindent 4 }}
 rules:
@@ -116,14 +129,17 @@ rules:
     verbs: ["create", "get", "list", "watch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: {{ ternary "Role" "ClusterRole" (eq (include "kates-chaos.namespaced" $) "true") }}Binding
 metadata:
   name: {{ include "kates-chaos.fullname" $ }}-coordinator-{{ $t.name }}
+  {{- if (include "kates-chaos.namespaced" $) }}
+  namespace: {{ $t.name }}
+  {{- end }}
   labels:
     {{- include "kates-chaos.labels" $ | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: {{ ternary "Role" "ClusterRole" (eq (include "kates-chaos.namespaced" $) "true") }}
   name: {{ include "kates-chaos.fullname" $ }}-coordinator-{{ $t.name }}
 subjects:
   - kind: ServiceAccount

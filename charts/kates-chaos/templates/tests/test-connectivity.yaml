@@ -15,9 +15,12 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: {{ ternary "Role" "ClusterRole" (eq (include "kates-chaos.namespaced" $) "true") }}
 metadata:
   name: {{ $testSA }}
+  {{- if (include "kates-chaos.namespaced" $) }}
+  namespace: {{ .Release.Namespace }}
+  {{- end }}
   labels:
     {{- include "kates-chaos.labels" . | nindent 4 }}
   annotations:
@@ -31,17 +34,22 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list", "watch"]
+  {{- if not (include "kates-chaos.namespaced" $) }}
   - apiGroups: ["apiextensions.k8s.io"]
     resources: ["customresourcedefinitions"]
     verbs: ["get", "list"]
+  {{- end }}
   - apiGroups: ["litmuschaos.io"]
     resources: ["chaosexperiments", "chaosengines", "chaosresults"]
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: {{ ternary "Role" "ClusterRole" (eq (include "kates-chaos.namespaced" $) "true") }}Binding
 metadata:
   name: {{ $testSA }}
+  {{- if (include "kates-chaos.namespaced" $) }}
+  namespace: {{ .Release.Namespace }}
+  {{- end }}
   labels:
     {{- include "kates-chaos.labels" . | nindent 4 }}
   annotations:
@@ -50,7 +58,7 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: {{ ternary "Role" "ClusterRole" (eq (include "kates-chaos.namespaced" $) "true") }}
   name: {{ $testSA }}
 subjects:
   - kind: ServiceAccount
@@ -145,7 +153,11 @@ spec:
           TOTAL=0
           for crd in $CRDS; do
             TOTAL=$((TOTAL + 1))
+            {{- if include "kates-chaos.namespaced" . }}
+            if kubectl api-resources -o name 2>/dev/null | grep -qx "${crd}.litmuschaos.io"; then
+            {{- else }}
             if kubectl get crd ${crd}.litmuschaos.io >/dev/null 2>&1; then
+            {{- end }}
               echo "  ✅ ${crd}.litmuschaos.io"
               PASS=$((PASS + 1))
             else
