@@ -332,6 +332,26 @@ body:not(:has(.sidebar-link.active:is([href$="10-cli-reference.html"], [href$="1
     }
   }
 
+  // A glossary term reads as part of its sentence: the text's own ink over a
+  // dotted rule, taking the link colour only under the pointer or the
+  // keyboard, so the blue is left to the links that go somewhere. Its entry
+  // lights up in the margin all the same (reader.html).
+  :is(p, li, td, dd, blockquote) a[href*="appendix-a-glossary.html#gl-"] {
+    color: inherit;
+    text-decoration-style: dotted;
+    text-decoration-thickness: max(1px, 0.07em);
+    text-decoration-color: $kates-muted;
+
+    &:is(:hover, :focus-visible) {
+      color: $kates-link;
+      text-decoration-color: currentColor;
+    }
+
+    code:not(.sourceCode) {
+      background-color: $code-bg;
+    }
+  }
+
   // The semibold, as the PDF's bold: Garamond's bold is heavy in a line of
   // text.
   strong {
@@ -407,6 +427,73 @@ kbd {
   background-color: transparent;
   padding: 0;
   font-weight: 500;
+}
+
+// The Endpoint Index (11-api-reference.md): every row is a link, so the rows
+// go without the blue and the underline until the pointer or the keyboard
+// reaches one. The method is a small badge and the path plain mono, in one
+// column as wide in every family's table. On a phone a row's description
+// sits under its call instead of beside it.
+#quarto-document-content .kates-endpoints {
+  td a {
+    color: inherit;
+    text-decoration: none;
+
+    &:is(:hover, :focus-visible) {
+      color: $kates-link;
+
+      code {
+        text-decoration: underline;
+        text-underline-offset: 0.2em;
+      }
+    }
+  }
+
+  td a code:not(.sourceCode) {
+    color: inherit;
+    background-color: transparent;
+    padding: 0;
+  }
+
+  :is(th, td):first-child {
+    width: 50%;
+  }
+
+  .kates-method {
+    display: inline-block;
+    box-sizing: content-box;
+    min-width: 6ch;
+    margin-right: 0.5em;
+    padding: 0.05em 0.35em;
+    border: 1px solid $kates-border-strong;
+    border-radius: $border-radius-sm;
+    font-family: $font-family-monospace;
+    font-size: 0.7em;
+    font-weight: 600;
+    line-height: 1.4;
+    text-align: center;
+    color: $kates-muted;
+    vertical-align: 0.1em;
+  }
+
+  @include media-breakpoint-down(sm) {
+    :is(thead, tbody, tr, th, td) {
+      display: block;
+    }
+
+    :is(th, td):first-child {
+      width: auto;
+    }
+
+    thead th + th {
+      display: none;
+    }
+
+    td:first-child {
+      border-bottom: 0;
+      padding-bottom: 0;
+    }
+  }
 }
 
 // Headings already carry weight; keep their code at heading size

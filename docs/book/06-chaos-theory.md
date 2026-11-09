@@ -250,7 +250,7 @@ sequenceDiagram
     Note over C1,C3: Processing resumes
 ```
 
-The diagram shows the classic eager protocol, where every consumer in the group stops processing during a rebalance. That "stop-the-world" pause can last seconds to minutes, depending on group size and partition count. Cooperative incremental rebalancing (KIP-429 [@kip429]) shrinks the pause to only the partitions that move, and the next-generation consumer group protocol (KIP-848 [@kip848], `group.protocol=consumer`) removes the global synchronization barrier entirely. Kates's test consumers run the classic protocol, the default of the Kafka client they run on, so a Kates test shows you the eager or cooperative pause, not the KIP-848 one.
+The diagram shows the classic eager protocol, where every consumer in the group stops processing during a rebalance. That "stop-the-world" pause can last seconds to minutes, depending on group size and partition count. Cooperative incremental rebalancing (KIP-429 [@kip429]) shrinks the pause to only the partitions that move, and the newer consumer group protocol (KIP-848 [@kip848], `group.protocol=consumer`) removes the global synchronization barrier entirely. Kates's test consumers run the classic protocol, the default of the Kafka client they run on, so a Kates test shows you the eager or cooperative pause, not the KIP-848 one.
 
 ## Key Metrics During Chaos
 

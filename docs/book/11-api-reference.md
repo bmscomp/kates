@@ -32,50 +32,78 @@ What every call shares has one home, and an entry says only what it adds: the ke
 
 ### Endpoint Index
 
+::: {.kates-endpoints}
+
 Find the call you need here, by family, and follow its link to the entry:
 
-| Endpoint | What it does |
+| Health & System | What it does |
 |----------|--------------|
-| [GET /api/whoami](#authentication) | Names the key's principal and its scopes |
-| [GET /api/health](#get-apihealth) | Reports whether the Kates API is up and reaches Kafka; public |
-| [POST /api/tests](#post-apitests) | Creates and starts a test run |
-| [GET /api/tests](#get-apitests) | Lists test runs, by type or status |
-| [GET /api/tests/types](#get-apiteststypes) | Lists the test types the Kates API accepts |
-| [GET /api/tests/{id}](#get-apitestsid) | Gets one run, with a result per task |
-| [POST /api/tests/{id}/cancel](#post-apitestsidcancel) | Stops a run and stores it as `FAILED` |
-| [DELETE /api/tests/{id}](#delete-apitestsid) | Stops and deletes one run |
-| [DELETE /api/tests](#delete-apitests) | Deletes finished runs created before a cutoff |
-| [GET /api/tests/{id}/report](#get-apitestsidreport) | Gets the JSON report, with its SLA verdict |
-| [GET /api/tests/{id}/report/csv](#get-apitestsidreportcsv) | Exports the report as CSV |
-| [GET /api/tests/{id}/report/junit](#get-apitestsidreportjunit) | Exports the report as JUnit XML |
-| [GET /api/tests/{id}/report/heatmap](#get-apitestsidreportheatmap) | Exports latency heatmap data as JSON or CSV |
-| [GET /api/cluster/info](#get-apiclusterinfo) | Gets the cluster ID, controller and brokers |
-| [GET /api/cluster/topics](#get-apiclustertopics) | Lists topic names |
-| [GET /api/cluster/topics/{name}](#get-apiclustertopicsname) | Gets a topic's partitions, ISR and configuration |
-| [GET /api/cluster/groups](#get-apiclustergroups) | Lists consumer groups with their state |
-| [GET /api/cluster/groups/{id}](#get-apiclustergroupsid) | Gets a group's offsets and lag |
-| [GET /api/cluster/brokers/{id}/configs](#get-apiclusterbrokersidconfigs) | Gets a broker's non-default configuration |
-| [POST /api/conformity/check](#post-apiconformitycheck) | Checks the cluster against a reference architecture |
-| [GET /api/conformity/checks](#get-apiconformitychecks) | Lists stored compliance checks |
-| [GET /api/conformity/checks/{id}](#get-apiconformitychecksid) | Gets one stored check, with its hashes |
-| [POST /api/disruptions](#post-apidisruptions) | Runs a disruption plan, or dry-runs it |
-| [GET /api/disruptions](#get-apidisruptions) | Lists disruption reports |
-| [GET /api/disruptions/{id}](#get-apidisruptionsid) | Gets a disruption report and its SLA grade |
-| [GET /api/disruptions/{id}/timeline](#get-apidisruptionsidtimeline) | Gets pod events and recovery times per step |
-| [GET /api/disruptions/types](#get-apidisruptionstypes) | Lists the disruption types |
-| [GET /api/disruptions/{id}/kafka-metrics](#get-apidisruptionsidkafka-metrics) | Gets ISR and consumer-lag figures per step |
-| [GET /api/disruptions/playbooks](#get-apidisruptionsplaybooks) | Lists the built-in playbooks |
-| [GET /api/disruptions/playbooks/{name}](#get-apidisruptionsplaybooksname) | Gets the plan a playbook runs |
-| [POST /api/disruptions/playbooks/{name}](#post-apidisruptionsplaybooksname) | Runs a playbook |
-| [POST /api/resilience](#post-apiresilience) | Starts a test run and injects one fault into it |
-| [GET /api/resilience/scenarios](#get-apiresiliencescenarios) | Lists the pre-built resilience scenarios |
-| [POST /api/resilience/scenarios/{id}](#post-apiresiliencescenariosid) | Runs a resilience scenario |
-| [GET /api/trends](#get-apitrends) | Follows one metric across runs and flags regressions |
-| [POST /api/schedules](#post-apischedules) | Creates a recurring test schedule |
-| [GET /api/schedules](#get-apischedules) | Lists schedules |
-| [GET /api/schedules/{id}](#get-apischedulesid) | Gets one schedule |
-| [PUT /api/schedules/{id}](#put-apischedulesid) | Changes a schedule |
-| [DELETE /api/schedules/{id}](#delete-apischedulesid) | Deletes a schedule |
+| [[GET]{.kates-method} `/api/whoami`](#authentication) | Names the key's principal and its scopes |
+| [[GET]{.kates-method} `/api/health`](#get-apihealth) | Reports whether the Kates API is up and reaches Kafka; public |
+
+| Test Management | What it does |
+|----------|--------------|
+| [[POST]{.kates-method} `/api/tests`](#post-apitests) | Creates and starts a test run |
+| [[GET]{.kates-method} `/api/tests`](#get-apitests) | Lists test runs, by type or status |
+| [[GET]{.kates-method} `/api/tests/types`](#get-apiteststypes) | Lists the test types the Kates API accepts |
+| [[GET]{.kates-method} `/api/tests/{id}`](#get-apitestsid) | Gets one run, with a result per task |
+| [[POST]{.kates-method} `/api/tests/{id}/cancel`](#post-apitestsidcancel) | Stops a run and stores it as `FAILED` |
+| [[DELETE]{.kates-method} `/api/tests/{id}`](#delete-apitestsid) | Stops and deletes one run |
+| [[DELETE]{.kates-method} `/api/tests`](#delete-apitests) | Deletes finished runs created before a cutoff |
+
+| Reports | What it does |
+|----------|--------------|
+| [[GET]{.kates-method} `/api/tests/{id}/report`](#get-apitestsidreport) | Gets the JSON report, with its SLA verdict |
+| [[GET]{.kates-method} `/api/tests/{id}/report/csv`](#get-apitestsidreportcsv) | Exports the report as CSV |
+| [[GET]{.kates-method} `/api/tests/{id}/report/junit`](#get-apitestsidreportjunit) | Exports the report as JUnit XML |
+| [[GET]{.kates-method} `/api/tests/{id}/report/heatmap`](#get-apitestsidreportheatmap) | Exports latency heatmap data as JSON or CSV |
+
+| Cluster Inspection | What it does |
+|----------|--------------|
+| [[GET]{.kates-method} `/api/cluster/info`](#get-apiclusterinfo) | Gets the cluster ID, controller and brokers |
+| [[GET]{.kates-method} `/api/cluster/topics`](#get-apiclustertopics) | Lists topic names |
+| [[GET]{.kates-method} `/api/cluster/topics/{name}`](#get-apiclustertopicsname) | Gets a topic's partitions, ISR and configuration |
+| [[GET]{.kates-method} `/api/cluster/groups`](#get-apiclustergroups) | Lists consumer groups with their state |
+| [[GET]{.kates-method} `/api/cluster/groups/{id}`](#get-apiclustergroupsid) | Gets a group's offsets and lag |
+| [[GET]{.kates-method} `/api/cluster/brokers/{id}/configs`](#get-apiclusterbrokersidconfigs) | Gets a broker's non-default configuration |
+
+| Compliance | What it does |
+|----------|--------------|
+| [[POST]{.kates-method} `/api/conformity/check`](#post-apiconformitycheck) | Checks the cluster against a reference architecture |
+| [[GET]{.kates-method} `/api/conformity/checks`](#get-apiconformitychecks) | Lists stored compliance checks |
+| [[GET]{.kates-method} `/api/conformity/checks/{id}`](#get-apiconformitychecksid) | Gets one stored check, with its hashes |
+
+| Disruption Testing | What it does |
+|----------|--------------|
+| [[POST]{.kates-method} `/api/disruptions`](#post-apidisruptions) | Runs a disruption plan, or dry-runs it |
+| [[GET]{.kates-method} `/api/disruptions`](#get-apidisruptions) | Lists disruption reports |
+| [[GET]{.kates-method} `/api/disruptions/{id}`](#get-apidisruptionsid) | Gets a disruption report and its SLA grade |
+| [[GET]{.kates-method} `/api/disruptions/{id}/timeline`](#get-apidisruptionsidtimeline) | Gets pod events and recovery times per step |
+| [[GET]{.kates-method} `/api/disruptions/types`](#get-apidisruptionstypes) | Lists the disruption types |
+| [[GET]{.kates-method} `/api/disruptions/{id}/kafka-metrics`](#get-apidisruptionsidkafka-metrics) | Gets ISR and consumer-lag figures per step |
+| [[GET]{.kates-method} `/api/disruptions/playbooks`](#get-apidisruptionsplaybooks) | Lists the built-in playbooks |
+| [[GET]{.kates-method} `/api/disruptions/playbooks/{name}`](#get-apidisruptionsplaybooksname) | Gets the plan a playbook runs |
+| [[POST]{.kates-method} `/api/disruptions/playbooks/{name}`](#post-apidisruptionsplaybooksname) | Runs a playbook |
+
+| Resilience Testing | What it does |
+|----------|--------------|
+| [[POST]{.kates-method} `/api/resilience`](#post-apiresilience) | Starts a test run and injects one fault into it |
+| [[GET]{.kates-method} `/api/resilience/scenarios`](#get-apiresiliencescenarios) | Lists the pre-built resilience scenarios |
+| [[POST]{.kates-method} `/api/resilience/scenarios/{id}`](#post-apiresiliencescenariosid) | Runs a resilience scenario |
+
+| Trend Analysis | What it does |
+|----------|--------------|
+| [[GET]{.kates-method} `/api/trends`](#get-apitrends) | Follows one metric across runs and flags regressions |
+
+| Scheduling | What it does |
+|----------|--------------|
+| [[POST]{.kates-method} `/api/schedules`](#post-apischedules) | Creates a recurring test schedule |
+| [[GET]{.kates-method} `/api/schedules`](#get-apischedules) | Lists schedules |
+| [[GET]{.kates-method} `/api/schedules/{id}`](#get-apischedulesid) | Gets one schedule |
+| [[PUT]{.kates-method} `/api/schedules/{id}`](#put-apischedulesid) | Changes a schedule |
+| [[DELETE]{.kates-method} `/api/schedules/{id}`](#delete-apischedulesid) | Deletes a schedule |
+
+:::
 
 The Kates API serves more endpoints than these, and [Endpoints](#endpoints) says where the full list is.
 

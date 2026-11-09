@@ -136,6 +136,8 @@ def pairs(syntax):
         # Links
         ("links", "links", "$kates-link", page, TEXT),
         ("links", "links on a table header", "$kates-link", page + ["$kates-surface"], TEXT),
+        ("links", "glossary term's dotted underline", "$kates-muted", page, NON_TEXT),
+        ("links", "endpoint index method badge", "$kates-muted", page + ["$kates-row-hover"], TEXT),
         # Code
         ("code", "inline code", "$code-color", page + ["$code-bg"], TEXT),
         ("code", "inline code in a link", "$kates-link",

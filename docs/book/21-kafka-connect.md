@@ -649,7 +649,7 @@ When a compatibility rule is set, the registry checks each new version of a sche
 |-------------------|---------------|----------|
 | BACKWARD | New schema can read data written by old | Default — consumers upgrade first |
 | FORWARD | Old schema can read data written by new | Producers upgrade first |
-| FULL | Both backward and forward compatible | Strictest — safest for mission-critical data |
+| FULL | Both backward and forward compatible | Strictest — safest when old and new clients must both keep working |
 | NONE | Any change allowed | Development only |
 
 ::: {.callout-warning title="Changing converters means a new topic prefix"}
