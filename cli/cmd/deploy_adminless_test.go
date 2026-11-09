@@ -162,8 +162,11 @@ func TestRunDeploy_AdminlessInstallsTheStack(t *testing.T) {
 					t.Errorf("admin-less install asks helm to create its namespace: %s", c)
 				}
 			}
-			if !strings.Contains(installed["kates"], "--set rbac.scope=namespace") {
-				t.Errorf("kates without rbac.scope=namespace: %s", installed["kates"])
+			// Strimzi would bind rack-aware brokers and workers to ClusterRoles.
+			for _, release := range []string{"kates", "krafter", "connect-cluster", "mm2"} {
+				if !strings.Contains(installed[release], "--set rbac.scope=namespace") {
+					t.Errorf("%s without rbac.scope=namespace: %s", release, installed[release])
+				}
 			}
 		})
 	}
