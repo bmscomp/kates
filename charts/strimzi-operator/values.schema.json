@@ -68,6 +68,14 @@
         "enabled": { "type": "boolean" }
       }
     },
+    "namespacedRbac": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Render the operator's RBAC as Roles and RoleBindings in each watched namespace, from upstream's ClusterRole rules, and nothing cluster-scoped: an install a namespace admin can make once an admin has installed the CRDs.",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
     "operatorPolicy": {
       "type": "object",
       "additionalProperties": false,
