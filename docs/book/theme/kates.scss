@@ -34,11 +34,13 @@ $code-block-bg-padding: 0.95rem 1.15rem;
 // Running text, measured with Introduction at 17px: see "Prose" below
 $kates-measure: 78ch;
 
-// The panels beside the text: entries at 17px, their notes (the question
-// under a chapter, a glossary definition) at 16px, and labels in small
-// capitals at the size of the part name above the chapter title.
+// The panels beside the text: entries at 17px, their notes at 16px, the
+// question under a chapter and a glossary definition a step quieter at 15px,
+// and labels in small capitals at the size of the part name above the
+// chapter title.
 $kates-panel-font-size: 17px;
 $kates-panel-note-size: 16px;
+$kates-panel-small-size: 15px;
 $kates-panel-label-size: 1.05rem;
 
 // Callouts and the chapter table of contents
@@ -1291,8 +1293,8 @@ dialog.kates-diagram-viewer {
 // ── The page, from 1200px up ────────────────────────────────────────────────
 // Five bands that all grow with the window: an edge, the navigation, the text
 // and its two outsets, the contents, an edge. The text column is its own
-// measure, 29 times the text's size (about 70 characters a line), so
-// running text fills it. A table, a code block or a diagram steps out into
+// measure, 30 times the text's size (about 75 characters a line), so
+// running text fills it; what the window has over goes to the outsets. A table, a code block or a diagram steps out into
 // the outsets, equally on both sides, only when the column is too narrow for
 // it, and only as far as it needs: theme/reader.html marks it .kates-wide
 // and gives it --kates-out. The rest keep to the column, under their
@@ -1307,7 +1309,7 @@ dialog.kates-diagram-viewer {
     --kates-edge: clamp(16px, 1.8vw, 40px);
     --kates-panel-width: clamp(210px, 15.5vw, 290px);
     --kates-gap: clamp(24px, 2vw, 44px);
-    --kates-column: clamp(680px, 48vw, 920px);
+    --kates-column: calc(var(--kates-text) * 30);
     // How far wide material may step out of the column: not at all, so code,
     // tables, diagrams and screenshots keep the text's edges (theme/reader.html
     // and the figure rules below read it)
@@ -1667,17 +1669,30 @@ $kates-part-hang: 2.15em; // the part numerals' column
   }
 }
 
-// What the chapter being read answers, in its part page's words
+// What the chapter being read answers, in its part page's words: two lines
+// a size under the notes, so that it does not read as a third column of
+// text beside the chapter and the glossary; the whole question when the
+// reader reaches for the navigation
 .kates-blurb {
   white-space: normal;
   overflow-wrap: break-word;
   margin: 2px 0 6px;
   padding: 0 0 0 calc(10px + 1.5em);
   color: $kates-chrome-note;
-  font-size: $kates-panel-note-size;
+  font-size: $kates-panel-small-size;
   font-style: italic;
   line-height: 1.38;
   hyphens: none;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+#{$kates-nav}:is(:hover, :focus-within) .kates-blurb {
+  -webkit-line-clamp: unset;
+  line-clamp: none;
 }
 
 .kates-blurb code,
@@ -2072,7 +2087,7 @@ $kates-part-hang: 2.15em; // the part numerals' column
 
   dt {
     font-weight: 600;
-    font-size: $kates-panel-font-size;
+    font-size: $kates-panel-note-size;
     line-height: 1.25;
     margin: 0;
   }
@@ -2085,8 +2100,13 @@ $kates-part-hang: 2.15em; // the part numerals' column
   dd {
     margin: 1px 0 0;
     color: $kates-chrome-note;
-    font-size: $kates-panel-note-size;
+    font-size: $kates-panel-small-size;
     line-height: 1.38;
+  }
+
+  // Full contrast for the entry the reader reaches for
+  &:is(:hover, :focus-within) dd {
+    color: $kates-chrome-strong;
   }
 
   dd code {
