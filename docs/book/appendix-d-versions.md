@@ -28,7 +28,7 @@ Every version the platform pins, in one place. This table is generated from the 
 | `mirror-maker2` chart | 0.12.0 (app 4.3.1) | `charts/mirror-maker2/Chart.yaml` |
 | `monitoring` chart | 1.9.0 (app 82.4.3) | `charts/monitoring/Chart.yaml` |
 | `strimzi-operator` chart | 0.5.0 (app 1.2.0) | `charts/strimzi-operator/Chart.yaml` |
-| `velero` chart | 11.3.6 (app 1.17.1) | `charts/velero/Chart.yaml` |
+| `velero` chart | 11.4.0 (app 1.17.1) | `charts/velero/Chart.yaml` |
 <!-- version-matrix:end -->
 
 Regenerate with `scripts/gen-version-matrix.sh` and verify with `scripts/gen-version-matrix.sh --check` (CI runs the check on every book change).

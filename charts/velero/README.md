@@ -52,6 +52,30 @@ The **label-namespace** Job (rendered when `namespace.labels` is not empty;
 context and no resources, and no value reaches them. Leave `namespace.labels`
 empty and label the namespace yourself (`kubectl label namespace ...`).
 
+### RBAC scope: cluster or namespace
+
+`rbac.scope` (a Kates key; empty falls back to `global.rbacScope`, then
+`cluster`) picks who installs the release. `cluster`, the default, renders as
+upstream does: the server is bound to `cluster-admin`. `namespace` creates
+nothing cluster-scoped, so a namespace admin (bound to the built-in `admin`
+ClusterRole in one namespace) installs it with the overlay:
+
+```bash
+helm install velero charts/velero -n team-a --skip-crds \
+  -f charts/velero/values-namespace.yaml -f my-storage.yaml
+```
+
+The chart then renders no Role of its own (upstream's grants every verb on
+every resource, which a namespace admin may not grant) and binds the server to
+`admin` in its namespace, with the informer cache off (it lists restored types
+in every namespace). It backs up and restores that namespace only, with no
+upgrade-crds, cleanup-crds or label-namespace Job and no node-agent. A cluster
+admin installs the CRDs and two ClusterRoles once, then binds each release's
+server to read Namespaces and list ClusterRoleBindings; the header of
+`values-namespace.yaml` has the manifests and everything the mode gives up.
+With `rbac.scope=namespace`, turning back on `rbac.clusterAdministrator`,
+`upgradeCRDs`, `cleanUpCRDs` or `namespace.labels` fails the render.
+
 ## Installing the Velero CLI
 
 See the different options for installing the [Velero CLI](https://velero.io/docs/v1.13/basic-install/#install-the-cli).

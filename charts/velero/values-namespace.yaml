@@ -1,0 +1,90 @@
+# Velero installed by a namespace admin: the release creates nothing
+# cluster-scoped, so an account bound only to the built-in admin ClusterRole
+# (a RoleBinding in this one namespace) can install it:
+#
+#   helm install velero charts/velero -n team-a --skip-crds \
+#     -f charts/velero/values-namespace.yaml -f my-storage.yaml
+#
+# --skip-crds: Helm 4 applies crds/ even when they exist, and a namespace
+# admin may not. The chart renders no Role of its own (upstream's grants every
+# verb on every resource, which a namespace admin may not grant: the API
+# server refuses it as an escalation); it binds the server to admin here.
+#
+# A cluster admin, once per cluster:
+#   1. installs the CRDs: kubectl apply -f charts/velero/crds/
+#   2. lets admin use them, and read the namespaced types admin cannot list
+#      (a Backup reports each one as an error otherwise; the list varies with
+#      the Kubernetes version, so add what a backup's errors name):
+#        kubectl apply -f - <<'EOF'
+#        apiVersion: rbac.authorization.k8s.io/v1
+#        kind: ClusterRole
+#        metadata:
+#          name: velero-namespace-admin
+#          labels:
+#            rbac.authorization.k8s.io/aggregate-to-admin: "true"
+#        rules:
+#          - apiGroups: ["velero.io"]
+#            resources: ["*"]
+#            verbs: ["*"]
+#          - apiGroups: [""]
+#            resources: ["podtemplates"]
+#            verbs: ["get", "list", "watch"]
+#          - apiGroups: ["storage.k8s.io"]
+#            resources: ["csistoragecapacities"]
+#            verbs: ["get", "list", "watch"]
+#          - apiGroups: ["certificates.k8s.io"]
+#            resources: ["podcertificaterequests"]
+#            verbs: ["get", "list", "watch"]
+#        ---
+#        apiVersion: rbac.authorization.k8s.io/v1
+#        kind: ClusterRole
+#        metadata:
+#          name: velero-namespace-server
+#        rules:
+#          # The server watches every Namespace (no namespaced form exists) and
+#          # its ServiceAccount backup action lists ClusterRoleBindings.
+#          - apiGroups: [""]
+#            resources: ["namespaces"]
+#            verbs: ["get", "list", "watch"]
+#          - apiGroups: ["rbac.authorization.k8s.io"]
+#            resources: ["clusterrolebindings"]
+#            verbs: ["list"]
+#        EOF
+# And once per Velero namespace, binds the server's ServiceAccount to it:
+#   kubectl create clusterrolebinding velero-team-a \
+#     --clusterrole=velero-namespace-server --serviceaccount=team-a:velero-server
+# Without it the server runs, but every Backup stays New.
+#
+# What namespace scope gives up, next to the default cluster scope:
+#   - The server can read, back up and restore only its own namespace, and
+#     sees the names of all namespaces and ClusterRoleBindings. Name the
+#     namespace in includedNamespaces and set includeClusterResources: false;
+#     anything else fails on forbidden reads. A restore can create only what
+#     admin may create (no ResourceQuota or LimitRange, for example).
+#   - No upgradeCRDs Job: CRD upgrades are the cluster admin's, step 1 again.
+#   - No cleanUpCRDs Job and no namespace.labels Job.
+#   - No node-agent (file-system backups): the DaemonSet mounts host paths and
+#     runs privileged, which a namespace enforcing the Baseline or Restricted
+#     Pod Security Standard refuses. Volume snapshots need the provider's
+#     snapshot classes and drivers, set up by a cluster admin.
+#
+# rbac.scope=namespace with any of the switches below turned back on fails
+# the render.
+rbac:
+  scope: namespace
+  clusterAdministrator: false
+upgradeCRDs: false
+cleanUpCRDs: false
+namespace:
+  labels: {}
+deployNodeAgent: false
+configuration:
+  # A restore's informer cache lists each restored type in every namespace,
+  # which admin may not: the restore hangs InProgress. Read per namespace.
+  disableInformerCache: true
+serviceAccount:
+  server:
+    labels:
+      # Its ClusterRoleBinding is the cluster admin's, which the server may
+      # not read: backing the account up would fail on it.
+      velero.io/exclude-from-backup: "true"
