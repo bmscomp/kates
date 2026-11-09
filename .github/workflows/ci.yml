@@ -49,6 +49,7 @@ jobs:
               - 'versions.env'
               - '.github/kyverno/**'
               - 'scripts/check-chart-policies.sh'
+              - 'scripts/check-rbac-scope.sh'
               - 'scripts/check-versions.sh'
               # check-versions.sh now also asserts the kind node image tags in
               # this file against versions.env, so editing it has to run it.
@@ -510,6 +511,13 @@ jobs:
             helm template "${name}" "${chart}" > /dev/null || rc=1
           done
           exit ${rc}
+
+      # Every chart installs with ClusterRoles (rbac.scope cluster, the
+      # default) or with Roles only (namespace), set per chart or through
+      # global.rbacScope; charts with a subchart refuse namespace scope
+      # without their values-namespace.yaml.
+      - name: Assert every chart installs in both RBAC scopes
+        run: scripts/check-rbac-scope.sh
 
       # Helm installs whatever sits in charts/; the umbrella's own guard holds
       # it to Chart.yaml's ranges. kates 0.10.7 is the last chart whose
