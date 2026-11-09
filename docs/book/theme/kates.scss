@@ -415,6 +415,13 @@ kbd {
   overflow-wrap: break-word;
 }
 
+// theme/reader.html wraps each word of inline code in one of these. The
+// colour is the code's, not the code blocks' (a "code span" rule).
+.kates-unbroken {
+  color: inherit;
+  white-space: nowrap;
+}
+
 #quarto-document-content a code:not(.sourceCode):not(pre code) {
   color: inherit;
   background-color: rgba($kates-link, 0.07);
@@ -537,19 +544,34 @@ div.sourceCode pre.sourceCode {
   overflow-x: auto;
 }
 
-// Copy button: visible on the dark block, brand accent on hover
+// Copy button: visible on the dark block, brand accent on hover. It stands
+// on the block's own colour, so a line scrolled under it never shows
+// through, and the block keeps room at the end of each line to scroll the
+// last characters out from under it.
 .code-copy-button {
   margin-top: 8px !important;
   margin-right: 8px !important;
   border-radius: $border-radius-sm;
-  opacity: 0.75;
-  transition: opacity 0.15s ease, background-color 0.15s ease;
+  background-color: $code-block-bg !important;
+  transition: background-color 0.15s ease;
+
+  .bi {
+    opacity: 0.75;
+    transition: opacity 0.15s ease;
+  }
 
   &:hover,
   &:focus-visible {
-    opacity: 1;
-    background-color: rgba(255, 255, 255, 0.08) !important;
+    background-color: mix(#fff, $code-block-bg, 8%) !important;
+
+    .bi {
+      opacity: 1;
+    }
   }
+}
+
+.code-copy-outer-scaffold div.sourceCode pre.sourceCode {
+  padding-right: calc(1.15rem + 2rem);
 }
 
 .code-with-filename {
@@ -1785,6 +1807,12 @@ $kates-part-hang: 2.15em; // the part numerals' column
         padding-right: 0.15rem !important;
         padding-left: 0.15rem !important;
         text-align: center;
+      }
+
+      // The search button is a 24px target of its own: no padding round it
+      > div.quarto-navigation-tool {
+        padding-right: 0 !important;
+        padding-left: 0 !important;
       }
     }
 

@@ -157,6 +157,57 @@
     a.replaceChildren(...parts.flatMap((p, i) => (i ? [document.createElement("wbr"), p] : [p])));
   }
 
+  // ── Inline code, broken where it reads ────────────────────────────────────
+  // A browser breaks inline code after any hyphen, and splits a flag in two
+  // ("--fail-on-sla-" over "breach"). Short code stays on one line; longer
+  // code breaks between its words, and a long word only after a /, ., = or
+  // a comma, where a path, host, setting or list parts. A piece still too
+  // long for a phone's line is left to break where it has to.
+  const whole = 24; // characters of code kept on one line
+  const piecemeal = 32; // the longest piece kept on one line
+  for (const code of main.querySelectorAll("code:not(.sourceCode, pre code)")) {
+    if (code.childElementCount) continue;
+    const text = code.textContent;
+    const words = text.length <= whole ? [text] : text.split(/(\s+)/);
+    code.replaceChildren(...words.flatMap((w, i) => {
+      if (i % 2 || !w) return w ? [w] : [];
+      const pieces = w.length > whole ? w.split(/(?<=[/.=,])/) : [w];
+      return pieces.flatMap((piece, j) => {
+        let node = piece;
+        if (piece.length <= piecemeal) {
+          node = document.createElement("span");
+          node.className = "kates-unbroken";
+          node.textContent = piece;
+        }
+        return j ? [document.createElement("wbr"), node] : [node];
+      });
+    }));
+  }
+
+  // ── Back to top, clear of previous and next ───────────────────────────────
+  // Quarto floats "Back to top" 50px above the window's foot, and shows it at
+  // the end of a chapter, over the previous and next cards. It rides above
+  // them while they are on screen. Quarto prints the cards after this script.
+  const clearOfCards = () => {
+    const toTop = document.getElementById("quarto-back-to-top");
+    const cards = document.querySelector("nav.page-navigation");
+    if (!toTop || !cards) return;
+    const lift = frame(() => {
+      const box = cards.getBoundingClientRect();
+      const over = window.innerHeight - box.top + 12;
+      if (over > 50 && box.bottom > 0) toTop.style.bottom = `${over}px`;
+      else toTop.style.removeProperty("bottom");
+    });
+    window.addEventListener("scroll", lift, { passive: true });
+    window.addEventListener("resize", lift, { passive: true });
+    lift();
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", clearOfCards, { once: true });
+  } else {
+    clearOfCards();
+  }
+
   // ── Part labels: the numeral in a hanging column ──────────────────────────
   // "Part II — Performance Testing" becomes "II" and "Performance Testing";
   // the word "Part" stays for screen readers, and the whole label is the

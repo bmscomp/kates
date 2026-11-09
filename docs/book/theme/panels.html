@@ -10,16 +10,18 @@
   // (toc-location: right-body), open and titled like the margin's. Below
   // 1200px it is the only copy on screen. Fold it into a <details>, so a
   // reader on a phone opens it when they want it. Give it the margin's "Edit
-  // this page" and "Report an issue", which go with the margin. The copy
-  // repeats the margin's ids (toc-title, and toc-<section> on each entry), so
-  // drop them: an id names one element.
+  // this page" and "Report an issue", which go with the margin. The summary
+  // takes the place of the copy's "Table of contents" heading (toc-title-body).
+  // The copy repeats the margin's ids (toc-<section> on each entry), so drop
+  // them: an id names one element.
   const copy = document.getElementById("TOC-body");
   if (copy && !copy.querySelector(".kates-toc-fold")) {
     const fold = document.createElement("details");
     fold.className = "kates-toc-fold";
     const summary = document.createElement("summary");
     summary.textContent = "On this page";
-    copy.querySelector("#toc-title")?.remove();
+    copy.querySelector("#toc-title-body")?.remove();
+    copy.removeAttribute("aria-labelledby");
     for (const el of copy.querySelectorAll("[id]")) el.removeAttribute("id");
     fold.append(summary, ...copy.childNodes);
     const actions = document.querySelector("#TOC .toc-actions");
