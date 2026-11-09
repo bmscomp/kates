@@ -16,6 +16,7 @@
             }
         },
         "kafkaNamespace": { "type": "string" },
+        "rbac": { "type": "object", "properties": { "scope": { "type": "string", "enum": ["", "cluster", "namespace"], "description": "cluster (empty: global.rbacScope, then cluster) or namespace: nothing cluster-scoped, so a namespace admin can install the release (with -f values-namespace.yaml)." } } },
         "networkPolicy": {
             "type": "object",
             "properties": {
@@ -61,6 +62,7 @@
             "type": "object",
             "description": "Passed down to kube-prometheus-stack and its subcharts; also used by this chart's test pod",
             "properties": {
+                "rbacScope": { "type": "string", "enum": ["", "cluster", "namespace"], "description": "Default rbac.scope of every chart in an umbrella release." },
                 "imageRegistry": { "type": "string" },
                 "imagePullSecrets": {
                     "type": "array",

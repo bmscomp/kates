@@ -116,3 +116,11 @@ Calculate the checksum of the credentials secret.
 {{- define "chart.config-checksum" -}}
 {{- tpl (print .Values.credentials.secretContents .Values.credentials.extraEnvVars ) $ | sha256sum -}}
 {{- end -}}
+
+{{/*
+Kates: "true" when rbac.scope (then global.rbacScope, then cluster) is
+namespace: the release creates nothing cluster-scoped.
+*/}}
+{{- define "velero.namespaceScope" -}}
+{{- eq (.Values.rbac.scope | default (.Values.global).rbacScope | default "cluster") "namespace" -}}
+{{- end -}}

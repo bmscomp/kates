@@ -83,6 +83,14 @@ kubectl image used by the installer Job, gameday, and tests.
 Honors, in order: experiments.installer.image (string), the deprecated
 experiments.image (string), then the images.kubectl dict.
 */}}
+{{/*
+"true" when rbac.scope (else global.rbacScope, else cluster) is namespace: the
+release then renders nothing cluster-scoped, so a namespace admin installs it.
+*/}}
+{{- define "kates-chaos.namespaced" -}}
+{{- if eq (.Values.rbac.scope | default (.Values.global).rbacScope | default "cluster") "namespace" -}}true{{- end -}}
+{{- end }}
+
 {{- define "kates-chaos.kubectlImage" -}}
 {{- $override := "" -}}
 {{- if .Values.experiments.installer -}}{{- $override = .Values.experiments.installer.image | default "" -}}{{- end -}}
@@ -127,9 +135,10 @@ Consume with: include "kates-chaos.targetNamespaces" . | fromYamlArray
 {{- if .Values.rbac.targetNamespaces -}}
 {{- toYaml .Values.rbac.targetNamespaces -}}
 {{- else -}}
-- name: {{ .Values.rbac.kafkaNamespace | default "kafka" }}
+{{- $own := ternary .Release.Namespace "" (eq (include "kates-chaos.namespaced" .) "true") }}
+- name: {{ .Values.rbac.kafkaNamespace | default $own | default "kafka" }}
   role: target
-- name: {{ .Values.rbac.katesNamespace | default "kates" }}
+- name: {{ .Values.rbac.katesNamespace | default $own | default "kates" }}
   role: coordinator
 {{- end -}}
 {{- end }}

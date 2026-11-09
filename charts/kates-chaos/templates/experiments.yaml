@@ -139,6 +139,7 @@ spec:
             - "-n"
             - "{{ .Release.Namespace }}"
             - "--timeout=300s"
+        {{- if not (include "kates-chaos.namespaced" .) }}
         - name: wait-for-crd
           image: {{ $kubectl }}
           imagePullPolicy: {{ $pullPolicy }}
@@ -156,6 +157,7 @@ spec:
             - "--for=condition=Established"
             - "crd/chaosexperiments.litmuschaos.io"
             - "--timeout=300s"
+        {{- end }}
       containers:
         - name: install
           image: {{ $kubectl }}
@@ -191,9 +193,12 @@ metadata:
 automountServiceAccountToken: true
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: {{ ternary "Role" "ClusterRole" (eq (include "kates-chaos.namespaced" $) "true") }}
 metadata:
   name: {{ include "kates-chaos.fullname" . }}-experiment-installer
+  {{- if (include "kates-chaos.namespaced" $) }}
+  namespace: {{ .Release.Namespace }}
+  {{- end }}
   labels:
     {{- include "kates-chaos.labels" . | nindent 4 }}
   annotations:
@@ -207,14 +212,19 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list", "watch"]
+  {{- if not (include "kates-chaos.namespaced" $) }}
   - apiGroups: ["apiextensions.k8s.io"]
     resources: ["customresourcedefinitions"]
     verbs: ["get", "list", "watch"]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: {{ ternary "Role" "ClusterRole" (eq (include "kates-chaos.namespaced" $) "true") }}Binding
 metadata:
   name: {{ include "kates-chaos.fullname" . }}-experiment-installer
+  {{- if (include "kates-chaos.namespaced" $) }}
+  namespace: {{ .Release.Namespace }}
+  {{- end }}
   labels:
     {{- include "kates-chaos.labels" . | nindent 4 }}
   annotations:
@@ -223,7 +233,7 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: {{ ternary "Role" "ClusterRole" (eq (include "kates-chaos.namespaced" $) "true") }}
   name: {{ include "kates-chaos.fullname" . }}-experiment-installer
 subjects:
   - kind: ServiceAccount

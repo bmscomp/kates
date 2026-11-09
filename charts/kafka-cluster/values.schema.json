@@ -16,6 +16,7 @@
     "global": {
       "type": "object",
       "properties": {
+        "rbacScope": { "type": "string", "enum": ["", "cluster", "namespace"], "description": "Default rbac.scope of every chart in an umbrella release." },
         "imageRegistry": {
           "type": "string"
         },
@@ -2107,6 +2108,7 @@
     "rbac": {
       "type": "object",
       "properties": {
+        "scope": { "type": "string", "enum": ["", "cluster", "namespace"], "description": "cluster (empty: global.rbacScope, then cluster) or namespace: nothing cluster-scoped, so a namespace admin can install the release." },
         "create": {
           "type": "boolean"
         },

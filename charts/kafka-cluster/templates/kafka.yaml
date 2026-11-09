@@ -102,7 +102,7 @@ spec:
           key: kafka-metrics-config.yml
       {{- end }}
     {{- end }}
-    {{- with $v.kafka.rack }}
+    {{- with (ternary dict $v.kafka.rack (eq ($.Values.rbac.scope | default ($.Values.global).rbacScope | default "cluster") "namespace")) }}
     rack:
       {{- toYaml . | nindent 6 }}
     {{- end }}

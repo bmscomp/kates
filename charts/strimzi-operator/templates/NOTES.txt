@@ -35,8 +35,12 @@ Configuration:
     Upgrade that release to kafka-cluster 1.0 (which drops it), then upgrade
     this one again.
 {{- end }}
-{{- $dcOwner := include "strimzi-operator.ownedElsewhere" (dict "ctx" . "apiVersion" "admissionregistration.k8s.io/v1" "kind" "ValidatingWebhookConfiguration" "name" "strimzi-drain-cleaner") }}
-{{- if and (.Values.drainCleaner).enabled $dcOwner }}
+{{- /* Looked up only when on: the webhook is cluster-scoped, and a namespace admin may not read it. */}}
+{{- $dcOwner := "" }}
+{{- if (.Values.drainCleaner).enabled }}
+{{- $dcOwner = include "strimzi-operator.ownedElsewhere" (dict "ctx" . "apiVersion" "admissionregistration.k8s.io/v1" "kind" "ValidatingWebhookConfiguration" "name" "strimzi-drain-cleaner") }}
+{{- end }}
+{{- if $dcOwner }}
 
   ⚠ The drain cleaner is still owned by the release {{ $dcOwner }}, so this
     release did not render it. Upgrade that release with drainCleaner.enabled=false

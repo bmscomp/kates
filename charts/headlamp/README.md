@@ -38,6 +38,17 @@ Every pod, the Helm test included, passes Pod Security Standards `restricted` wi
 
 The full value reference is `values.yaml`; every key is validated by `values.schema.json`.
 
+## Cluster or namespace
+
+`rbac.scope` (default `cluster`, also from `global.rbacScope`) picks the install. `cluster` renders a ClusterRole: Headlamp shows the whole cluster. `namespace` renders a Role and RoleBinding in the release namespace, without the cluster-scoped resources of `rbac.rules` (nodes, namespaces, PersistentVolumes, ClusterRoles, StorageClasses, CRDs, IngressClasses): a namespace admin installs it and Headlamp shows that namespace.
+
+A cluster admin first grants, once and inside the namespace only, a Role with `escalate` and `bind` on `roles`: Kubernetes refuses a Role holding rules its creator lacks, and the Role names metrics and `*` on the Strimzi, Litmus and Prometheus kinds.
+
+```bash
+kubectl -n team-a create role rbac-delegate --verb=escalate,bind --resource=roles.rbac.authorization.k8s.io
+kubectl -n team-a create rolebinding <who>-rbac-delegate --role=rbac-delegate --serviceaccount=team-a:<who>
+```
+
 ## Notes
 
 Access is read-only by design: the shipped ClusterRole grants only `get`/`list`/`watch`. To let Headlamp act on resources, extend `rbac.rules` deliberately.

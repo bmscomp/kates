@@ -1,12 +1,14 @@
 apiVersion: v2
 name: kates-monitoring
+# Minor: rbac.scope, cluster (default) or namespace: with values-namespace.yaml
+# nothing cluster-scoped, so a namespace admin installs the release.
 # Minor: every container of the stack gets requests and a memory limit,
 # Prometheus included (2Gi), and a limit is a new way for a busy install to
 # be OOM-killed; Grafana's root chown init container is off.
 # Patch: the package ships the environment overlays (values-*.yaml), which
 # kates deploy passes with -f when it installs the published chart.
 # Patch: the chart icon.
-version: 1.8.1
+version: 1.9.0
 appVersion: "82.4.3"
 description: Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration
 icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/assets/charts/monitoring.svg
@@ -26,6 +28,8 @@ annotations:
   artifacthub.io/category: monitoring-logging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "rbac.scope (empty: global.rbacScope, then cluster) and the values-namespace.yaml overlay. In namespace scope a namespace admin installs the stack and the release creates nothing cluster-scoped: the operator watches the release namespace and gets a Role, as Prometheus does, in place of kube-prometheus-stack's ClusterRoles; kube-state-metrics and Grafana use namespaced RBAC; node-exporter, the admission webhooks, the CRDs, the kubelet Service and the node and control-plane targets and rules are off. The chart refuses namespace scope while a subchart value would still create a cluster-scoped object. A cluster admin applies the CRDs and aggregates monitoring.coreos.com into admin once, as the overlay's header shows. An unset scope still means cluster"
     - kind: added
       description: "A Kates chart icon."
     - kind: fixed

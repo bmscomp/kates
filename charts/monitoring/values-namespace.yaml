@@ -1,0 +1,144 @@
+# Namespace scope: a namespace admin (bound to the built-in `admin`
+# ClusterRole by a RoleBinding in one namespace) installs the stack, and the
+# release creates nothing cluster-scoped.
+#
+#   helm install mon charts/monitoring -n team-a --skip-crds \
+#     -f charts/monitoring/values-namespace.yaml
+#
+# rbac.scope alone cannot do it: this chart cannot template its subchart's
+# values, so every kube-prometheus-stack switch is set here too, and the chart
+# refuses rbac.scope=namespace when one of them is set back.
+#
+# ONE-TIME CLUSTER ADMIN STEP, before the first namespaced install:
+#   1. The monitoring.coreos.com CRDs: the subchart's charts/crds/crds,
+#      `kubectl apply --server-side -f` (helm pull --untar, then untar
+#      charts/kube-prometheus-stack-*.tgz).
+#   2. Every verb on monitoring.coreos.com, aggregated into `admin`. Without
+#      it the namespace admin can neither create a Prometheus nor grant the
+#      operator its Role ("attempting to grant RBAC permissions not currently
+#      held"). kube-prometheus-stack's createAggregateClusterRoles is not
+#      enough: it leaves out the /status and /finalizers subresources and
+#      ThanosRulers, which the operator writes.
+#        kubectl apply -f - <<'EOF'
+#        apiVersion: rbac.authorization.k8s.io/v1
+#        kind: ClusterRole
+#        metadata:
+#          name: monitoring-coreos-admin
+#          labels:
+#            rbac.authorization.k8s.io/aggregate-to-admin: "true"
+#        rules:
+#          - apiGroups: [monitoring.coreos.com]
+#            resources: ["*"]
+#            verbs: ["*"]
+#        EOF
+#
+# What namespace scope gives up: node-exporter and every node, kubelet,
+# cAdvisor and control-plane (API server, etcd, scheduler, controller
+# manager, CoreDNS, kube-proxy) target, with their rules and boards;
+# kube-state-metrics and the operator see the release namespace only, so do
+# Prometheus's monitors and rules; the Grafana sidecar loads boards from its
+# own namespace only; no admission webhook validates PrometheusRules; no
+# ChaosEngine series (kube_customresource_chaosengine_*), so the chaos board
+# and chaos alerts read nothing.
+rbac:
+  scope: namespace
+
+kube-prometheus-stack:
+  crds:
+    enabled: false
+  global:
+    # The operator's and Prometheus's ClusterRoles; this chart renders a Role
+    # for each instead
+    rbac:
+      create: false
+  prometheusOperator:
+    namespaces:
+      releaseNamespace: true
+    kubeletService:
+      enabled: false
+    admissionWebhooks:
+      enabled: false
+      patch:
+        enabled: false
+    tls:
+      enabled: false
+  grafana:
+    rbac:
+      namespaced: true
+    sidecar:
+      dashboards:
+        # Empty: the sidecar's own namespace
+        searchNamespace: ""
+  kube-state-metrics:
+    rbac:
+      useClusterRole: false
+      # The ChaosEngine read (values.yaml): a Role cannot list the CRDs it
+      # needs, and the chaos plane lives in another namespace anyway
+      extraRules: []
+    customResourceState:
+      enabled: false
+    releaseNamespace: true
+    collectors:
+      - configmaps
+      - cronjobs
+      - daemonsets
+      - deployments
+      - endpointslices
+      - horizontalpodautoscalers
+      - ingresses
+      - jobs
+      - leases
+      - limitranges
+      - networkpolicies
+      - persistentvolumeclaims
+      - poddisruptionbudgets
+      - pods
+      - replicasets
+      - replicationcontrollers
+      - resourcequotas
+      - secrets
+      - services
+      - statefulsets
+  nodeExporter:
+    enabled: false
+  kubelet:
+    enabled: false
+  kubeApiServer:
+    enabled: false
+  kubeControllerManager:
+    enabled: false
+  coreDns:
+    enabled: false
+  kubeEtcd:
+    enabled: false
+  kubeScheduler:
+    enabled: false
+  kubeProxy:
+    enabled: false
+  defaultRules:
+    rules:
+      etcd: false
+      k8sContainerCpuUsageSecondsTotal: false
+      k8sContainerMemoryCache: false
+      k8sContainerMemoryRss: false
+      k8sContainerMemorySwap: false
+      k8sContainerResource: false
+      k8sContainerMemoryWorkingSetBytes: false
+      kubeApiserverAvailability: false
+      kubeApiserverBurnrate: false
+      kubeApiserverHistogram: false
+      kubeApiserverSlos: false
+      kubeControllerManager: false
+      kubelet: false
+      kubeProxy: false
+      kubePrometheusNodeRecording: false
+      kubernetesResources: false
+      kubernetesStorage: false
+      kubernetesSystem: false
+      kubeSchedulerAlerting: false
+      kubeSchedulerRecording: false
+      network: false
+      node: false
+      nodeExporterAlerting: false
+      nodeExporterRecording: false
+      windows: false

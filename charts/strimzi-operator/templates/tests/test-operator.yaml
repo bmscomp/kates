@@ -8,6 +8,9 @@ releases (the primary plus an additional operator) are both named
 be deleted from under each other's `helm test`.
 */}}
 {{- $testRole := printf "%s-%s" $testSA .Release.Namespace }}
+{{- /* Under rbac.scope=namespace the installer may not create ClusterRoles: the test
+reads its own namespace through a Role, and finds the CRDs by discovery. */}}
+{{- $roleKind := ternary "Role" "ClusterRole" (eq (include "strimzi-operator.namespaced" .) "true") }}
 {{- $podLabels := include "strimzi-operator.podLabels" (dict "ctx" . "labels" (include "strimzi-operator.labels" .)) }}
 apiVersion: v1
 kind: ServiceAccount
@@ -22,9 +25,12 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: {{ $roleKind }}
 metadata:
   name: {{ $testRole }}
+  {{- if (eq (include "strimzi-operator.namespaced" .) "true") }}
+  namespace: {{ .Release.Namespace }}
+  {{- end }}
   labels:
     {{- include "strimzi-operator.labels" . | nindent 4 }}
   annotations:
@@ -35,9 +41,11 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list", "watch"]
+  {{- if not (eq (include "strimzi-operator.namespaced" .) "true") }}
   - apiGroups: ["apiextensions.k8s.io"]
     resources: ["customresourcedefinitions"]
     verbs: ["get", "list", "watch"]
+  {{- end }}
   # Read pods so the failure diagnostic below can actually run. Without this
   # the diagnostic prints Forbidden at exactly the moment it is needed.
   - apiGroups: [""]
@@ -45,9 +53,12 @@ rules:
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: {{ $roleKind }}Binding
 metadata:
   name: {{ $testRole }}
+  {{- if (eq (include "strimzi-operator.namespaced" .) "true") }}
+  namespace: {{ .Release.Namespace }}
+  {{- end }}
   labels:
     {{- include "strimzi-operator.labels" . | nindent 4 }}
   annotations:
@@ -56,7 +67,7 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: {{ $roleKind }}
   name: {{ $testRole }}
 subjects:
   - kind: ServiceAccount
@@ -140,8 +151,16 @@ spec:
                 kafkarebalances.kafka.strimzi.io \
                 strimzipodsets.core.strimzi.io"
           FAIL=0
+          {{- if (eq (include "strimzi-operator.namespaced" .) "true") }}
+          # No CRD reads here: a served resource is an Established CRD.
+          SERVED=$(kubectl api-resources -o name 2>/dev/null)
+          {{- end }}
           for crd in $CRDS; do
+            {{- if (eq (include "strimzi-operator.namespaced" .) "true") }}
+            if echo "${SERVED}" | grep -qx "${crd}"; then
+            {{- else }}
             if kubectl wait --for=condition=Established "crd/${crd}" --timeout=60s >/dev/null 2>&1; then
+            {{- end }}
               echo "  ✅ ${crd}"
             else
               echo "  ❌ ${crd} not Established"

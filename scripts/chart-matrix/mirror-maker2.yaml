@@ -96,6 +96,13 @@ renders:
         kind: KafkaUser
         path: spec/authorization
         exists: false
+  - name: namespace rbac scope
+    set: [rbac.scope=namespace, rack.enabled=true]
+    assert:
+      - why: "no rack, so Strimzi binds the workers to no ClusterRole"
+        kind: KafkaMirrorMaker2
+        path: spec/rack
+        exists: false
 
 rails:
   - name: custom authentication without configuration

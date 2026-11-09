@@ -1,0 +1,14 @@
+{{- /*
+Kates: in namespace scope, refuse every switch that renders a cluster-scoped
+object or needs cluster rights. values-namespace.yaml turns them all off.
+*/ -}}
+{{- if eq (include "velero.namespaceScope" .) "true" }}
+{{- $on := list }}
+{{- if and .Values.rbac.create .Values.rbac.clusterAdministrator }}{{ $on = append $on "rbac.clusterAdministrator (a ClusterRoleBinding)" }}{{ end }}
+{{- if .Values.upgradeCRDs }}{{ $on = append $on "upgradeCRDs (a ClusterRole, a ClusterRoleBinding and a Job that applies CRDs)" }}{{ end }}
+{{- if .Values.cleanUpCRDs }}{{ $on = append $on "cleanUpCRDs (a Job that deletes CRDs)" }}{{ end }}
+{{- if and .Values.namespace (gt (len (.Values.namespace.labels | default dict)) 0) }}{{ $on = append $on "namespace.labels (a Job that patches the Namespace)" }}{{ end }}
+{{- if $on }}
+{{- fail (printf "rbac.scope=namespace creates nothing cluster-scoped, but %s would; install with -f charts/velero/values-namespace.yaml" (join ", " $on)) }}
+{{- end }}
+{{- end }}

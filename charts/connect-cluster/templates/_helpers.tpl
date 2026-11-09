@@ -183,7 +183,7 @@ connectWorker.spec reads (shared with mirror-maker2).
       "logging" $logging
       "loggingConfigMap" (printf "%s-logging" $fullname)
       "tracing" (ternary (dict "type" (.Values.tracing.type | default "opentelemetry")) dict (eq (include "kafka-common.enabled" (list .Values.tracing.enabled true)) "true"))
-      "rack" .Values.rack
+      "rack" (ternary dict .Values.rack (eq (.Values.rbac.scope | default (.Values.global).rbacScope | default "cluster") "namespace"))
       "metrics" (dict
           "enabled" $r.metrics.enabled
           "type" $r.metrics.type

@@ -1,0 +1,77 @@
+{{- if (eq (include "strimzi-operator.namespaced" .) "true") }}
+{{- $op := index .Values "strimzi-kafka-operator" -}}
+{{- /*
+The operator's rights as Roles, for an install by someone who may not create
+ClusterRoles (a namespace admin). Upstream only knows ClusterRoles, bound per
+watched namespace by RoleBindings; this renders the same rules as Roles of the
+same names in each watched namespace, and binds them the same way.
+
+The rules are not copied: each Role renders upstream's own ClusterRole template
+with rbac.create and createGlobalResources forced on, and keeps its rules, so a
+new Strimzi version brings its rules with it.
+
+What has no namespaced form is left out, and with it what needs it:
+strimzi-cluster-operator-global (ClusterRoleBindings for rack awareness, nodes
+for NodePort addresses, StorageClasses for volume expansion) and the
+strimzi-kafka-broker and strimzi-kafka-client delegations. So Kafka clusters
+this operator manages run without rack awareness. The CRDs are cluster-scoped
+too: an admin installs them once.
+*/ -}}
+{{- $offenders := list -}}
+{{- if $op.watchAnyNamespace }}{{ $offenders = append $offenders "strimzi-kafka-operator.watchAnyNamespace=false" }}{{ end -}}
+{{- if $op.rbac.create }}{{ $offenders = append $offenders "strimzi-kafka-operator.rbac.create=false" }}{{ end -}}
+{{- if $op.createGlobalResources }}{{ $offenders = append $offenders "strimzi-kafka-operator.createGlobalResources=false" }}{{ end -}}
+{{- if $op.createAggregateRoles }}{{ $offenders = append $offenders "strimzi-kafka-operator.createAggregateRoles=false" }}{{ end -}}
+{{- if .Values.crdUpgrade.enabled }}{{ $offenders = append $offenders "crdUpgrade.enabled=false" }}{{ end -}}
+{{- if .Values.globalBindings.enabled }}{{ $offenders = append $offenders "globalBindings.enabled=false" }}{{ end -}}
+{{- if .Values.drainCleaner.enabled }}{{ $offenders = append $offenders "drainCleaner.enabled=false" }}{{ end -}}
+{{- if $offenders }}
+{{- fail (printf "strimzi-operator: rbac.scope=namespace creates no cluster-scoped object, so it also needs %s. values-namespace.yaml sets them." (join ", " $offenders)) -}}
+{{- end }}
+{{- $sub := index .Subcharts "strimzi-kafka-operator" -}}
+{{- $subValues := merge (dict "rbac" (dict "create" true) "createGlobalResources" true) (deepCopy $sub.Values) -}}
+{{- $subCtx := dict "Values" $subValues "Chart" $sub.Chart "Release" $sub.Release "Template" $sub.Template "Capabilities" $sub.Capabilities -}}
+{{- $upstream := printf "%s/charts/strimzi-kafka-operator/templates/" .Chart.Name -}}
+{{- $sa := $op.serviceAccount | default "strimzi-cluster-operator" -}}
+{{- /* role (upstream ClusterRole name), the template it comes from, the binding's name, and where */ -}}
+{{- $watched := splitList "," (include "strimzi-operator.watchScope" .) -}}
+{{- $roles := list
+      (dict "role" "strimzi-cluster-operator-namespaced"      "file" "020-ClusterRole-strimzi-cluster-operator-role.yaml" "binding" "strimzi-cluster-operator"                           "namespaces" $watched)
+      (dict "role" "strimzi-cluster-operator-watched"         "file" "023-ClusterRole-strimzi-cluster-operator-role.yaml" "binding" "strimzi-cluster-operator-watched"                   "namespaces" $watched)
+      (dict "role" "strimzi-entity-operator"                  "file" "031-ClusterRole-strimzi-entity-operator.yaml"       "binding" "strimzi-cluster-operator-entity-operator-delegation" "namespaces" $watched)
+      (dict "role" "strimzi-cluster-operator-leader-election" "file" "022-ClusterRole-strimzi-cluster-operator-role.yaml" "binding" "strimzi-cluster-operator-leader-election"           "namespaces" (list .Release.Namespace)) }}
+{{- range $r := $roles }}
+{{- $rendered := include (printf "%s%s" $upstream $r.file) $subCtx | fromYaml }}
+{{- if ne $rendered.metadata.name $r.role }}
+{{- fail (printf "strimzi-operator: upstream's %s no longer renders the ClusterRole %s (got %q); rbac.scope=namespace needs updating for this Strimzi version." $r.file $r.role $rendered.metadata.name) }}
+{{- end }}
+{{- range $ns := $r.namespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $r.role }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "strimzi-operator.labels" $ | nindent 4 }}
+rules:
+  {{- toYaml $rendered.rules | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $r.binding }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "strimzi-operator.labels" $ | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ $.Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ $r.role }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}
+{{- end }}

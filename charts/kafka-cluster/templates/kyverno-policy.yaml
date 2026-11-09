@@ -7,7 +7,7 @@ Formerly `podSecurityPolicy`; the old key is still read in 1.x.
 {{- $r := dict -}}
 {{- $_ := include "kafka-cluster.resolve" (dict "ctx" . "out" $r) -}}
 {{- $ky := $r.kyverno -}}
-{{- if and $ky.enabled (.Capabilities.APIVersions.Has "kyverno.io/v1") }}
+{{- if and $ky.enabled (.Capabilities.APIVersions.Has "kyverno.io/v1") (not (eq ($.Values.rbac.scope | default ($.Values.global).rbacScope | default "cluster") "namespace")) }}
 {{- $ns := include "kafka-cluster.namespace" . -}}
 {{- $policy := include "kafka-cluster.kyvernoPolicyName" . -}}
 apiVersion: kyverno.io/v1

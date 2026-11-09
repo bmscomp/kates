@@ -102,3 +102,30 @@ renders:
         kind: PrometheusRule
         name: kafka-chaos-alerts
         count: 0
+
+  - name: namespace rbac scope
+    values: [values-namespace.yaml]
+    set: [chaosAlerts.enabled=true]
+    assert:
+      - why: "a namespace admin installs it: nothing cluster-scoped"
+        kind: ClusterRole
+        count: 0
+      - kind: ClusterRoleBinding
+        count: 0
+      - kind: ValidatingWebhookConfiguration
+        count: 0
+      - kind: MutatingWebhookConfiguration
+        count: 0
+      - why: "the operator gets a Role in place of kube-prometheus-stack's ClusterRole"
+        kind: Role
+        name: monitoring-kube-prometheus-operator
+        count: 1
+
+rails:
+  - name: namespace rbac scope without the overlay
+    want: "Install with -f values-namespace.yaml"
+    set: [rbac.scope=namespace]
+  - name: namespace rbac scope with node-exporter back on
+    want: "access (nodeExporter.enabled)"
+    values: [values-namespace.yaml]
+    set: [kube-prometheus-stack.nodeExporter.enabled=true]

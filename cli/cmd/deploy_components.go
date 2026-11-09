@@ -1221,6 +1221,7 @@ func (dc *deployContext) kafkaComponent() component {
 
 			// (Values files are already appended above so these overrides take precedence)
 			kafkaArgs = append(kafkaArgs, dc.kafkaRackArgs()...)
+			kafkaArgs = append(kafkaArgs, adminlessScopeArgs()...)
 			kafkaArgs = append(kafkaArgs, dc.scrapeArgs("charts/kafka-cluster")...)
 
 			return runHelmFn(ctx, append(kafkaArgs, dc.policyArgs("kafka-cluster")...)...)
@@ -1236,6 +1237,16 @@ func (dc *deployContext) kafkaComponent() component {
 			return nil
 		},
 	}
+}
+
+// adminlessScopeArgs installs a chart in namespace RBAC scope under
+// --adminless: without it Strimzi still binds rack-aware brokers and workers to
+// its ClusterRoles, a cluster grant the team never asked for.
+func adminlessScopeArgs() []string {
+	if deployAdminless {
+		return []string{"--set", "rbac.scope=namespace"}
+	}
+	return nil
 }
 
 // kafkaRackArgs moves rack to the hostname once the nodes are read and none has
@@ -1480,6 +1491,7 @@ func (dc *deployContext) kafkaConnectHelmArgs(bootstrap, kafkaSvcDomain, connect
 	// CRDs its PodMonitor needs exist; without --with-monitoring the
 	// chart's own API check keeps a bare cluster installable.
 	connectArgs = append(connectArgs, dc.scrapeArgs("charts/connect-cluster")...)
+	connectArgs = append(connectArgs, adminlessScopeArgs()...)
 	return append(connectArgs, dc.policyArgs("connect-cluster")...)
 }
 
@@ -1858,6 +1870,7 @@ func (dc *deployContext) mirrorMaker2Component() component {
 			if oneBroker() {
 				helmArgs = append(helmArgs, oneBrokerMM2Args...)
 			}
+			helmArgs = append(helmArgs, adminlessScopeArgs()...)
 			helmArgs = append(helmArgs, dc.scrapeArgs("charts/mirror-maker2")...)
 			helmArgs = append(helmArgs, dc.policyArgs("mirror-maker2")...)
 			helmArgs = append(helmArgs, "--timeout", "10m")

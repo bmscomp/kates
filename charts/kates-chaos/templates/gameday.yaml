@@ -6,10 +6,10 @@
 {{- $checks := .Values.gameday.checks }}
 {{- if not $checks }}
 {{- $checks = list
-      (dict "name" "CRDs installed" "command" "kubectl get crd chaosengines.litmuschaos.io")
+      (dict "name" "CRDs installed" "command" (ternary "kubectl api-resources -o name | grep -qx chaosengines.litmuschaos.io" "kubectl get crd chaosengines.litmuschaos.io" (eq (include "kates-chaos.namespaced" .) "true")))
       (dict "name" "Chaos operator running" "command" (printf "kubectl get pods -n %s -l app.kubernetes.io/name=litmus --no-headers | grep Running" $ns))
       (dict "name" "Experiments installed" "command" (printf "[ $(kubectl get chaosexperiments -n %s --no-headers 2>/dev/null | wc -l) -gt 0 ]" $kafkaNamespace))
-      (dict "name" "Target namespace accessible" "command" (printf "kubectl get namespace %s" $kafkaNamespace)) }}
+      (dict "name" "Target namespace accessible" "command" (printf (ternary "kubectl get pods -n %s" "kubectl get namespace %s" (eq (include "kates-chaos.namespaced" .) "true")) $kafkaNamespace)) }}
 {{- end }}
 apiVersion: v1
 kind: ServiceAccount
@@ -24,9 +24,12 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: {{ ternary "Role" "ClusterRole" (eq (include "kates-chaos.namespaced" $) "true") }}
 metadata:
   name: {{ include "kates-chaos.fullname" . }}-gameday
+  {{- if (include "kates-chaos.namespaced" $) }}
+  namespace: {{ .Release.Namespace }}
+  {{- end }}
   labels:
     {{- include "kates-chaos.labels" . | nindent 4 }}
   annotations:
@@ -35,22 +38,27 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 rules:
   - apiGroups: [""]
-    resources: ["pods", "namespaces"]
+    resources: ["pods"{{ if not (include "kates-chaos.namespaced" $) }}, "namespaces"{{ end }}]
     verbs: ["get", "list"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list"]
+  {{- if not (include "kates-chaos.namespaced" $) }}
   - apiGroups: ["apiextensions.k8s.io"]
     resources: ["customresourcedefinitions"]
     verbs: ["get", "list"]
+  {{- end }}
   - apiGroups: ["litmuschaos.io"]
     resources: ["chaosexperiments", "chaosengines", "chaosresults"]
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: {{ ternary "Role" "ClusterRole" (eq (include "kates-chaos.namespaced" $) "true") }}Binding
 metadata:
   name: {{ include "kates-chaos.fullname" . }}-gameday
+  {{- if (include "kates-chaos.namespaced" $) }}
+  namespace: {{ .Release.Namespace }}
+  {{- end }}
   labels:
     {{- include "kates-chaos.labels" . | nindent 4 }}
   annotations:
@@ -59,7 +67,7 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: {{ ternary "Role" "ClusterRole" (eq (include "kates-chaos.namespaced" $) "true") }}
   name: {{ include "kates-chaos.fullname" . }}-gameday
 subjects:
   - kind: ServiceAccount

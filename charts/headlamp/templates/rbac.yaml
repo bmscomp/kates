@@ -1,23 +1,43 @@
 {{- if .Values.serviceAccount.create }}
 {{- if .Values.rbac.create }}
+{{- $namespaced := eq (.Values.rbac.scope | default (.Values.global).rbacScope | default "cluster") "namespace" }}
+{{- $kind := ternary "Role" "ClusterRole" $namespaced }}
+{{- /* A Role cannot grant cluster-scoped resources, and a namespace admin may not write rules it does not hold. */}}
+{{- $clusterScoped := list "namespaces" "nodes" "persistentvolumes" "clusterroles" "clusterrolebindings" "storageclasses" "customresourcedefinitions" "ingressclasses" }}
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: {{ $kind }}
 metadata:
   name: {{ include "headlamp.fullname" . }}
+  {{- if $namespaced }}
+  namespace: {{ .Release.Namespace }}
+  {{- end }}
   labels:
     {{- include "headlamp.labels" . | nindent 4 }}
 rules:
+  {{- if $namespaced }}
+  {{- range .Values.rbac.rules }}
+  {{- $resources := list }}
+  {{- range .resources }}{{ if not (has . $clusterScoped) }}{{ $resources = append $resources . }}{{ end }}{{ end }}
+  {{- if $resources }}
+  - {{ toYaml (merge (dict "resources" $resources) (omit . "resources")) | nindent 4 | trim }}
+  {{- end }}
+  {{- end }}
+  {{- else }}
   {{- toYaml .Values.rbac.rules | nindent 2 }}
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: {{ $kind }}Binding
 metadata:
   name: {{ include "headlamp.fullname" . }}
+  {{- if $namespaced }}
+  namespace: {{ .Release.Namespace }}
+  {{- end }}
   labels:
     {{- include "headlamp.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: {{ $kind }}
   name: {{ include "headlamp.fullname" . }}
 subjects:
   - kind: ServiceAccount

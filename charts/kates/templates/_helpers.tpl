@@ -2,6 +2,14 @@
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{/*
+The RBAC scope: rbac.scope, else global.rbacScope (one switch for an umbrella),
+else cluster. Anything but namespace is cluster.
+*/}}
+{{- define "kates.rbacScope" -}}
+{{- .Values.rbac.scope | default (.Values.global).rbacScope | default "cluster" -}}
+{{- end }}
+
 {{- define "kates.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}

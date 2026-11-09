@@ -14,10 +14,13 @@ maintainers:
 name: velero
 sources:
 - https://github.com/vmware-tanzu/velero
-# Patch: the chart icon.
-version: 11.3.6
+# Minor: rbac.scope, cluster (default) or namespace: nothing cluster-scoped,
+# so a namespace admin installs the release with values-namespace.yaml.
+version: 11.4.0
 annotations:
   artifacthub.io/changes: |
+    - kind: added
+      description: "rbac.scope (or global.rbacScope): namespace leaves nothing cluster-scoped behind, so a namespace admin installs the release with values-namespace.yaml. No Role of its own: the server is bound to admin in its namespace and backs up that namespace only; no ClusterRoleBinding, upgrade-crds, cleanup-crds or label-namespace Job, and no node-agent; the informer cache is off. A cluster admin installs the CRDs and two ClusterRoles once, and binds each release's server to read Namespaces and list ClusterRoleBindings; turning a cluster-scoped switch back on fails the render. Default cluster: unchanged"
     - kind: changed
       description: "The chart icon is now a Kates icon, served from this repository."
     - kind: fixed

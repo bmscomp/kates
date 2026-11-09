@@ -1,3 +1,12 @@
+# The install mode of the whole release, read by every subchart as its
+# rbac.scope default. cluster: a cluster admin installs it; Kates gets its
+# ClusterRole (every feature, chaos included) and Strimzi binds brokers and
+# workers to ClusterRoles for rack awareness. namespace: nothing cluster-scoped,
+# so a namespace admin installs it; no rack awareness, no NodePort listeners,
+# no chaos or disruption.
+global:
+  rbacScope: cluster
+
 kafka-cluster:
   enabled: true
   # The kates platform's topics, users (kates-backend, kafka-ui, …) and client

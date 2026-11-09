@@ -661,6 +661,13 @@ configuration:
 ##
 
 rbac:
+  # Kates: cluster (empty: global.rbacScope, then cluster) or namespace. In
+  # namespace scope the release creates nothing cluster-scoped: no Role of its
+  # own, the server is bound to the built-in admin ClusterRole in this
+  # namespace and backs up only this namespace. Install it with
+  # -f values-namespace.yaml, which turns off every switch that needs cluster
+  # rights (the chart refuses them otherwise).
+  scope: ""
   # Whether to create the Velero role and role binding to give all permissions to the namespace to Velero.
   create: true
   # Whether to create the cluster role binding to give administrator permissions to Velero

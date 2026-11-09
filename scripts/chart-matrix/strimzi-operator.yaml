@@ -98,6 +98,26 @@ renders:
         name: strimzi-operator
         path: metadata/annotations/kates.io~1watch-scope
         equals: kafka-2
+  - name: without ClusterRoles
+    values: [values-namespace.yaml]
+    namespace: team-a
+    assert:
+      - why: "a namespace admin may create nothing cluster-scoped"
+        kind: ClusterRole
+        count: 0
+      - kind: ClusterRoleBinding
+        count: 0
+      - kind: CustomResourceDefinition
+        count: 0
+      - why: "upstream's rules, rendered from the subchart"
+        kind: Role
+        name: strimzi-cluster-operator-watched
+        path: rules/*/resources/*
+        equals: strimzipodsets
+      - kind: RoleBinding
+        name: strimzi-cluster-operator
+        path: roleRef/kind
+        equals: Role
   - name: kind
     values: [values-kind.yaml]
   - name: dev
@@ -125,6 +145,9 @@ rails:
   - name: a floating drain-cleaner image
     want: "a floating tag"
     set: [drainCleaner.enabled=true, drainCleaner.tls.certManager.enabled=true, drainCleaner.image=quay.io/strimzi/drain-cleaner:latest]
+  - name: rbac.scope=namespace beside cluster-scoped switches
+    want: "rbac.scope=namespace creates no cluster-scoped object"
+    set: [rbac.scope=namespace]
   - name: a misspelled key
     want: "Additional property replica is not allowed"
     set: [drainCleaner.replica=2]

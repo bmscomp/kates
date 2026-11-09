@@ -2,20 +2,9 @@ apiVersion: v2
 name: mirror-maker2
 description: Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x)
 type: application
-# Minor: both dashboards move to dashboards/ and are loaded with .Files.Get
-# instead of being written inline, the uid scheme changes (so an upgrade
-# leaves the old board behind in Grafana), and two values that used to move
-# the migration board are now frozen at generation time.
-# docs/grafana-dashboards-refactor-plan.md, phase 3.
-# Minor: dashboard.namespace, so both boards' ConfigMaps can go somewhere
-# other than the workload's namespace. Defaults are unchanged.
-# Minor: dashboard.migration.drainedBelowMs and .translationFreshMs are
-# REMOVED. 0.10.0 froze them into the generated board and documented them as
-# inert, which left two keys that accept a number and ignore it; a release
-# setting either is now refused with the constant to edit named.
-# Patch: testImages.kubectl moves to kates-tester 1.38.0, the tag the v1.38.0
-# release publishes; every chart that runs it pins the same one.
-version: 0.11.27
+# Minor: rbac.scope, cluster (default) or namespace: nothing cluster-scoped,
+# so a namespace admin installs the release.
+version: 0.12.0
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
@@ -42,6 +31,8 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "rbac.scope (or global.rbacScope): namespace leaves nothing cluster-scoped behind, so a namespace admin installs the release. It drops rack, for which Strimzi binds the workers to a ClusterRole. Default cluster: unchanged"
     - kind: changed
       description: "testImages.kubectl moves to kates-tester 1.38.0, the tag the v1.38.0 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion, as it does for every chart that runs the image."
     - kind: changed

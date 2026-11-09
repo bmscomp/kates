@@ -1,0 +1,55 @@
+# Strimzi Operator — Without ClusterRoles
+# Usage, as a namespace admin:
+#   helm upgrade --install strimzi-operator charts/strimzi-operator \
+#     -n <kafka-namespace> --skip-crds \
+#     -f charts/strimzi-operator/values-namespace.yaml
+# --skip-crds: Helm 4 applies the subchart's crds/ even when they exist.
+#
+# BEFORE IT, ONCE, A CLUSTER ADMIN:
+#   • installs the Strimzi CRDs (the ones of this chart's strimziVersion);
+#   • gives the installer the Strimzi kinds, e.g. upstream's strimzi-admin
+#     ClusterRole aggregated into admin (createAggregateRoles=true on any
+#     release, or the bundle's 070-ClusterRole-strimzi-admin.yaml);
+#   • lets the installer grant rights it does not hold, in that namespace only.
+#     Kubernetes refuses a Role holding rules its creator lacks, and the
+#     operator's Roles name subresources (kafkas/status, …/finalizers) and
+#     OpenShift kinds that a namespace admin does not have:
+#       kubectl -n <ns> create role rbac-delegate --verb=escalate,bind \
+#         --resource=roles.rbac.authorization.k8s.io
+#       kubectl -n <ns> create rolebinding <who>-rbac-delegate \
+#         --role=rbac-delegate --serviceaccount=<ns>:<who>   # or --user/--group
+#     Both are namespaced: no ClusterRole is created for this.
+#
+# The operator runs in the Kafka namespace and watches only it. Its rights are
+# Roles there, holding the rules of upstream's ClusterRoles; nothing this
+# release creates is cluster-scoped. To watch more namespaces, list them in
+# strimzi-kafka-operator.watchNamespaces: the Roles go there too, so the
+# installer needs admin in each.
+#
+# What only a cluster grant gives is left out:
+#   • the CRDs: an admin installs them once (crdUpgrade is off here);
+#   • rack awareness: the operator cannot create the broker's
+#     ClusterRoleBinding, so install kafka-cluster with --set kafka.rack=null;
+#   • NodePort listener addresses (nodes) and volume-expansion checks
+#     (StorageClasses);
+#   • the drain cleaner, a cluster-wide webhook.
+# There must be no other operator watching this namespace.
+
+rbac:
+  scope: namespace
+
+crdUpgrade:
+  enabled: false
+
+strimzi-kafka-operator:
+  watchAnyNamespace: false
+  watchNamespaces: []
+  rbac:
+    create: false
+  createGlobalResources: false
+  createAggregateRoles: false
+  dashboards:
+    enabled: false
+
+drainCleaner:
+  enabled: false

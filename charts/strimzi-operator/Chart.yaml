@@ -1,11 +1,8 @@
 apiVersion: v2
 name: strimzi-operator
-# Minor: the operator runs Strimzi's restricted pod security provider by
-# default, which rolls every Kafka pod it manages once and refuses a Kaniko
-# Connect build; the Helm tests get resources, and podLabels is new.
-# Patch: testImages.kubectl moves to kates-tester 1.38.0, the tag the v1.38.0
-# release publishes; every chart that runs it pins the same one.
-version: 0.4.18
+# Minor: rbac.scope namespace, an operator a namespace admin can install with no
+# cluster-scoped object.
+version: 0.5.0
 # Tracks the Strimzi operator version this chart deploys. The CLI rewrites this
 # (and the dependency version) in a generated copy when another version is
 # selected; the repository copy is the pin.
@@ -33,6 +30,10 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "rbac.scope (or global.rbacScope) namespace and values-namespace.yaml: the operator's rights as Roles and RoleBindings in each watched namespace, with the rules of upstream's own ClusterRoles rendered from the subchart, and nothing cluster-scoped, so a namespace admin can install it. An admin installs the CRDs and grants escalate and bind on roles in the namespace once; rack awareness, NodePort addresses, volume-expansion checks and the drain cleaner are left out. The Helm tests use a Role and API discovery in this mode"
+    - kind: fixed
+      description: "NOTES looked up the drain cleaner's ValidatingWebhookConfiguration even with the drain cleaner off, so an install by anyone who may not read that cluster-scoped kind failed"
     - kind: changed
       description: "testImages.kubectl moves to kates-tester 1.38.0, the tag the v1.38.0 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion, as it does for every chart that runs the image."
     - kind: changed

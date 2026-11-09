@@ -1,5 +1,5 @@
 {{- with .Values.priorityClass }}
-{{- if .create }}
+{{- if and .create (not (eq ($.Values.rbac.scope | default ($.Values.global).rbacScope | default "cluster") "namespace")) }}
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:

@@ -379,6 +379,13 @@ podAntiAffinity:
   enabled: true
   topologyKey: kubernetes.io/hostname
 
+rbac:
+  # -- cluster (empty: global.rbacScope, then cluster) or namespace. In
+  # namespace scope the release leaves nothing cluster-scoped behind, so a
+  # namespace admin installs it: no rack awareness (for
+  # it Strimzi binds the workers to a ClusterRole).
+  scope: ""
+
 rack:
   enabled: false
   topologyKey: topology.kubernetes.io/zone
