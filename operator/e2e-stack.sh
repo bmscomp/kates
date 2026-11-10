@@ -4,6 +4,8 @@
 #
 #   KUBECONFIG=<scratch> operator/e2e-stack.sh <image>
 #
+# KATES_TAG picks the Kates image tag; it defaults to the chart's appVersion, native.
+#
 # Scratch clusters only: it installs Strimzi and Kafka, as a CI job would.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -22,7 +24,7 @@ kubectl -n kates create secret generic kates-backend --dry-run=client -o yaml \
 tag=$(sed -nE 's/^appVersion:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/p' charts/kates/Chart.yaml)
 # One broker: Kates' default of three replicas would refuse every topic.
 helm upgrade --install kates charts/kates -n kates --wait --timeout 8m \
-  --set image.tag="$tag-native" \
+  --set image.tag="${KATES_TAG:-$tag-native}" \
   --set-string defaults.replicationFactor=1,defaults.minInsyncReplicas=1 \
   --set-json 'extraEnv=[{"name":"KATES_OUTBOX_TOPIC_REPLICATION_FACTOR","value":"1"}]'
 
