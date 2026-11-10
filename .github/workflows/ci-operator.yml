@@ -168,6 +168,21 @@ jobs:
           docker build -f operator/Dockerfile -t kates-operator:ci .
           kind load docker-image kates-operator:ci --name ci-test
 
+      # A release PR pins kates-tester and Kates to the tag its release has yet
+      # to publish, so ghcr.io answers 404: strimzi-operator's CRD hook and the
+      # Kates pod wait on the pull until the install times out. Build both from
+      # this checkout under the pinned tags and load them into the nodes, as
+      # integration.yml does for kates-tester; the kubelet then uses them
+      # (IfNotPresent). Kates is the JVM build: native is too slow for PR CI.
+      - name: Load the kates-tester and Kates images the charts pin
+        run: |
+          set -euo pipefail
+          tag=$(sed -nE 's/^appVersion:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/p' charts/kates/Chart.yaml)
+          scripts/retry.sh 3 docker build -t "ghcr.io/bmscomp/kates-tester:${tag}" tester/
+          scripts/retry.sh 3 docker build -f kates/Dockerfile -t "ghcr.io/bmscomp/kates:${tag}" .
+          kind load docker-image "ghcr.io/bmscomp/kates-tester:${tag}" "ghcr.io/bmscomp/kates:${tag}" --name ci-test
+          echo "KATES_TAG=${tag}" >> "$GITHUB_ENV"
+
       - name: Deploy Kafka, Kates and the operator
         run: operator/e2e-stack.sh docker.io/library/kates-operator:ci
 
