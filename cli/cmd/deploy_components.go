@@ -1702,7 +1702,8 @@ func (dc *deployContext) katesComponent() component {
 			cleanupStaleClusterResource(ctx, "clusterrole", "kates", appNS)
 			cleanupStaleClusterResource(ctx, "clusterrolebinding", "kates", appNS)
 
-			katesBootstrap := dc.primary.Bootstrap(dc.report.Network.ClusterDomain)
+			// Ends at .svc: the pod's search path adds the cluster domain, so a wrong detection cannot break it.
+			katesBootstrap := fmt.Sprintf("%s-kafka-bootstrap.%s.svc:9092", dc.primary.Name, dc.primary.Namespace)
 
 			// Every install runs the native image. On kind, prefer a real local
 			// backend image when one is available on every node; otherwise, and on

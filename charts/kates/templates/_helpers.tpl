@@ -54,15 +54,16 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{ include "kates.fullname" . }}-db
 {{- end }}
 
-{{/* The host the chart waits for: the bundled database's, or the primary's Service. */}}
+{{/* The host the chart waits for: the bundled database's, or the primary's Service.
+     Ends at .svc so the pod's search path adds the cluster domain, whatever it is. */}}
 {{- define "kates.dbHost" -}}
 {{- $name := ternary (printf "%s-rw" (include "kates.cnpg.fullname" .)) (include "kates.postgresql.fullname" .) .Values.cnpg.enabled -}}
-{{ $name }}.{{ .Release.Namespace }}.svc.{{ .Values.global.clusterDomain }}
+{{ $name }}.{{ .Release.Namespace }}.svc
 {{- end }}
 
 {{- define "kates.postgresql.jdbcUrl" -}}
 {{- if .Values.postgresql.enabled -}}
-jdbc:postgresql://{{ include "kates.postgresql.fullname" . }}.{{ .Release.Namespace }}.svc.{{ .Values.global.clusterDomain }}:5432/{{ .Values.postgresql.auth.database }}
+jdbc:postgresql://{{ include "kates.postgresql.fullname" . }}.{{ .Release.Namespace }}.svc:5432/{{ .Values.postgresql.auth.database }}
 {{- else if .Values.cnpg.enabled -}}
 {{- /* Timeouts: a connection to a dead node otherwise hangs on TCP for minutes after a failover. */ -}}
 jdbc:postgresql://{{ include "kates.dbHost" . }}:5432/{{ .Values.externalDatabase.database }}?socketTimeout=60&tcpKeepAlive=true&connectTimeout=5

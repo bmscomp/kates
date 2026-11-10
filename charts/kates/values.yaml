@@ -7,8 +7,6 @@ global:
   # -- Pull secrets added to imagePullSecrets on every pod the chart renders,
   # each a Secret name or {name: ...}: [regcred] or [{name: regcred}]
   imagePullSecrets: []
-  # -- Kubernetes cluster DNS domain
-  clusterDomain: "cluster.local"
 
 # -- Enable production guard rails: template rendering fails if insecure
 # chart defaults (e.g. the default database password) would reach the
