@@ -14,7 +14,7 @@ kates-crds = { path = "../kates-crds" }
 futures = "0.3"
 http = "1"
 jiff = "0.2"
-json-patch = "4"
+json-patch = "5"
 kube-lease-manager = "0.13"
 secrecy = "0.10"
 serde.workspace = true
