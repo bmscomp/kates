@@ -27,6 +27,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
       helm: ${{ steps.filter.outputs.helm }}
+      deps: ${{ steps.filter.outputs.deps }}
       yaml: ${{ steps.filter.outputs.yaml }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,6 +45,16 @@ jobs:
               - 'versions.env'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
+            # What the dependency scan reads: the dependency sets and its own
+            # settings. A pull request that touches none of these cannot have
+            # caused a finding.
+            deps:
+              - 'kates/pom.xml'
+              - 'cli/go.mod'
+              - 'cli/go.sum'
+              - '.trivyignore.yaml'
+              - 'versions.env'
+              - '.github/workflows/ci.yml'
             helm:
               - 'charts/**'
               - 'versions.env'
@@ -139,9 +150,16 @@ jobs:
   dependency-scan:
     name: Dependency CVE scan
     needs: changes
+    # An advisory published overnight fails this job on a tree nobody changed.
+    # On main that is the point. On a pull request it would block a change
+    # that has nothing to do with it, so there the scan runs only when the
+    # pull request changes what is scanned (`deps`).
     # A release pin PR touches no code, but it is the last check before the tag
     # ships the tree, so it runs the scan against today's advisories anyway.
-    if: needs.changes.outputs.code == 'true' || startsWith(github.head_ref, 'chore/release-')
+    if: >-
+      (github.event_name == 'push' && needs.changes.outputs.code == 'true')
+      || needs.changes.outputs.deps == 'true'
+      || startsWith(github.head_ref, 'chore/release-')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
