@@ -8,6 +8,7 @@ use std::time::Duration;
 use jiff::Timestamp;
 use k8s_openapi::api::apps::v1::StatefulSet;
 use k8s_openapi::api::core::v1::{Service, ServiceAccount};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
 use kates_crds::{Kates, KatesSpec, KatesStatus, SecretKey};
 use kube::api::{Api, Patch, PatchParams};
 use kube::runtime::controller::Action;
@@ -21,6 +22,7 @@ use crate::telemetry::current_trace_id;
 
 const KIND: &str = "Kates";
 const WRITE_RETRY: Duration = Duration::from_secs(30);
+const NAME_RETRY: Duration = Duration::from_mins(1);
 const DEFAULT_IMAGE: &str = "ghcr.io/bmscomp/kates";
 
 /// # Errors
@@ -34,45 +36,92 @@ pub async fn reconcile(kates: Arc<Kates>, ctx: Arc<Context>) -> Result<Action, E
         return Ok(Action::await_change());
     }
 
-    let objects = objects(&kates);
-    let params = PatchParams::apply(&ctx.field_manager).force();
+    let uid = kates.uid().unwrap_or_default();
     let client = &ctx.client;
-    Api::<ServiceAccount>::namespaced(client.clone(), &namespace)
-        .patch(&name, &params, &Patch::Apply(&objects.account))
-        .await?;
+    let accounts = Api::<ServiceAccount>::namespaced(client.clone(), &namespace);
     let services = Api::<Service>::namespaced(client.clone(), &namespace);
-    for service in [&objects.service, &objects.peers] {
-        let name = service["metadata"]["name"].as_str().unwrap_or_default();
-        services
-            .patch(name, &params, &Patch::Apply(service))
-            .await?;
-    }
-    let set = Api::<StatefulSet>::namespaced(client.clone(), &namespace)
-        .patch(&name, &params, &Patch::Apply(&objects.set))
-        .await?;
+    let sets = Api::<StatefulSet>::namespaced(client.clone(), &namespace);
+    let objects = objects(&kates);
+    let peers = objects.peers["metadata"]["name"]
+        .as_str()
+        .unwrap_or_default();
 
     let before = kates.status.clone().unwrap_or_default();
     let mut after = before.clone();
-    observe(&kates, &set, &mut after, Timestamp::now());
+    // Applying over an object of the same name would hand it to whoever may create a Kates:
+    // an existing ServiceAccount to run their image as, or a Service to point elsewhere.
+    let taken = [
+        taken(&accounts, &name, &uid).await?,
+        taken(&services, &name, &uid).await?,
+        taken(&services, peers, &uid).await?,
+        taken(&sets, &name, &uid).await?,
+    ];
+    let taken = taken.into_iter().flatten().next();
+    if let Some(what) = &taken {
+        let message = format!("{what} exists and is not this resource's: rename one of them");
+        let generation = kates.metadata.generation;
+        after.observed_generation = generation;
+        let conditions = &mut after.conditions;
+        let now = Timestamp::now();
+        status::set(
+            conditions,
+            "Ready",
+            "False",
+            "NameTaken",
+            &message,
+            generation,
+            now,
+        );
+    } else {
+        let params = PatchParams::apply(&ctx.field_manager).force();
+        accounts
+            .patch(&name, &params, &Patch::Apply(&objects.account))
+            .await?;
+        for service in [&objects.service, &objects.peers] {
+            let name = service["metadata"]["name"].as_str().unwrap_or_default();
+            services
+                .patch(name, &params, &Patch::Apply(service))
+                .await?;
+        }
+        let set = sets
+            .patch(&name, &params, &Patch::Apply(&objects.set))
+            .await?;
+        observe(&kates, &set, &mut after, Timestamp::now());
+    }
+
     if after != before {
         let patch = json!({
             "apiVersion": "kates.io/v1alpha1",
             "kind": KIND,
             "status": after,
         });
+        let params = PatchParams::apply(&ctx.field_manager).force();
         Api::<Kates>::namespaced(client.clone(), &namespace)
             .patch_status(&name, &params, &Patch::Apply(patch))
             .await?;
     }
-    let ready = |status: &KatesStatus| status::is_true(&status.conditions, "Ready");
-    if ready(&after) && !ready(&before) {
-        let message = format!("running {}", kates.spec.version);
-        let note = Note {
-            warning: false,
-            reason: "Ready",
-            message,
+    let reason = |status: &KatesStatus| {
+        let ready = status::find(&status.conditions, "Ready");
+        ready.map(|condition| condition.reason.clone())
+    };
+    if reason(&after) != reason(&before) {
+        let note = match reason(&after).as_deref() {
+            Some("Running") => Some((false, "Ready", format!("running {}", kates.spec.version))),
+            Some("NameTaken") => taken.map(|what| (true, "NameTaken", format!("{what} exists"))),
+            _ => None,
         };
-        ctx.publish(&*kates, vec![note]).await;
+        if let Some((warning, reason, message)) = note {
+            let note = Note {
+                warning,
+                reason,
+                message,
+            };
+            ctx.publish(&*kates, vec![note]).await;
+        }
+    }
+    if reason(&after).as_deref() == Some("NameTaken") {
+        // The other object is not watched, so its removal is only seen by looking again.
+        return Ok(Action::requeue(NAME_RETRY));
     }
     // The StatefulSet is watched: its next change starts the next pass.
     Ok(Action::await_change())
@@ -83,6 +132,23 @@ pub fn error_policy(kates: Arc<Kates>, error: &Error, ctx: Arc<Context>) -> Acti
     ctx.metrics.reconcile_failed(KIND, error.name());
     tracing::warn!(%error, name = %kates.name_any(), "reconcile failed");
     Action::requeue(WRITE_RETRY)
+}
+
+/// The kind and name of an object that exists under `name` without being controlled by the
+/// `Kates` with this uid, or `None` when the name is free or already this resource's.
+async fn taken<K>(api: &Api<K>, name: &str, uid: &str) -> Result<Option<String>, kube::Error>
+where
+    K: kube::Resource<DynamicType = ()> + Clone + serde::de::DeserializeOwned + std::fmt::Debug,
+{
+    let found = api.get_opt(name).await?;
+    Ok(found
+        .filter(|object| !controlled_by(object.owner_references(), uid))
+        .map(|_| format!("{} {name}", K::kind(&()))))
+}
+
+fn controlled_by(owners: &[OwnerReference], uid: &str) -> bool {
+    let controls = |owner: &OwnerReference| owner.controller == Some(true) && owner.uid == uid;
+    owners.iter().any(controls)
 }
 
 /// What a `Kates` becomes, each as the manifest that is applied.
@@ -386,6 +452,20 @@ mod tests {
         );
         // The apiserver must take the manifest as a StatefulSet.
         serde_json::from_value::<StatefulSet>(objects.set).unwrap();
+    }
+
+    #[test]
+    fn only_this_resource_as_controller_makes_an_object_ours() {
+        let owner = |uid: &str, controller: Option<bool>| OwnerReference {
+            uid: uid.to_owned(),
+            controller,
+            ..OwnerReference::default()
+        };
+        assert!(controlled_by(&[owner("uid", Some(true))], "uid"));
+        assert!(!controlled_by(&[], "uid"));
+        assert!(!controlled_by(&[owner("other", Some(true))], "uid"));
+        // A plain owner reference is not control: anyone may add one.
+        assert!(!controlled_by(&[owner("uid", None)], "uid"));
     }
 
     #[test]

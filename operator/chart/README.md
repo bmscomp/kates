@@ -212,6 +212,8 @@ spec:
 
 `kubectl get kates` shows the version every pod runs and whether the backend is Ready. A change to `spec.version` replaces the pod, and `Ready` is false until the new one answers.
 
+The operator never takes over an object it did not create. If a ServiceAccount, Service or StatefulSet of the resource's name already exists, nothing is applied and `Ready` is false with reason `NameTaken`: rename one of them.
+
 What it doesn't do yet:
 
 - It runs one pod. More than one waits for Kates' own quorum.

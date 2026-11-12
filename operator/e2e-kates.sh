@@ -98,6 +98,19 @@ echo "== a pod that dies comes back"
 "${k[@]}" wait --for=condition=Ready=false "kates/$name" --timeout=60s >/dev/null && pass "not Ready meanwhile" || fail "stayed Ready"
 "${k[@]}" wait --for=condition=Ready "kates/$name" --timeout=4m >/dev/null && pass "Ready again" || fail "did not come back"
 
+echo "== a name already taken is left alone"
+taken=taken-$(date +%s)
+"${k[@]}" create serviceaccount "$taken" >/dev/null
+printf 'apiVersion: kates.io/v1alpha1\nkind: Kates\nmetadata: {name: %s}\nspec: {version: "1", database: {secretRef: {name: none}}, kafka: {bootstrapServers: none}}\n' "$taken" \
+  | "${k[@]}" apply -f - >/dev/null
+"${k[@]}" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].reason}'=NameTaken "kates/$taken" --timeout=60s >/dev/null \
+  && pass "Ready is False, NameTaken" || fail "not refused"
+check "the ServiceAccount is not adopted" "" "$("${k[@]}" get serviceaccount "$taken" -o jsonpath='{.metadata.ownerReferences}')"
+check "no StatefulSet" "" "$("${k[@]}" get statefulset "$taken" -o name 2>/dev/null)"
+"${k[@]}" delete kates "$taken" --timeout=30s >/dev/null
+check "the ServiceAccount outlives the resource" "serviceaccount/$taken" "$("${k[@]}" get serviceaccount "$taken" -o name 2>/dev/null)"
+"${k[@]}" delete serviceaccount "$taken" >/dev/null
+
 echo "== deleting the resource removes what it made"
 "${k[@]}" delete kates "$name" --timeout=60s >/dev/null
 "${k[@]}" wait --for=delete "statefulset/$name" "service/$name" "serviceaccount/$name" --timeout=60s >/dev/null \
