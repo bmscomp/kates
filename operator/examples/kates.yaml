@@ -1,0 +1,16 @@
+# One Kates backend, installed by the operator. The database and its Secret are yours:
+#
+#   kubectl create secret generic kates-db \
+#     --from-literal=url=jdbc:postgresql://postgres:5432/kates \
+#     --from-literal=username=kates --from-literal=password=...
+apiVersion: kates.io/v1alpha1
+kind: Kates
+metadata:
+  name: main
+spec:
+  version: 1.39.1-native
+  database:
+    secretRef:
+      name: kates-db
+  kafka:
+    bootstrapServers: krafter-kafka-bootstrap.kafka.svc:9092

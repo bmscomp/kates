@@ -1,21 +1,25 @@
 //! The custom resources of `kates.io/v1alpha1`.
 
+mod compat;
 mod kafkacompliance;
+mod kates;
 mod katestest;
 mod wire;
 
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use kube::CustomResourceExt;
 
+pub use compat::breaking;
 pub use kafkacompliance::{
     ComplianceCounts, FailedRule, KafkaCompliance, KafkaComplianceSpec, KafkaComplianceStatus,
 };
+pub use kates::{Database, Kafka, Kates, KatesSpec, KatesStatus, Sasl, SecretKey, SecretName};
 pub use katestest::{KatesTest, KatesTestSpec, KatesTestStatus, Phase, RunSummary, TestType};
 
 /// Every CRD this build carries, for `crdgen` and `crds apply`.
 #[must_use]
 pub fn crds() -> Vec<CustomResourceDefinition> {
-    vec![KatesTest::crd(), KafkaCompliance::crd()]
+    vec![KatesTest::crd(), KafkaCompliance::crd(), Kates::crd()]
 }
 
 /// The `crd-version: <N>` a root schema's description ends in.

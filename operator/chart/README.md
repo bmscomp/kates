@@ -2,7 +2,7 @@
 
 Kates runs and compliance checks as Kubernetes resources. `KatesTest` is one run and `KafkaCompliance` a standing check. A team can commit `loadtest.yaml`, watch it with `kubectl get katestests`, and gate a pipeline on it.
 
-The operator drives a Kates API that is already running, through its REST API. It doesn't install Kates, and it needs Kates 1.38.0 or newer: older versions can't honour an idempotency key, so every `KatesTest` waits at `Synced=False`, reason `ApiTooOld`, and starts no run.
+The operator drives a Kates API through its REST API: one that is already running, or one it installs from a [`Kates`](#kates) resource. It needs Kates 1.38.0 or newer: older versions can't honour an idempotency key, so every `KatesTest` waits at `Synced=False`, reason `ApiTooOld`, and starts no run.
 
 ## Install
 
@@ -191,6 +191,35 @@ spec:
 `spec.reference` is a `KafkaReference` `.spec`, inline, and the API's strict reader checks it. The resource's name becomes the stored check's name, so it must be a DNS label. Intervals under a minute are raised to one minute, and intervals over a year lowered to one year.
 
 A check also runs when the spec changes, and when the Strimzi `Kafka` it names has finished reconciling a change, if that namespace is in `kafka.namespaces`. Any other target is checked on its interval alone, and `KafkaWatched=False` says why. `spec.suspend: true` stops new checks.
+
+## Kates
+
+A `Kates` resource is one Kates backend. The operator turns it into a StatefulSet of one pod, a Service of the same name on ports 8080 and 9000, and a ServiceAccount, and removes them when the resource is deleted.
+
+```yaml
+apiVersion: kates.io/v1alpha1
+kind: Kates
+metadata:
+  name: main
+spec:
+  version: 1.39.1-native
+  database:
+    secretRef:
+      name: kates-db          # keys: url (jdbc:postgresql://...), username, password
+  kafka:
+    bootstrapServers: krafter-kafka-bootstrap.kafka.svc:9092
+```
+
+`kubectl get kates` shows the version every pod runs and whether the backend is Ready. A change to `spec.version` replaces the pod, and `Ready` is false until the new one answers.
+
+The operator never takes over an object it did not create. If a ServiceAccount, Service or StatefulSet of the resource's name already exists, nothing is applied and `Ready` is false with reason `NameTaken`: rename one of them.
+
+What it doesn't do yet:
+
+- It runs one pod. More than one waits for Kates' own quorum.
+- The pod's ServiceAccount is bound to no role, so the backend injects no fault and reads nothing from Kubernetes: `KATES_CHAOS_PROVIDER` defaults to `noop`. Load and integrity tests need neither.
+- It doesn't create PostgreSQL. A changed Secret is not noticed: delete the pod to pick it up.
+- Kafka over TLS with a truststore file isn't expressible yet. `spec.env` takes any other setting of the container, except the names `database`, `kafka` and `apiKeySecretRef` set.
 
 ## Operating it
 
