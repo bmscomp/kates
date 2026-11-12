@@ -323,4 +323,51 @@ public class KafkaIntelligenceService {
             return lagSpiked ? null : Duration.ZERO;
         }
     }
+
+    /** The KRaft voters, and those among them caught up with the leader, the leader included. */
+    public record Quorum(Set<Integer> voters, Set<Integer> caughtUp) {}
+
+    // shortcut: Kafka's default controller.quorum.fetch.timeout.ms, read it from the controllers if a cluster changes
+    // it
+    private static final long CAUGHT_UP_WITHIN_MS = 2000;
+
+    /**
+     * Reads the KRaft quorum. Empty when it cannot be read or has no leader:
+     * a ZooKeeper cluster, a failed call, a quorum mid-election.
+     */
+    public Optional<Quorum> quorum() {
+        try {
+            return quorumOf(adminService
+                    .sharedAdminClient()
+                    .describeMetadataQuorum()
+                    .quorumInfo()
+                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS));
+        } catch (Exception e) {
+            LOG.warn("Failed to read the KRaft quorum", e);
+            return Optional.empty();
+        }
+    }
+
+    /** A voter is caught up when it fetched up to the leader's log end within the fetch timeout, as Strimzi counts it. */
+    static Optional<Quorum> quorumOf(org.apache.kafka.clients.admin.QuorumInfo info) {
+        OptionalLong leaderAt = info.voters().stream()
+                .filter(v -> v.replicaId() == info.leaderId())
+                .findFirst()
+                .map(org.apache.kafka.clients.admin.QuorumInfo.ReplicaState::lastCaughtUpTimestamp)
+                .orElse(OptionalLong.empty());
+        if (leaderAt.isEmpty()) {
+            return Optional.empty();
+        }
+        Set<Integer> voters = new TreeSet<>();
+        Set<Integer> caughtUp = new TreeSet<>();
+        for (org.apache.kafka.clients.admin.QuorumInfo.ReplicaState voter : info.voters()) {
+            voters.add(voter.replicaId());
+            OptionalLong at = voter.lastCaughtUpTimestamp();
+            if (voter.replicaId() == info.leaderId()
+                    || (at.isPresent() && leaderAt.getAsLong() - at.getAsLong() < CAUGHT_UP_WITHIN_MS)) {
+                caughtUp.add(voter.replicaId());
+            }
+        }
+        return Optional.of(new Quorum(voters, caughtUp));
+    }
 }

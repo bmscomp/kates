@@ -104,20 +104,32 @@ const (
 var mcpCaveatsChaos = []mcpCaveat{
 	{
 		ID:    mcpCaveatDryRunControllersUncounted,
-		Short: "The dry run's blast radius counts brokers only: hitting KRaft controllers does not make wouldSucceed false.",
+		Short: "The dry run's blast radius counts brokers only: KRaft controllers a plan hits are checked against the quorum instead.",
 		Text: "The dry run lists every pod a step would hit, KRaft controllers included, but its blast-radius check " +
 			"counts only brokers: a controller a step hits adds nothing to the affected-broker count or to " +
-			"maxAffectedBrokers, so a plan that takes down a majority of the controller quorum can still get " +
-			"wouldSucceed true. preview_disruption tells controllers from brokers by the KafkaNodePools in the " +
-			"cluster topology; when the topology cannot be read, it cannot say which pods are controllers.",
+			"maxAffectedBrokers. The controllers a plan hits are checked against the KRaft quorum instead: the plan " +
+			"is refused when the voters caught up with the leader, without them, would no longer be a majority of " +
+			"all voters, or when the quorum cannot be read. A random pick or a rolling restart counts one " +
+			"controller, the one the quorum can least spare. The check knows a controller by Strimzi's " +
+			"strimzi.io/controller-role label and its voter by the node ID its pod name ends with, and a Kates API " +
+			"from before this check does not make it: there, a plan that takes down a majority of the quorum can " +
+			"still get wouldSucceed true. preview_disruption tells controllers from brokers by the KafkaNodePools " +
+			"in the cluster topology; when the topology cannot be read, it cannot say which pods are controllers.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"disruption/DisruptionSafetyGuard.java:88-94,161-173,185-195,237-253,390-450",
-				"record Impact(List<String> pods, List<String> brokers)",
-				"Set<String> affectedBrokers = new HashSet<>();", "hit.subList(0, 1)",
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionSafetyGuard.java:88-95,162-187,199-213,255-271,408-480,872-927",
+				"record Impact(List<String> pods, List<String> brokers, List<String> controllers)",
+				"Set<String> affectedBrokers = new HashSet<>();", "impact.brokers().subList(0, 1)",
+				"quorumRefusal(affectedControllers, oneControllerOf)",
+				"private Optional<String> quorumRefusal(Set<String> controllers, List<List<String>> oneOf)",
+				"private static Integer nodeId(String pod)",
 				"plan.getMaxAffectedBrokers() > 0", "Only 1 broker would remain after disruption",
 				"impact(spec, kafkaPods).pods()", "affected.addAll(hit);",
 				"What a step's fault would hit", "pods.stream().filter(brokers::contains)"),
-			mcpJava + "chaos/PodTargets.java:108-119",
+			mcpAnchoredRef(mcpJava+"disruption/KafkaIntelligenceService.java:327-372",
+				"public record Quorum(Set<Integer> voters, Set<Integer> caughtUp) {}",
+				"private static final long CAUGHT_UP_WITHIN_MS = 2000;", "public Optional<Quorum> quorum()"),
+			mcpAnchoredRef(mcpJava+"chaos/PodTargets.java:108-128",
+				"public static boolean isBroker(Pod pod)", "public static boolean isController(Pod pod)"),
 			mcpJava + "service/ClusterTopologyService.java:568-641",
 			"charts/kafka-cluster/values.yaml:281-282",
 		},
@@ -132,7 +144,7 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"injects every fault except POD_DELETE, NETWORK_PARTITION, ROLLING_RESTART and SCALE_DOWN as its own " +
 			"litmus-admin service account, so for those the check does not show whether the fault can run.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"disruption/DisruptionSafetyGuard.java:275-278,772-841",
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionSafetyGuard.java:293-296,802-871",
 				"boolean canExecute = checkRbacPermissions(spec);", `"Insufficient RBAC permissions for "`,
 				"boolean checkRbacPermissions(FaultSpec spec)", `"RBAC check failed, assuming permitted"`),
 			mcpAnchoredRef(mcpJava+"chaos/LitmusChaosProvider.java:41-59,86-88,270",
@@ -152,7 +164,7 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"selection), so which pod the step hits, and whether it is a controller, is not known before it runs.",
 		Refs: []string{
 			mcpJava + "chaos/PodTargets.java:40-51,101-104",
-			mcpAnchoredRef(mcpJava+"disruption/DisruptionSafetyGuard.java:43-49,96-115,434-443",
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionSafetyGuard.java:43-49,97-116,457-473",
 				"Selects the cluster's Kafka pods", `defaultValue = "strimzi.io/component-type=kafka"`,
 				"private List<TargetedStep> targeted(DisruptionPlan plan)", "return targeted;",
 				"if (mode == PodTargets.Mode.ONE_RANDOM)", `" (random selection)"`),
@@ -170,11 +182,11 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"its targetBrokerId names, on every pod its targetLabel matches with targetAll, or else on one of them " +
 			"picked at random. A step that leaves targetNamespace out is in kates.chaos.kafka.namespace.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"disruption/DisruptionSafetyGuard.java:40-41,140-149,237-253,403-426",
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionSafetyGuard.java:40-41,141-150,255-271,422-449",
 				`name = "kates.chaos.kafka.namespace", defaultValue = "kafka"`,
 				"String katesNamespace = kubeClient.getNamespace();", `"': targetNamespace "`,
 				"impact(spec, kafkaPods).pods()", "this step disrupts no broker",
-				"Impact impact(FaultSpec spec, List<Pod> kafkaPods)", "return new Impact(List.of(spec.targetPod())"),
+				"Impact impact(FaultSpec spec, List<Pod> kafkaPods)", "List<String> named = List.of(spec.targetPod());"),
 			mcpAnchoredRef("charts/kates/templates/configmap.yaml:11-12",
 				"$kafkaNamespace := tpl (.Values.networkPolicy.kafka.namespace", "KATES_CHAOS_KAFKA_NAMESPACE:"),
 			mcpJava + "chaos/PodTargets.java:40-51,58-77,83-105",

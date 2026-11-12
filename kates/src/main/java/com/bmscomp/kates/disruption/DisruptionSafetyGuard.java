@@ -86,11 +86,12 @@ public class DisruptionSafetyGuard {
             DisruptionPlan.DisruptionStep step, FaultSpec spec, Integer leader, boolean lookupFailed) {}
 
     /**
-     * What a step's fault hits: every pod, for the dry run to list, and the
-     * brokers among them, which are what the blast radius counts.
+     * What a step's fault hits: every pod, for the dry run to list, the
+     * brokers among them, which are what the blast radius counts, and the
+     * KRaft controllers among them, which the quorum has to survive losing.
      */
-    record Impact(List<String> pods, List<String> brokers) {
-        static final Impact NONE = new Impact(List.of(), List.of());
+    record Impact(List<String> pods, List<String> brokers, List<String> controllers) {
+        static final Impact NONE = new Impact(List.of(), List.of(), List.of());
     }
 
     private List<TargetedStep> targeted(DisruptionPlan plan) {
@@ -159,18 +160,31 @@ public class DisruptionSafetyGuard {
         }
 
         Set<String> affectedBrokers = new HashSet<>();
+        Set<String> affectedControllers = new HashSet<>();
+        List<List<String>> oneControllerOf = new ArrayList<>();
 
         for (TargetedStep t : targeted) {
             DisruptionPlan.DisruptionStep step = t.step();
             FaultSpec spec = t.spec();
 
             try {
-                List<String> hit = impact(spec, kafkaPods).brokers();
-                // A rolling restart takes its brokers down one at a time.
+                Impact impact = impact(spec, kafkaPods);
+                // A rolling restart takes its pods down one at a time.
+                boolean rolling = spec.disruptionType() == DisruptionType.ROLLING_RESTART;
                 affectedBrokers.addAll(
-                        spec.disruptionType() == DisruptionType.ROLLING_RESTART && !hit.isEmpty()
-                                ? hit.subList(0, 1)
-                                : hit);
+                        rolling && !impact.brokers().isEmpty()
+                                ? impact.brokers().subList(0, 1)
+                                : impact.brokers());
+                // Of the controllers a roll restarts or a random pick may land on, one is down at a time.
+                boolean oneAtATime = rolling
+                        || (!drainsANode(spec)
+                                && spec.disruptionType() != DisruptionType.SCALE_DOWN
+                                && PodTargets.mode(spec) == PodTargets.Mode.ONE_RANDOM);
+                if (oneAtATime && !impact.controllers().isEmpty()) {
+                    oneControllerOf.add(impact.controllers());
+                } else {
+                    affectedControllers.addAll(impact.controllers());
+                }
             } catch (IllegalArgumentException | io.fabric8.kubernetes.client.KubernetesClientException e) {
                 errors.add("Step '" + step.name() + "': " + e.getMessage());
             }
@@ -192,6 +206,10 @@ public class DisruptionSafetyGuard {
             errors.add("Plan would affect ALL " + totalBrokers + " brokers — cluster would lose availability");
         } else if (remainingBrokers == 1) {
             warnings.add("Only 1 broker would remain after disruption — high risk of data loss");
+        }
+
+        if (!affectedControllers.isEmpty() || !oneControllerOf.isEmpty()) {
+            quorumRefusal(affectedControllers, oneControllerOf).ifPresent(errors::add);
         }
 
         if (!errors.isEmpty()) {
@@ -391,8 +409,9 @@ public class DisruptionSafetyGuard {
      * What a step's fault would hit, chosen by the same rules the chaos
      * backends use ({@link PodTargets}) among the Kafka pods its selector
      * matches, so a {@code targetAll} step hits every one of them. Only the
-     * brokers among them count: a KRaft controller the step hits is listed,
-     * not counted. A random pick is one pod, marked since the actual pod is
+     * brokers among them count towards the blast radius: a KRaft controller
+     * the step hits is checked against the quorum instead
+     * ({@link #quorumRefusal}). A random pick is one pod, marked since the actual pod is
      * not known yet, and counts as a broker if the selector matches one. A
      * {@code SCALE_DOWN} step hits the broker each KafkaNodePool or
      * StatefulSet it selects will lose ({@link ScaleDownTargets}). A drain hits
@@ -411,7 +430,7 @@ public class DisruptionSafetyGuard {
                 return Impact.NONE;
             }
             List<String> removed = ScaleDownTargets.preview(spec, kafkaPods).removedPods();
-            return new Impact(removed, removed);
+            return new Impact(removed, removed, controllersAmong(removed, kafkaPods));
         }
         PodTargets.Mode mode = PodTargets.mode(spec);
         if (mode == PodTargets.Mode.NAMED_POD) {
@@ -419,7 +438,11 @@ public class DisruptionSafetyGuard {
                     && kafkaPods.stream()
                             .anyMatch(
                                     p -> p.getMetadata().getName().equals(spec.targetPod()) && !PodTargets.isBroker(p));
-            return new Impact(List.of(spec.targetPod()), controller ? List.of() : List.of(spec.targetPod()));
+            List<String> named = List.of(spec.targetPod());
+            return new Impact(
+                    named,
+                    controller ? List.of() : named,
+                    inKafkaNamespace ? controllersAmong(named, kafkaPods) : List.of());
         }
         if (!inKafkaNamespace) {
             return Impact.NONE;
@@ -439,14 +462,21 @@ public class DisruptionSafetyGuard {
                     matching.stream().filter(PodTargets::isBroker).findFirst();
             List<String> pick =
                     List.of(broker.orElse(matching.getFirst()).getMetadata().getName() + " (random selection)");
-            return new Impact(pick, broker.isPresent() ? pick : List.of());
+            // The pick may as well be any controller the selector matches.
+            return new Impact(
+                    pick,
+                    broker.isPresent() ? pick : List.of(),
+                    matching.stream()
+                            .filter(PodTargets::isController)
+                            .map(p -> p.getMetadata().getName())
+                            .toList());
         }
         List<String> pods = PodTargets.select(spec, matching);
         Set<String> brokers = new HashSet<>(matching.stream()
                 .filter(PodTargets::isBroker)
                 .map(p -> p.getMetadata().getName())
                 .toList());
-        return new Impact(pods, pods.stream().filter(brokers::contains).toList());
+        return new Impact(pods, pods.stream().filter(brokers::contains).toList(), controllersAmong(pods, kafkaPods));
     }
 
     /** What the dry run warns when targetBrokerId names no broker, and the pick falls back to another. */
@@ -662,7 +692,7 @@ public class DisruptionSafetyGuard {
                 .map(p -> p.getMetadata().getName())
                 .toList();
         String note = lead + (onIt.isEmpty() ? ", which runs no Kafka pod" : ", and evicts every pod on it");
-        return new Drain(new Impact(pods, brokers), target, List.of(note));
+        return new Drain(new Impact(pods, brokers, controllersAmong(pods, kafkaPods)), target, List.of(note));
     }
 
     /**
@@ -838,5 +868,62 @@ public class DisruptionSafetyGuard {
             LOG.debug("RBAC check failed, assuming permitted", e);
             return true;
         }
+    }
+
+    /**
+     * Why the KRaft quorum would not survive the plan, by the rule Strimzi's
+     * KafkaRoller restarts a controller by: the voters caught up with the
+     * leader, without the ones lost, must still be a majority of all voters.
+     * A voter already down or lagging is one the plan cannot spend. A random
+     * pick ({@code oneOf}) counts the controller the quorum can least spare. A
+     * quorum that cannot be read refuses the plan too, since nothing then
+     * says the loss is safe.
+     */
+    private Optional<String> quorumRefusal(Set<String> controllers, List<List<String>> oneOf) {
+        Optional<KafkaIntelligenceService.Quorum> read = intelligence.quorum();
+        Set<Integer> left = new HashSet<>(
+                read.map(KafkaIntelligenceService.Quorum::caughtUp).orElse(Set.of()));
+        Set<String> lost = new TreeSet<>(controllers);
+        for (List<String> candidates : oneOf) {
+            lost.add(candidates.stream()
+                    .filter(p -> !lost.contains(p) && left.contains(nodeId(p)))
+                    .findFirst()
+                    .orElse(candidates.getFirst()));
+        }
+        String what =
+                "Plan would take down KRaft controller" + (lost.size() == 1 ? " " : "s ") + String.join(", ", lost);
+        if (read.isEmpty()) {
+            return Optional.of(what + ", and the KRaft quorum could not be read, so nothing says it would survive");
+        }
+        for (String pod : lost) {
+            if (nodeId(pod) == null) {
+                return Optional.of(what + ", and " + pod + " does not end in a node ID, so its voter is not known");
+            }
+            left.remove(nodeId(pod));
+        }
+        int voters = read.get().voters().size();
+        int majority = voters / 2 + 1;
+        return left.size() >= majority
+                ? Optional.empty()
+                : Optional.of(what + ", leaving " + left.size() + " caught-up of " + voters
+                        + " voters, and the quorum needs " + majority);
+    }
+
+    /** The node ID Strimzi ends a pod's name with, {@code <cluster>-<pool>-<id>}, or null. */
+    private static Integer nodeId(String pod) {
+        try {
+            return Integer.valueOf(pod.substring(pod.lastIndexOf('-') + 1));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** The KRaft controllers among {@code pods}: a node with both roles is one too. */
+    private static List<String> controllersAmong(List<String> pods, List<Pod> kafkaPods) {
+        Set<String> controllers = new HashSet<>(kafkaPods.stream()
+                .filter(PodTargets::isController)
+                .map(p -> p.getMetadata().getName())
+                .toList());
+        return pods.stream().filter(controllers::contains).toList();
     }
 }

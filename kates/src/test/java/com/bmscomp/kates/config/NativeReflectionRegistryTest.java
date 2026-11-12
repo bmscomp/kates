@@ -64,6 +64,8 @@ class NativeReflectionRegistryTest {
             // Control-flow result between the launcher and the two disruption
             // resources; the resources build the HTTP body themselves.
             "com.bmscomp.kates.disruption.DisruptionLauncher$LaunchResult",
+            // What the safety guard reads of the KRaft quorum; only its refusal message leaves.
+            "com.bmscomp.kates.disruption.KafkaIntelligenceService$Quorum",
             // Namespace holder for the request records nested inside it.
             "com.bmscomp.kates.disruption.DisruptionDtos",
             // Live Kubernetes watch handle and in-process registries — held, not
