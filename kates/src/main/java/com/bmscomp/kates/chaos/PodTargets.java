@@ -118,6 +118,15 @@ public final class PodTargets {
         return brokerRole == null || "true".equals(brokerRole);
     }
 
+    /**
+     * Whether a Kafka pod is a KRaft controller, alone or with the broker
+     * role. A pod without Strimzi's label is not taken for one.
+     */
+    public static boolean isController(Pod pod) {
+        Map<String, String> labels = pod.getMetadata().getLabels();
+        return labels != null && "true".equals(labels.get(ScaleDownTargets.CONTROLLER_ROLE_LABEL));
+    }
+
     private static String name(Pod pod) {
         return pod.getMetadata().getName();
     }

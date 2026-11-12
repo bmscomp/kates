@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import io.fabric8.kubernetes.api.model.NodeBuilder;
 import io.fabric8.kubernetes.api.model.PodBuilder;
@@ -57,6 +58,14 @@ class DisruptionSafetyGuardTest {
         guard.limits = new FaultLimits();
         guard.kafkaNamespace = "kafka";
         guard.kafkaLabel = "strimzi.io/component-type=kafka";
+        guard.intelligence = mock(KafkaIntelligenceService.class);
+        quorum(Set.of(3, 4, 5), Set.of(3, 4, 5));
+    }
+
+    /** What the KRaft quorum reports: its voters, and those caught up with the leader. */
+    private void quorum(Set<Integer> voters, Set<Integer> caughtUp) {
+        when(guard.intelligence.quorum())
+                .thenReturn(Optional.of(new KafkaIntelligenceService.Quorum(voters, caughtUp)));
     }
 
     @Test
@@ -661,6 +670,66 @@ class DisruptionSafetyGuardTest {
                 guard.dryRun(plan(1, zoneAlpha)).steps().getFirst().affectedPods().stream()
                         .sorted()
                         .toList());
+    }
+
+    private static final FaultSpec KILL_CONTROLLER_3 = FaultSpec.builder("kill-controller")
+            .targetPod("krafter-controllers-alpha-3")
+            .disruptionType(DisruptionType.POD_KILL)
+            .build();
+
+    @Test
+    void aControllerIsRefusedWhenTheQuorumWouldNotSurviveIt() {
+        threeBrokersThreeControllers();
+        assertTrue(guard.validatePlan(plan(1, KILL_CONTROLLER_3)).safe());
+
+        // Controller 4 is already down or lagging: 3 is one of the two left.
+        quorum(Set.of(3, 4, 5), Set.of(3, 5));
+        var result = guard.dryRun(plan(1, KILL_CONTROLLER_3));
+
+        assertFalse(result.wouldSucceed());
+        assertEquals(
+                List.of("Plan would take down KRaft controller krafter-controllers-alpha-3, leaving 1 caught-up of 3"
+                        + " voters, and the quorum needs 2"),
+                result.errors());
+        // A broker costs the quorum nothing.
+        assertTrue(guard.validatePlan(plan(1, kill(1))).safe());
+    }
+
+    @Test
+    void twoOfThreeControllersAreRefusedEvenWhenAllAreCaughtUp() {
+        threeBrokersThreeControllers();
+
+        var result =
+                guard.validatePlan(plan(-1, killAll("strimzi.io/pool-name in (controllers-alpha,controllers-gamma)")));
+
+        assertFalse(result.safe());
+        assertTrue(result.errors().getFirst().endsWith("leaving 1 caught-up of 3 voters, and the quorum needs 2"));
+    }
+
+    @Test
+    void aControllerIsRefusedWhenTheQuorumCannotBeRead() {
+        threeBrokersThreeControllers();
+        when(guard.intelligence.quorum()).thenReturn(Optional.empty());
+
+        var result = guard.validatePlan(plan(1, KILL_CONTROLLER_3));
+
+        assertFalse(result.safe());
+        assertEquals(
+                List.of("Plan would take down KRaft controller krafter-controllers-alpha-3, and the KRaft quorum could"
+                        + " not be read, so nothing says it would survive"),
+                result.errors());
+    }
+
+    @Test
+    void aRandomPickThatMayLandOnAControllerCountsOne() {
+        threeBrokersThreeControllers();
+        quorum(Set.of(3, 4, 5), Set.of(4, 5));
+        FaultSpec random = FaultSpec.builder("kill-any")
+                .targetLabel("strimzi.io/component-type=kafka")
+                .disruptionType(DisruptionType.POD_KILL)
+                .build();
+
+        assertFalse(guard.validatePlan(plan(1, random)).safe());
     }
 
     @Test
