@@ -10,12 +10,13 @@ use axum::http::{StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use futures::channel::oneshot;
-use futures::stream::{self, BoxStream, StreamExt as _};
+use futures::stream::{self, BoxStream, Stream, StreamExt as _};
 use futures::{FutureExt as _, future};
+use k8s_openapi::api::apps::v1::StatefulSet;
 use k8s_openapi::api::authorization::v1::{
     ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
 };
-use kates_crds::{KafkaCompliance, KatesTest};
+use kates_crds::{KafkaCompliance, Kates, KatesTest};
 use kube::api::{Api, DynamicObject, PostParams};
 use kube::discovery;
 use kube::runtime::Controller;
@@ -34,7 +35,7 @@ use crate::connection::{Connections, FALLBACK_DIR};
 use crate::context::{Context, KafkaWatch, Watched};
 use crate::crds;
 use crate::metrics::{Metrics, StoreCollector, Stores};
-use crate::reconcile::{compliance, test};
+use crate::reconcile::{compliance, kates, test};
 
 const OPENMETRICS: &str = "application/openmetrics-text; version=1.0.0; charset=utf-8";
 const LEASE: &str = "kates-operator";
@@ -237,18 +238,11 @@ async fn lead(args: LeadArgs) -> Fallible {
             .write()
             .expect("the stores")
             .push(controller.store());
-        streams.push(
-            controller
-                .run(test::reconcile, test::error_policy, ctx.clone())
-                .for_each(|outcome| {
-                    if let Err(error) = outcome {
-                        tracing::debug!(%error, "controller");
-                    }
-                    future::ready(())
-                })
-                .into_stream()
-                .boxed(),
-        );
+        streams.push(quiet(controller.run(
+            test::reconcile,
+            test::error_policy,
+            ctx.clone(),
+        )));
     }
     for api in scope.apis::<KafkaCompliance>(&client) {
         let controller = Controller::new(api, watcher::Config::default());
@@ -261,21 +255,41 @@ async fn lead(args: LeadArgs) -> Fallible {
         let controller = kafka_triggers(controller, &client, ctx.kafka.as_ref(), &store)
             .graceful_shutdown_on(lease_lost(leader.clone()))
             .shutdown_on_signal();
-        streams.push(
-            controller
-                .run(compliance::reconcile, compliance::error_policy, ctx.clone())
-                .for_each(|outcome| {
-                    if let Err(error) = outcome {
-                        tracing::debug!(%error, "controller");
-                    }
-                    future::ready(())
-                })
-                .into_stream()
-                .boxed(),
-        );
+        streams.push(quiet(controller.run(
+            compliance::reconcile,
+            compliance::error_policy,
+            ctx.clone(),
+        )));
+    }
+    let sets = scope.apis::<StatefulSet>(&client);
+    for (api, sets) in scope.apis::<Kates>(&client).into_iter().zip(sets) {
+        let controller = Controller::new(api, watcher::Config::default())
+            .owns(sets, watcher::Config::default())
+            .graceful_shutdown_on(lease_lost(leader.clone()))
+            .shutdown_on_signal();
+        streams.push(quiet(controller.run(
+            kates::reconcile,
+            kates::error_policy,
+            ctx.clone(),
+        )));
     }
     stream::select_all(streams).collect::<()>().await;
     Ok(())
+}
+
+// A failed pass is already counted and logged by its error policy.
+fn quiet<T, E: std::fmt::Display>(
+    outcomes: impl Stream<Item = Result<T, E>> + Send + 'static,
+) -> BoxStream<'static, ()> {
+    outcomes
+        .for_each(|outcome| {
+            if let Err(error) = outcome {
+                tracing::debug!(%error, "controller");
+            }
+            future::ready(())
+        })
+        .into_stream()
+        .boxed()
 }
 
 // The controllers hold off until the served schema is at least this build's: a stale install
@@ -490,7 +504,8 @@ mod tests {
 
     const SERVED: &str = r#"{"components":{"schemas":{
         "io.kates.v1alpha1.KatesTest":{"description":"crd-version: 1"},
-        "io.kates.v1alpha1.KafkaCompliance":{"description":"crd-version: 1"}}}}"#;
+        "io.kates.v1alpha1.KafkaCompliance":{"description":"crd-version: 1"},
+        "io.kates.v1alpha1.Kates":{"description":"crd-version: 1"}}}}"#;
 
     const VERSION: &str = r#"{"major":"1","minor":"34","gitVersion":"v1.34.11","gitCommit":"c",
         "gitTreeState":"clean","buildDate":"2026-01-01T00:00:00Z","goVersion":"go1.25",

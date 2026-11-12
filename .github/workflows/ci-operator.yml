@@ -189,6 +189,9 @@ jobs:
       - name: Run the e2e checks
         run: operator/e2e.sh payments kafka krafter
 
+      - name: A Kates resource becomes a backend that runs a test
+        run: operator/e2e-kates.sh payments
+
       - name: Show the stack
         if: failure()
         run: |

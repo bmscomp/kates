@@ -24,7 +24,7 @@ metadata:
 rules:
   - apiGroups: ["apiextensions.k8s.io"]
     resources: ["customresourcedefinitions"]
-    resourceNames: ["katestests.kates.io", "kafkacompliances.kates.io"]
+    resourceNames: ["katestests.kates.io", "kafkacompliances.kates.io", "kates.kates.io"]
     verbs: ["get", "create", "patch"]
   - apiGroups: ["apiextensions.k8s.io"]
     resources: ["customresourcedefinitions"]

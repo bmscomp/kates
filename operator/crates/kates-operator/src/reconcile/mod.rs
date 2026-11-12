@@ -1,6 +1,7 @@
 //! The reconcilers, one per kind.
 
 pub mod compliance;
+pub mod kates;
 pub mod test;
 
 use std::collections::BTreeMap;
