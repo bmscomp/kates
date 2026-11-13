@@ -191,8 +191,8 @@ public class DisruptionSafetyGuard {
 
             if (spec.disruptionType() == DisruptionType.SCALE_DOWN) {
                 warnings.add("Step '" + step.name() + "': SCALE_DOWN removes a broker from each KafkaNodePool or"
-                        + " StatefulSet it selects and leaves it removed — autoRollback recommended, which restores"
-                        + " it when the step fails its recovery check");
+                        + " StatefulSet it selects for the rest of the run, which gives it back when it ends;"
+                        + " autoRollback gives it back sooner, when the step fails its recovery check");
             }
         }
 
@@ -340,32 +340,32 @@ public class DisruptionSafetyGuard {
 
     /**
      * Rolls back a fault injection. Called when recovery times out.
+     *
+     * @throws RuntimeException when the rollback fails, after the retries: it
+     *     used to be logged and swallowed, so the retry never ran and the step
+     *     was reported rolled back all the same
      */
     @Retry(maxRetries = 3, delay = 2000)
     public void rollback(FaultSpec spec, String engineName) {
         if (spec.disruptionType() == null) return;
 
-        try {
-            switch (spec.disruptionType()) {
-                case NETWORK_PARTITION -> {
-                    LOG.info("ROLLBACK: removing Kates-managed NetworkPolicies");
-                    kubeClient
-                            .network()
-                            .networkPolicies()
-                            .inNamespace(spec.targetNamespace())
-                            .withLabel("managed-by", "kates")
-                            .delete();
-                }
-                case SCALE_DOWN -> {
-                    LOG.info("ROLLBACK: restoring scaled-down KafkaNodePools and StatefulSets");
-                    restoreReplicaCount(spec);
-                }
-                default ->
-                    LOG.info("ROLLBACK: no explicit rollback needed for " + spec.disruptionType()
-                            + " — StatefulSet controller handles recovery");
+        switch (spec.disruptionType()) {
+            case NETWORK_PARTITION -> {
+                LOG.info("ROLLBACK: removing Kates-managed NetworkPolicies");
+                kubeClient
+                        .network()
+                        .networkPolicies()
+                        .inNamespace(spec.targetNamespace())
+                        .withLabel("managed-by", "kates")
+                        .delete();
             }
-        } catch (Exception e) {
-            LOG.error("Rollback failed for " + spec.disruptionType(), e);
+            case SCALE_DOWN -> {
+                LOG.info("ROLLBACK: restoring scaled-down KafkaNodePools and StatefulSets");
+                restoreReplicaCount(spec);
+            }
+            default ->
+                LOG.info("ROLLBACK: no explicit rollback needed for " + spec.disruptionType()
+                        + " — StatefulSet controller handles recovery");
         }
     }
 
