@@ -1,8 +1,8 @@
 {{- /*
   What a Kates pod may do, for the backend's chaos, topology and compliance reads. The rules are
   the Kates chart's ClusterRole in its cluster scope (charts/kates/templates/rbac.yaml), and CI
-  fails when the two differ. The operator binds this role to each Kates pod's ServiceAccount with
-  `bind` on this one name: it never holds these rights itself. A namespace-scoped install
+  fails when the two differ. The operator binds this role to the ServiceAccount of each Kates pod
+  in rbac.backendNamespaces, with `bind` on this one name: it never holds these rights itself. A namespace-scoped install
   (rbac.clusterRoles.create=false) creates nothing cluster-scoped, so its Kates pods get no role
   and run with faults off, as the Kates chart does in its namespace scope.
 */}}
@@ -90,10 +90,13 @@ metadata:
   labels:
     {{- include "kates-operator.labels" . | nindent 4 }}
 rules:
-  {{- /* create cannot be limited by name: the binding's name comes from each Kates. */}}
+  {{- /*
+    create cannot be limited by name: the binding's name comes from each Kates. list: at start the
+    operator removes the bindings of namespaces taken off rbac.backendNamespaces.
+  */}}
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterrolebindings"]
-    verbs: ["get", "create", "patch", "delete"]
+    verbs: ["get", "list", "create", "patch", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
     verbs: ["bind"]

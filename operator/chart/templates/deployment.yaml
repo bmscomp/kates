@@ -63,6 +63,8 @@ spec:
             {{- if .Values.rbac.clusterRoles.create }}
             - name: KATES_OPERATOR_BACKEND_ROLE
               value: kates-backend-{{ .Release.Namespace }}
+            - name: KATES_OPERATOR_BACKEND_NAMESPACES
+              value: {{ join "," .Values.rbac.backendNamespaces | quote }}
             {{- end }}
             - name: LOG_FORMAT
               value: {{ .Values.logFormat | quote }}

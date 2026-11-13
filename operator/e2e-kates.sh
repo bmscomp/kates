@@ -141,6 +141,36 @@ check "no StatefulSet" "" "$("${k[@]}" get statefulset "$taken" -o name 2>/dev/n
 check "the ServiceAccount outlives the resource" "serviceaccount/$taken" "$("${k[@]}" get serviceaccount "$taken" -o name 2>/dev/null)"
 "${k[@]}" delete serviceaccount "$taken" >/dev/null
 
+echo "== a namespace the installer did not name gets no role"
+plain=$ns-plain
+kubectl -n "$plain" apply -f - >/dev/null <<EOF
+apiVersion: kates.io/v1alpha1
+kind: Kates
+metadata: {name: plain}
+spec:
+  version: "${KATES_TAG:-$tag-native}"
+  database: {secretRef: {name: none}}
+  kafka: {bootstrapServers: "none:9092"}
+EOF
+for _ in $(seq 1 30); do kubectl -n "$plain" get statefulset plain >/dev/null 2>&1 && break; sleep 1; done
+check "faults are off" noop "$(kubectl -n "$plain" get statefulset plain \
+  -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="KATES_CHAOS_PROVIDER")].value}')"
+check "no ClusterRoleBinding" "" "$(kubectl get clusterrolebinding "kates-backend.$plain.plain" -o name 2>/dev/null)"
+check "no finalizer" "" "$(kubectl -n "$plain" get kates plain -o jsonpath='{.metadata.finalizers}')"
+kubectl -n "$plain" delete kates plain --timeout=30s >/dev/null
+
+echo "== a restart removes a binding the list does not allow"
+stray=kates-backend.$plain.stray
+kubectl create clusterrolebinding "$stray" --clusterrole=kates-backend-kates-operator \
+  --serviceaccount="$plain:stray" >/dev/null
+kubectl label clusterrolebinding "$stray" app.kubernetes.io/managed-by=kates-operator >/dev/null
+kubectl -n kates-operator rollout restart deploy/kates-operator >/dev/null
+kubectl -n kates-operator rollout status deploy/kates-operator --timeout=120s >/dev/null
+for _ in $(seq 1 60); do kubectl get clusterrolebinding "$stray" >/dev/null 2>&1 || break; sleep 2; done
+check "the stray binding is gone" "" "$(kubectl get clusterrolebinding "$stray" -o name 2>/dev/null)"
+check "the listed namespace keeps its binding" "clusterrolebinding.rbac.authorization.k8s.io/$binding" \
+  "$(kubectl get clusterrolebinding "$binding" -o name 2>/dev/null)"
+
 echo "== deleting the resource removes what it made"
 "${k[@]}" delete kates "$name" --timeout=60s >/dev/null
 "${k[@]}" wait --for=delete "statefulset/$name" "service/$name" "serviceaccount/$name" --timeout=60s >/dev/null \

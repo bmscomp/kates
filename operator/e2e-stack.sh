@@ -29,6 +29,8 @@ helm upgrade --install kates charts/kates -n kates --wait --timeout 8m \
   --set-json 'extraEnv=[{"name":"KATES_OUTBOX_TOPIC_REPLICATION_FACTOR","value":"1"}]'
 
 kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
+# Watched, but not in rbac.backendNamespaces: its Kates pods get no role.
+kubectl create namespace "$ns-plain" --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n "$ns" create secret generic kates-connection --dry-run=client -o yaml \
   --from-literal=url=http://kates.kates.svc:8080 \
   --from-literal=apiKey="$(kubectl -n kates get secret kates-api-key -o jsonpath='{.data.api-key}' | base64 -d)" \
@@ -36,4 +38,4 @@ kubectl -n "$ns" create secret generic kates-connection --dry-run=client -o yaml
 
 helm upgrade --install kates-operator operator/chart -n kates-operator --create-namespace --wait --timeout 3m \
   --set image.repository="${image%:*}" --set image.tag="${image##*:}" --set image.pullPolicy=Never \
-  --set "watchNamespaces={$ns}" --set 'kafka.namespaces={kafka}'
+  --set "watchNamespaces={$ns,$ns-plain}" --set "rbac.backendNamespaces={$ns}" --set 'kafka.namespaces={kafka}'

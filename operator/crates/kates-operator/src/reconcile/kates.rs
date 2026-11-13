@@ -4,6 +4,7 @@
 //! that gives the pod its rights: a namespaced owner cannot hold a cluster-scoped object, so a
 //! finalizer removes it.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,7 +14,7 @@ use k8s_openapi::api::core::v1::{Service, ServiceAccount};
 use k8s_openapi::api::rbac::v1::ClusterRoleBinding;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
 use kates_crds::{Kates, KatesSpec, KatesStatus, SecretKey};
-use kube::api::{Api, DeleteParams, Patch, PatchParams};
+use kube::api::{Api, DeleteParams, ListParams, Patch, PatchParams};
 use kube::runtime::controller::Action;
 use kube::runtime::finalizer::{self, Event as Finalizer};
 use kube::{Resource as _, ResourceExt as _};
@@ -38,8 +39,8 @@ pub async fn reconcile(kates: Arc<Kates>, ctx: Arc<Context>) -> Result<Action, E
     let namespace = kates.namespace().ok_or(Error::NoNamespace)?;
     // Without a role there is no binding, so no finalizer: one in a namespace-scoped install
     // would hold the namespace's deletion on an operator that is being deleted with it. One left
-    // from an install that had a role still runs its cleanup.
-    if ctx.backend_role.is_none() && !kates.finalizers().iter().any(|f| f == FINALIZER) {
+    // from when this namespace had a role still runs its cleanup.
+    if ctx.backend_role_in(&namespace).is_none() && !bound_before(&kates) {
         return apply(&kates, &ctx).await;
     }
     let api = Api::<Kates>::namespaced(ctx.client.clone(), &namespace);
@@ -53,21 +54,57 @@ pub async fn reconcile(kates: Arc<Kates>, ctx: Arc<Context>) -> Result<Action, E
     .map_err(|error| Error::Finalizer(Box::new(error)))
 }
 
+fn bound_before(kates: &Kates) -> bool {
+    kates.finalizers().iter().any(|f| f == FINALIZER)
+}
+
 /// Removes the binding, the one object no owner reference removes.
 async fn cleanup(kates: &Kates, ctx: &Context) -> Result<Action, Error> {
     let namespace = kates.namespace().ok_or(Error::NoNamespace)?;
+    unbind(ctx, &binding_name(&namespace, &kates.name_any())).await?;
+    Ok(Action::await_change())
+}
+
+async fn unbind(ctx: &Context, binding: &str) -> Result<(), kube::Error> {
     let bindings = Api::<ClusterRoleBinding>::all(ctx.client.clone());
-    match bindings
-        .delete(
-            &binding_name(&namespace, &kates.name_any()),
-            &DeleteParams::default(),
-        )
-        .await
-    {
-        Ok(_) => Ok(Action::await_change()),
-        Err(kube::Error::Api(response)) if response.code == 404 => Ok(Action::await_change()),
-        Err(error) => Err(error.into()),
+    match bindings.delete(binding, &DeleteParams::default()).await {
+        Ok(_) => Ok(()),
+        Err(kube::Error::Api(response)) if response.code == 404 => Ok(()),
+        Err(error) => Err(error),
     }
+}
+
+/// Removes, at start, the bindings to the backend's role in namespaces the installer does not
+/// name. No pass can be trusted with it: a namespace taken off the list may no longer be watched,
+/// and the finalizer that records a binding is its editors' to remove.
+///
+/// # Errors
+/// A failed list or delete: the operator must not run while a revoked namespace keeps the role.
+pub async fn sweep(ctx: &Context) -> Result<(), kube::Error> {
+    let Some(role) = &ctx.backend_role else {
+        return Ok(());
+    };
+    let ours = ListParams::default().labels("app.kubernetes.io/managed-by=kates-operator");
+    let bindings = Api::<ClusterRoleBinding>::all(ctx.client.clone());
+    for binding in bindings.list(&ours).await? {
+        if revoked(&binding, role, &ctx.backend_namespaces) {
+            tracing::warn!(binding = %binding.name_any(), "namespace not in the list: unbinding");
+            unbind(ctx, &binding.name_any()).await?;
+        }
+    }
+    Ok(())
+}
+
+/// A binding to `role` with a subject outside `namespaces`. Another release's role is not ours.
+#[must_use]
+pub fn revoked(binding: &ClusterRoleBinding, role: &str, namespaces: &BTreeSet<String>) -> bool {
+    binding.role_ref.name == role
+        && binding.subjects.iter().flatten().any(|subject| {
+            subject
+                .namespace
+                .as_ref()
+                .is_none_or(|namespace| !namespaces.contains(namespace))
+        })
 }
 
 async fn apply(kates: &Kates, ctx: &Context) -> Result<Action, Error> {
@@ -82,7 +119,7 @@ async fn apply(kates: &Kates, ctx: &Context) -> Result<Action, Error> {
     let accounts = Api::<ServiceAccount>::namespaced(client.clone(), &namespace);
     let services = Api::<Service>::namespaced(client.clone(), &namespace);
     let sets = Api::<StatefulSet>::namespaced(client.clone(), &namespace);
-    let objects = objects(kates, ctx.backend_role.is_some());
+    let objects = objects(kates, ctx.backend_role_in(&namespace).is_some());
     let peers = objects.peers["metadata"]["name"]
         .as_str()
         .unwrap_or_default();
@@ -119,7 +156,7 @@ async fn apply(kates: &Kates, ctx: &Context) -> Result<Action, Error> {
             .patch(&name, &params, &Patch::Apply(&objects.account))
             .await?;
         // Before the StatefulSet, so the pod starts with its rights.
-        if let Some(role) = &ctx.backend_role {
+        if let Some(role) = ctx.backend_role_in(&namespace) {
             let binding = binding(kates, role);
             Api::<ClusterRoleBinding>::all(client.clone())
                 .patch(
@@ -451,6 +488,20 @@ mod tests {
         assert_eq!(provider(false).unwrap()["value"], "noop");
         // Bound: the image's own default, as the Kates chart leaves it.
         assert!(provider(true).is_none());
+    }
+
+    #[test]
+    fn only_this_roles_bindings_outside_the_list_are_revoked() {
+        let listed = BTreeSet::from(["payments".to_owned()]);
+        let bound = |namespace: &str, role: &str| -> ClusterRoleBinding {
+            let mut kates = kates(json!({}));
+            kates.metadata.namespace = Some(namespace.to_owned());
+            serde_json::from_value(binding(&kates, role)).unwrap()
+        };
+        assert!(!revoked(&bound("payments", "r"), "r", &listed));
+        assert!(revoked(&bound("tenant", "r"), "r", &listed));
+        assert!(revoked(&bound("payments", "r"), "r", &BTreeSet::new()));
+        assert!(!revoked(&bound("tenant", "other"), "r", &listed));
     }
 
     #[test]
