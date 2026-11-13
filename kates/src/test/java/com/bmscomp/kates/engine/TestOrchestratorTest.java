@@ -1944,6 +1944,31 @@ class TestOrchestratorTest {
         }
 
         @Test
+        void aTaskSeenStoppingIsPolledUntilItEnds() {
+            // Trogdor answers STOPPING between a stop and DONE. A row stored
+            // STOPPING was never polled again, so its run never ended.
+            Map<String, BenchmarkStatus> polls = new java.util.concurrent.ConcurrentHashMap<>();
+            TestOrchestrator orchestrator = storing(
+                    new java.util.concurrent.ConcurrentHashMap<>(), answering(polls), mock(BenchmarkMetrics.class));
+            TestRun run = orchestrator.executeTest(twoPhases()).asSuccess().orElseThrow();
+            for (TestResult task : run.getResults()) {
+                polls.put(
+                        task.getTaskId(),
+                        BenchmarkStatus.builder(TestResult.TaskStatus.STOPPING).build());
+            }
+            orchestrator.refreshStatus(run.getId());
+
+            for (TestResult task : run.getResults()) {
+                polls.put(
+                        task.getTaskId(),
+                        BenchmarkStatus.builder(TestResult.TaskStatus.DONE).build());
+            }
+            assertEquals(
+                    TestResult.TaskStatus.DONE,
+                    orchestrator.refreshStatus(run.getId()).getStatus());
+        }
+
+        @Test
         void aPhaseWaitingForItsTurnMeasuresNothing() {
             // A phase polls PENDING, with zeros, until its turn. Read as a
             // measurement, those zeros breached a minimum-throughput SLA, and
