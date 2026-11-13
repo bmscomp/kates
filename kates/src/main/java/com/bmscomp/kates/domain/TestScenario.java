@@ -104,9 +104,16 @@ public class TestScenario {
      * (TestOrchestrator.applyTypeDefaults); a phase's own targetThroughput
      * overrides both. The producer options carry through as set, so that an
      * option nobody set stays unset and the Kafka client decides.
+     *
+     * <p>{@code base} is the scenario's base spec with its type's defaults
+     * applied, the spec the run stores; resolving from the raw base gave a
+     * phase TestSpec's own defaults instead of its type's. A phase value
+     * overrides the base whenever the phase sets it, even to TestSpec's
+     * default: comparing with that default dropped {@code acks: "all"} over a
+     * base of {@code "1"}.
      */
-    public TestSpec resolveSpecForPhase(ScenarioPhase phase) {
-        TestSpec base = baseSpec != null ? baseSpec : new TestSpec();
+    public TestSpec resolveSpecForPhase(ScenarioPhase phase, TestSpec base) {
+        base = base != null ? base : new TestSpec();
         TestSpec phaseSpec = phase.getSpec();
         if (phaseSpec == null) {
             TestSpec copy = copySpec(base);
@@ -121,19 +128,19 @@ public class TestScenario {
 
         TestSpec merged = copySpec(base);
         if (phaseSpec.getTopic() != null) merged.setTopic(phaseSpec.getTopic());
-        if (phaseSpec.getReplicationFactor() != 3) merged.setReplicationFactor(phaseSpec.getReplicationFactor());
-        if (phaseSpec.getPartitions() != 3) merged.setPartitions(phaseSpec.getPartitions());
-        if (phaseSpec.getMinInsyncReplicas() != 2) merged.setMinInsyncReplicas(phaseSpec.getMinInsyncReplicas());
-        if (!"all".equals(phaseSpec.getAcks())) merged.setAcks(phaseSpec.getAcks());
-        if (phaseSpec.getBatchSize() != 65536) merged.setBatchSize(phaseSpec.getBatchSize());
-        if (phaseSpec.getLingerMs() != 5) merged.setLingerMs(phaseSpec.getLingerMs());
-        if (!"lz4".equals(phaseSpec.getCompressionType())) merged.setCompressionType(phaseSpec.getCompressionType());
-        if (phaseSpec.getRecordSize() != 1024) merged.setRecordSize(phaseSpec.getRecordSize());
-        if (phaseSpec.getNumRecords() != 1_000_000) merged.setNumRecords(phaseSpec.getNumRecords());
+        if (phaseSpec.hasReplicationFactor()) merged.setReplicationFactor(phaseSpec.getReplicationFactor());
+        if (phaseSpec.hasPartitions()) merged.setPartitions(phaseSpec.getPartitions());
+        if (phaseSpec.hasMinInsyncReplicas()) merged.setMinInsyncReplicas(phaseSpec.getMinInsyncReplicas());
+        if (phaseSpec.hasAcks()) merged.setAcks(phaseSpec.getAcks());
+        if (phaseSpec.hasBatchSize()) merged.setBatchSize(phaseSpec.getBatchSize());
+        if (phaseSpec.hasLingerMs()) merged.setLingerMs(phaseSpec.getLingerMs());
+        if (phaseSpec.hasCompressionType()) merged.setCompressionType(phaseSpec.getCompressionType());
+        if (phaseSpec.hasRecordSize()) merged.setRecordSize(phaseSpec.getRecordSize());
+        if (phaseSpec.hasNumRecords()) merged.setNumRecords(phaseSpec.getNumRecords());
         if (phaseSpec.hasThroughput()) merged.setThroughput(phaseSpec.getThroughput());
-        if (phaseSpec.getDurationMs() != 600_000) merged.setDurationMs(phaseSpec.getDurationMs());
-        if (phaseSpec.getNumProducers() != 1) merged.setNumProducers(phaseSpec.getNumProducers());
-        if (phaseSpec.getNumConsumers() != 1) merged.setNumConsumers(phaseSpec.getNumConsumers());
+        if (phaseSpec.hasDurationMs()) merged.setDurationMs(phaseSpec.getDurationMs());
+        if (phaseSpec.hasNumProducers()) merged.setNumProducers(phaseSpec.getNumProducers());
+        if (phaseSpec.hasNumConsumers()) merged.setNumConsumers(phaseSpec.getNumConsumers());
         if (phaseSpec.hasConsumerGroup()) merged.setConsumerGroup(phaseSpec.getConsumerGroup());
         if (phaseSpec.hasTargetThroughput()) {
             merged.setTargetThroughput(phaseSpec.getTargetThroughput());

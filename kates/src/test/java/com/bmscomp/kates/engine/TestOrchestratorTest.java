@@ -1282,6 +1282,65 @@ class TestOrchestratorTest {
             return new com.bmscomp.kates.domain.ScenarioPhase(name, type, 0, -1);
         }
 
+        /** A phase that sets a value overrides the base, even when the value is TestSpec's own default. */
+        @Test
+        void aPhaseValueEqualToTheBuiltInDefaultStillOverridesTheBase() {
+            TestOrchestrator engine = withBackend("native");
+            TestSpec base = new TestSpec();
+            base.setAcks("1");
+            base.setRecordSize(512);
+            ScenarioPhase steady = phase("steady", ScenarioPhase.PhaseType.STEADY);
+            TestSpec own = new TestSpec();
+            own.setAcks("all");
+            own.setRecordSize(1024);
+            steady.setSpec(own);
+
+            assertTrue(engine.executeTest(scenario(base, steady)).isSuccess());
+
+            BenchmarkTask task = submitted.getFirst();
+            assertEquals("all", task.getProducerConfig().get("acks"));
+            assertEquals(1024, task.getRecordSize());
+        }
+
+        /** The phases run with the spec the run stores: the base with its type's defaults, not TestSpec's. */
+        @Test
+        void phasesRunWithTheTypeDefaultsTheRunStores() {
+            TestOrchestrator engine = withBackend("native");
+            CreateTestRequest request = scenario(new TestSpec(), phase("burst", ScenarioPhase.PhaseType.SPIKE));
+            request.getScenario().setType(TestType.SPIKE);
+
+            TestRun run = engine.executeTest(request).asSuccess().orElseThrow();
+
+            BenchmarkTask task = submitted.getFirst();
+            assertEquals("1", run.getSpec().getAcks());
+            assertEquals(run.getSpec().getAcks(), task.getProducerConfig().get("acks"));
+            assertEquals(
+                    run.getSpec().getCompressionType(), task.getProducerConfig().get("compression.type"));
+            assertEquals(run.getSpec().getDurationMs(), task.getDurationMs());
+        }
+
+        /**
+         * A task's id carries its phase's name, so a second phase of one name
+         * replaced the first's worker, and cancel could no longer stop it.
+         */
+        @Test
+        void twoPhasesOfOneNameAreRefused() {
+            TestOrchestrator engine = withBackend("native");
+            CreateTestRequest request = scenario(
+                    new TestSpec(),
+                    phase("steady", ScenarioPhase.PhaseType.STEADY),
+                    phase("steady", ScenarioPhase.PhaseType.STEADY));
+
+            Exception failure = engine.executeTest(request).asFailure().orElseThrow();
+
+            assertEquals(
+                    Map.of(
+                            "phases[1].name",
+                            "phase steady has the name of an earlier phase; give each phase its own name"),
+                    assertInstanceOf(InvalidTestSpecException.class, failure).getFieldErrors());
+            assertTrue(submitted.isEmpty());
+        }
+
         @Test
         void aScenarioWithNoTypeIsRefusedBeforeTakingAPermit() {
             // POST /api/resilience and a schedule run no bean validation, so a
@@ -1554,16 +1613,13 @@ class TestOrchestratorTest {
 
         @Test
         void aRampPhaseWithoutARateIsRefusedByName() {
-            // ENDURANCE's default rate is 5000 records a second, but a phase
-            // resolves its spec without the type's defaults: with no rate set,
-            // this ramp's four steps ran at 1, 2, 3 and 4 records a second.
-            // The STEADY phase runs unthrottled. A phase's own rate of 0 is
-            // outside its limits (PhaseValuesOutsideTheirLimits).
+            // LOAD has no default rate: with none set, this ramp's four steps
+            // ran at 1, 2, 3 and 4 records a second. The STEADY phase runs
+            // unthrottled. A phase's own rate of 0 is outside its limits
+            // (PhaseValuesOutsideTheirLimits).
             ScenarioPhase ramp = phase("ramp-up", ScenarioPhase.PhaseType.RAMP);
             ramp.setRampSteps(4);
             CreateTestRequest request = scenario(new TestSpec(), phase("steady", ScenarioPhase.PhaseType.STEADY), ramp);
-            request.setType(TestType.ENDURANCE);
-            request.getScenario().setType(TestType.ENDURANCE);
 
             Exception failure =
                     withBackend("native").executeTest(request).asFailure().orElseThrow();
@@ -1576,6 +1632,25 @@ class TestOrchestratorTest {
                     errors.toString());
             assertTrue(invalid.getMessage().contains("scenario.phases[1].targetThroughput: "), invalid.getMessage());
             assertTrue(submitted.isEmpty());
+        }
+
+        /** ENDURANCE's default rate, which the run stores, is the rate its phases ramp to. */
+        @Test
+        void aRampPhaseWithoutARateRampsToItsTypesRate() {
+            ScenarioPhase ramp = phase("ramp-up", ScenarioPhase.PhaseType.RAMP);
+            ramp.setRampSteps(4);
+            CreateTestRequest request = scenario(new TestSpec(), ramp);
+            request.setType(TestType.ENDURANCE);
+            request.getScenario().setType(TestType.ENDURANCE);
+
+            TestRun run = withBackend("native").executeTest(request).asSuccess().orElseThrow();
+
+            assertEquals(5000, run.getSpec().getThroughput());
+            assertEquals(
+                    List.of(1250, 2500, 3750, 5000),
+                    submitted.stream()
+                            .map(BenchmarkTask::getTargetMessagesPerSec)
+                            .toList());
         }
 
         @Test
@@ -1769,7 +1844,7 @@ class TestOrchestratorTest {
                         return invocation.callRealMethod();
                     })
                     .when(scenario)
-                    .resolveSpecForPhase(any());
+                    .resolveSpecForPhase(any(), any());
             request.setScenario(scenario);
             TestOrchestrator orchestrator = withBackend("native");
             when(repository.saveIfStatus(any(), any())).thenReturn(true);
