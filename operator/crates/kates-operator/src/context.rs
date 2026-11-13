@@ -16,6 +16,22 @@ pub struct Context {
     pub field_manager: String,
     /// `None` without the Strimzi CRD: compliance then runs on its interval only.
     pub kafka: Option<KafkaWatch>,
+    /// The `ClusterRole` each `Kates` pod is bound to. `None` in a namespace-scoped install,
+    /// which creates nothing cluster-scoped.
+    pub backend_role: Option<String>,
+    /// The namespaces whose `Kates` pods get that role, named by whoever installed the operator:
+    /// any pod in such a namespace can run as that account.
+    pub backend_namespaces: BTreeSet<String>,
+}
+
+/// The role a `Kates` in `namespace` is bound to, if the installer allowed that namespace.
+#[must_use]
+pub fn role_in<'a>(
+    role: Option<&'a str>,
+    namespaces: &BTreeSet<String>,
+    namespace: &str,
+) -> Option<&'a str> {
+    role.filter(|_| namespaces.contains(namespace))
 }
 
 /// The namespaces whose `Kafka`s trigger a check, fixed at start.
@@ -54,6 +70,15 @@ pub struct Note {
 }
 
 impl Context {
+    #[must_use]
+    pub fn backend_role_in(&self, namespace: &str) -> Option<&str> {
+        role_in(
+            self.backend_role.as_deref(),
+            &self.backend_namespaces,
+            namespace,
+        )
+    }
+
     /// Never fails a pass: a terminating namespace refuses new objects, Events included.
     pub async fn publish<K>(&self, object: &K, notes: Vec<Note>)
     where
@@ -76,5 +101,19 @@ impl Context {
                 tracing::warn!(%error, name = ?reference.name, "event refused");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_role_is_given_only_in_a_namespace_the_installer_named() {
+        let named = BTreeSet::from(["payments".to_owned()]);
+        assert_eq!(role_in(Some("r"), &named, "payments"), Some("r"));
+        assert_eq!(role_in(Some("r"), &named, "tenant"), None);
+        assert_eq!(role_in(Some("r"), &BTreeSet::new(), "payments"), None);
+        assert_eq!(role_in(None, &named, "payments"), None);
     }
 }

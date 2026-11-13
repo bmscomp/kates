@@ -42,6 +42,17 @@ rbac:
   # -- Render the Role that lets the operator read Kafkas in kafka.namespaces.
   # false: someone with rights there applies it from helm template --show-only.
   kafkaNamespaceRole: true
+  # -- Namespaces whose Kates pods get the backend's cluster role, for faults,
+  # topology and compliance reads. Empty: none, and faults are off. Name only
+  # namespaces where you trust everyone who can run a pod with that role in
+  # every namespace: any pod there can run as a Kates pod's ServiceAccount.
+  backendNamespaces: []
+  # -- Let Kates pods make the writes the direct Kubernetes chaos provider makes
+  # itself (KATES_CHAOS_PROVIDER=kubernetes, or hybrid without Litmus):
+  # StatefulSet scaling, for SCALE_DOWN on a Kafka Strimzi does not manage, and
+  # pod ephemeral containers, for CPU_STRESS and IO_STRESS. The Kates chart's
+  # rbac.directChaos. Needs rbac.clusterRoles.create.
+  backendDirectChaos: false
 
 connection:
   # -- Lend every watched namespace the Secret below when it has no

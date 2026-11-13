@@ -208,11 +208,7 @@ async fn lead(args: LeadArgs) -> Fallible {
             .expect("the health state")
             .clone_from(&watch.refused);
     }
-    let requests = metrics.clone();
-    let connections = Connections::new(
-        PathBuf::from(FALLBACK_DIR),
-        Arc::new(move |method, route, status| requests.api_request(method, route, status)),
-    );
+    let connections = connections(metrics.clone());
     let ctx = Arc::new(Context {
         recorder: Recorder::new(
             client.clone(),
@@ -226,8 +222,11 @@ async fn lead(args: LeadArgs) -> Fallible {
         connections,
         field_manager: format!("kates-operator-{namespace}"),
         kafka,
+        backend_role: names(&env_or("KATES_OPERATOR_BACKEND_ROLE", "")).pop_first(),
+        backend_namespaces: names(&env_or("KATES_OPERATOR_BACKEND_NAMESPACES", "")),
     });
 
+    kates::sweep(&ctx).await?;
     let mut streams: Vec<BoxStream<'static, ()>> = Vec::new();
     for api in scope.apis::<KatesTest>(&client) {
         let controller = Controller::new(api, watcher::Config::default())
@@ -418,6 +417,21 @@ fn checks_of(
         .iter()
         .filter(|check| compliance::target(check) == target)
         .map(|check| ObjectRef::from_obj(&**check))
+        .collect()
+}
+
+fn connections(requests: Metrics) -> Connections {
+    Connections::new(
+        PathBuf::from(FALLBACK_DIR),
+        Arc::new(move |method, route, status| requests.api_request(method, route, status)),
+    )
+}
+
+fn names(list: &str) -> BTreeSet<String> {
+    list.split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
         .collect()
 }
 

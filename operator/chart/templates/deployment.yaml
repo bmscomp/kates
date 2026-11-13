@@ -60,6 +60,12 @@ spec:
               value: {{ include "kates-operator.namespaces" . | quote }}
             - name: KATES_OPERATOR_KAFKA_NAMESPACES
               value: {{ if .Values.watchAnyNamespace }}"*"{{ else }}{{ join "," .Values.kafka.namespaces | quote }}{{ end }}
+            {{- if .Values.rbac.clusterRoles.create }}
+            - name: KATES_OPERATOR_BACKEND_ROLE
+              value: kates-backend-{{ .Release.Namespace }}
+            - name: KATES_OPERATOR_BACKEND_NAMESPACES
+              value: {{ join "," .Values.rbac.backendNamespaces | quote }}
+            {{- end }}
             - name: LOG_FORMAT
               value: {{ .Values.logFormat | quote }}
             {{- with .Values.tracing.endpoint }}

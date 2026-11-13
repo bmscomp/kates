@@ -210,6 +210,10 @@ spec:
     bootstrapServers: krafter-kafka-bootstrap.kafka.svc:9092
 ```
 
+In a namespace named in `rbac.backendNamespaces`, its pod gets the rights a Helm-installed Kates gets in the Kates chart's cluster scope, for faults, topology and compliance reads. The list is empty by default. Those rights reach every namespace, and any pod in the namespace can run as a `Kates` pod's ServiceAccount, so name only namespaces where you would trust everyone who can run a pod with the role itself. The chart ships the rights as the ClusterRole `kates-backend-<release namespace>`, and the operator binds it to each such pod's ServiceAccount through a ClusterRoleBinding named `kates-backend.<namespace>.<name>`. The operator holds `bind` on that one role, never the rights themselves. A namespace cannot own a cluster-scoped binding, so a finalizer removes it when the `Kates` is deleted. `rbac.backendDirectChaos` adds the writes of the direct Kubernetes chaos provider, as the Kates chart's `rbac.directChaos` does. The backend's default provider is `litmus-crd`; set `KATES_CHAOS_PROVIDER` in `spec.env` to use another.
+
+In any other namespace the pod gets no role, no finalizer is added, and `KATES_CHAOS_PROVIDER` defaults to `noop`, as in the Kates chart's namespace scope. Load and integrity tests need no role. A namespace taken off the list loses its bindings when the operator restarts, as it does on the `helm upgrade` that changes the list, whether or not the namespace is still watched. With `rbac.clusterRoles.create=false` nothing cluster-scoped is created and no namespace gets the role.
+
 `kubectl get kates` shows the version every pod runs and whether the backend is Ready. A change to `spec.version` replaces the pod, and `Ready` is false until the new one answers.
 
 The operator never takes over an object it did not create. If a ServiceAccount, Service or StatefulSet of the resource's name already exists, nothing is applied and `Ready` is false with reason `NameTaken`: rename one of them.
@@ -217,7 +221,7 @@ The operator never takes over an object it did not create. If a ServiceAccount, 
 What it doesn't do yet:
 
 - It runs one pod. More than one waits for Kates' own quorum.
-- The pod's ServiceAccount is bound to no role, so the backend injects no fault and reads nothing from Kubernetes: `KATES_CHAOS_PROVIDER` defaults to `noop`. Load and integrity tests need neither.
+- No PostgreSQL Secret for the `INTEGRATION_CDC` test, and no `rbac.extraRules`: the Kates chart's `rbac.cdcSecretNamespaces` and `rbac.extraRules` have no counterpart yet.
 - It doesn't create PostgreSQL. A changed Secret is not noticed: delete the pod to pick it up.
 - Kafka over TLS with a truststore file isn't expressible yet. `spec.env` takes any other setting of the container, except the names `database`, `kafka` and `apiKeySecretRef` set.
 
@@ -228,7 +232,7 @@ What it doesn't do yet:
 | `kates.io/pause-reconciliation: "true"` | No calls to the Kates API. A deleted resource is never paused |
 | `kates.io/reconcile-at: <new value>` | Forces a pass, recorded in `status.lastHandledReconcileAt` |
 
-Before `helm uninstall`, before dropping a namespace from `watchNamespaces`, and before deleting a namespace, delete its live `KatesTest`s. A finished `KatesTest` holds no finalizer and blocks nothing.
+Before `helm uninstall`, before dropping a namespace from `watchNamespaces`, and before deleting a namespace, delete its live `KatesTest`s and its `Kates` resources. A finished `KatesTest` holds no finalizer and blocks nothing.
 
 A live one left behind needs a hand. With `watchNamespaces` or the default mode, the RoleBinding that gives the operator its rights lives in the namespace, so `kubectl delete namespace` removes those rights along with everything else. The operator can then no longer clear its finalizer, and the namespace stays Terminating until you do:
 
@@ -237,6 +241,13 @@ kubectl patch katestest <name> -n <namespace> --type=merge -p '{"metadata":{"fin
 ```
 
 Kates ends the run at its own timeout. With `watchAnyNamespace` the ClusterRoleBinding survives: if the Secret goes first, the finalizer comes off with a `CancelSkipped` Event.
+
+A `Kates` left behind is cleared the same way, and its ClusterRoleBinding then stays: delete it too, or a ServiceAccount later created under that name in that namespace inherits its rights.
+
+```bash
+kubectl patch kates <name> -n <namespace> --type=merge -p '{"metadata":{"finalizers":null}}'
+kubectl delete clusterrolebinding kates-backend.<namespace>.<name>
+```
 
 The NetworkPolicy allows egress on 8080, 443 and 6443. A Kates URL on any other port needs `networkPolicy.egressRules`, or the blocked call shows as `ApiUnavailable`.
 

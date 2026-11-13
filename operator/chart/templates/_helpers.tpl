@@ -45,9 +45,10 @@ imagePullSecrets:
 - apiGroups: ["kates.io"]
   resources: ["katestests/status", "kafkacompliances/status", "katestests/finalizers", "kafkacompliances/finalizers"]
   verbs: ["get", "patch", "update"]
+{{- /* patch and update: the finalizer that removes a pod's ClusterRoleBinding. */}}
 - apiGroups: ["kates.io"]
   resources: ["kates"]
-  verbs: ["get", "list", "watch"]
+  verbs: ["get", "list", "watch", "patch", "update"]
 {{- /* finalizers: an owner reference that blocks deletion needs it where the admission plugin is on. */}}
 - apiGroups: ["kates.io"]
   resources: ["kates/status", "kates/finalizers"]

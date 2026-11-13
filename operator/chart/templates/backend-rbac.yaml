@@ -1,0 +1,119 @@
+{{- /*
+  What a Kates pod may do, for the backend's chaos, topology and compliance reads. The rules are
+  the Kates chart's ClusterRole in its cluster scope (charts/kates/templates/rbac.yaml), and CI
+  fails when the two differ. The operator binds this role to the ServiceAccount of each Kates pod
+  in rbac.backendNamespaces, with `bind` on this one name: it never holds these rights itself. A namespace-scoped install
+  (rbac.clusterRoles.create=false) creates nothing cluster-scoped, so its Kates pods get no role
+  and run with faults off, as the Kates chart does in its namespace scope.
+*/}}
+{{- if .Values.rbac.clusterRoles.create }}
+{{- $role := printf "kates-backend-%s" .Release.Namespace }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $role }}
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["litmuschaos.io"]
+    resources: ["chaosengines", "chaosexperiments", "chaosresults"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # patch: ROLLING_RESTART annotates Kafka pods with
+  # strimzi.io/manual-rolling-update for the Strimzi Cluster Operator to roll.
+  # It does so on both chaos backends, so it is not behind rbac.directChaos.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete", "patch"]
+  - apiGroups: [""]
+    resources: ["pods/log", "nodes", "namespaces", "persistentvolumeclaims", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  # No secrets: the one Secret the Kates API reads is granted by a Role in that
+  # Secret's namespace (rbac.cdcSecretNamespaces).
+  - apiGroups: ["apps"]
+    resources: ["statefulsets", "deployments"]
+    verbs: ["get", "list"]
+  # patch: ROLLING_RESTART restarts a StatefulSet that Strimzi does not manage
+  # (charts/legacy-kafka runs Kafka that way). Like the pod annotation above,
+  # it runs on both chaos backends, so it is not behind rbac.directChaos.
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list"]
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkas", "kafkanodepools", "kafkatopics", "kafkausers", "kafkaconnects", "kafkamirrormaker2s", "kafkarebalances"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkaconnectors", "kafkatopics"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # patch: SCALE_DOWN lowers a KafkaNodePool's spec.replicas and records the
+  # original count on it; rollback and orphan recovery put it back. It does so
+  # on both chaos backends, so it is not behind rbac.directChaos.
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkanodepools"]
+    verbs: ["patch"]
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["podmonitors", "prometheusrules"]
+    verbs: ["get", "list"]
+  - apiGroups: ["core.strimzi.io"]
+    resources: ["strimzipodsets"]
+    verbs: ["get", "list"]
+  # NETWORK_PARTITION is a NetworkPolicy Kates applies itself on both chaos
+  # backends, so it is not behind rbac.directChaos. Cleanup, rollback and
+  # orphan recovery delete Kates NetworkPolicies by label: deletecollection.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create", "delete", "deletecollection"]
+  {{- if .Values.rbac.backendDirectChaos }}
+  {{- /*
+    The direct Kubernetes chaos backend (kates.chaos.provider=kubernetes, or
+    hybrid on a cluster without Litmus) makes these writes itself. Litmus runs
+    every experiment as its own litmus-admin service account, so a Litmus
+    install needs none of them. On a Kafka that Strimzi does not manage,
+    SCALE_DOWN sets replicas through the StatefulSet's scale subresource (its
+    PATCH on the StatefulSet is granted above, for ROLLING_RESTART); CPU_STRESS
+    and IO_STRESS add a container through pods/ephemeralcontainers.
+  */}}
+  - apiGroups: ["apps"]
+    resources: ["statefulsets/scale"]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["pods/ephemeralcontainers"]
+    verbs: ["update"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kates-operator-backend-binder-{{ .Release.Namespace }}
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+rules:
+  {{- /*
+    create cannot be limited by name: the binding's name comes from each Kates. list: at start the
+    operator removes the bindings of namespaces taken off rbac.backendNamespaces.
+  */}}
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterrolebindings"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    verbs: ["bind"]
+    resourceNames: [{{ $role | quote }}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kates-operator-backend-binder-{{ .Release.Namespace }}
+  labels:
+    {{- include "kates-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kates-operator-backend-binder-{{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: kates-operator
+    namespace: {{ .Release.Namespace }}
+{{- end }}

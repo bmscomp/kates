@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# A Kates backend installed from a Kates resource answers and runs a test.
+# A Kates backend installed from a Kates resource answers, runs a test and
+# injects a fault.
 #
 #   KUBECONFIG=<scratch> operator/e2e-kates.sh [namespace]
 #
@@ -70,11 +71,17 @@ spec:
   env:
     # One broker: the outbox topic's default of three replicas could not be created.
     - {name: KATES_OUTBOX_TOPIC_REPLICATION_FACTOR, value: "1"}
+    # No Litmus on this stack: faults go through the Kubernetes API, with the pod's own rights.
+    - {name: KATES_CHAOS_PROVIDER, value: kubernetes}
 EOF
 "${k[@]}" wait --for=condition=Ready "kates/$name" --timeout=6m >/dev/null && pass "Ready" || fail "never Ready"
 check "status.version" "${KATES_TAG:-$tag-native}" "$("${k[@]}" get kates "$name" -o jsonpath='{.status.version}')"
 check "the StatefulSet is the resource's" Kates \
   "$("${k[@]}" get statefulset "$name" -o jsonpath='{.metadata.ownerReferences[0].kind}')"
+
+binding=kates-backend.$ns.$name
+check "the pod's account is bound to the backend role" "kates-backend-kates-operator ServiceAccount/$name" \
+  "$(kubectl get clusterrolebinding "$binding" -o jsonpath='{.roleRef.name} {.subjects[0].kind}/{.subjects[0].name}')"
 
 echo "== the API answers and runs a test"
 "${k[@]}" port-forward "service/$name" 18099:8080 >/dev/null 2>&1 &
@@ -92,6 +99,29 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 check "the run" DONE "$status"
+
+echo "== the backend injects a fault with its own rights"
+# Not a broker: on one broker the safety guard refuses a kill, and any pod the backend deletes
+# with its own rights proves them. Strimzi's Deployment brings it back.
+target=strimzi.io/name=krafter-entity-operator
+pod=(kubectl -n kafka get pod -l "$target")
+before=$("${pod[@]}" -o jsonpath='{.items[0].metadata.uid}')
+plan=$(curl -s -X POST "$api/api/disruptions" -H 'Content-Type: application/json' -d '{
+  "name": "e2e-pod-kill", "maxAffectedBrokers": 1, "autoRollback": true,
+  "steps": [{"name": "kill-entity-operator", "faultSpec": {"experimentName": "pod-kill", "disruptionType": "POD_KILL",
+    "targetNamespace": "kafka", "targetLabel": "'"$target"'",
+    "chaosDurationSec": 0, "gracePeriodSec": 0},
+    "steadyStateSec": 0, "observationWindowSec": 10, "requireRecovery": false}]}')
+disruption=$(echo "$plan" | sed -nE 's/.*"id":"([^"]+)".*/\1/p')
+[ -n "$disruption" ] && pass "disruption $disruption accepted" || fail "disruption refused: $plan"
+for _ in $(seq 1 90); do
+  outcome=$(curl -s "$api/api/disruptions/$disruption" | jq -r .status)
+  [ -n "$outcome" ] && [ "$outcome" != RUNNING ] && break
+  sleep 4
+done
+check "the disruption" COMPLETED "$outcome"
+after=$("${pod[@]}" -o jsonpath='{.items[0].metadata.uid}')
+[ -n "$after" ] && [ "$after" != "$before" ] && pass "the pod was replaced" || fail "the pod is the same one"
 
 echo "== a pod that dies comes back"
 "${k[@]}" delete pod "$name-0" --wait=false >/dev/null
@@ -111,10 +141,41 @@ check "no StatefulSet" "" "$("${k[@]}" get statefulset "$taken" -o name 2>/dev/n
 check "the ServiceAccount outlives the resource" "serviceaccount/$taken" "$("${k[@]}" get serviceaccount "$taken" -o name 2>/dev/null)"
 "${k[@]}" delete serviceaccount "$taken" >/dev/null
 
+echo "== a namespace the installer did not name gets no role"
+plain=$ns-plain
+kubectl -n "$plain" apply -f - >/dev/null <<EOF
+apiVersion: kates.io/v1alpha1
+kind: Kates
+metadata: {name: plain}
+spec:
+  version: "${KATES_TAG:-$tag-native}"
+  database: {secretRef: {name: none}}
+  kafka: {bootstrapServers: "none:9092"}
+EOF
+for _ in $(seq 1 30); do kubectl -n "$plain" get statefulset plain >/dev/null 2>&1 && break; sleep 1; done
+check "faults are off" noop "$(kubectl -n "$plain" get statefulset plain \
+  -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="KATES_CHAOS_PROVIDER")].value}')"
+check "no ClusterRoleBinding" "" "$(kubectl get clusterrolebinding "kates-backend.$plain.plain" -o name 2>/dev/null)"
+check "no finalizer" "" "$(kubectl -n "$plain" get kates plain -o jsonpath='{.metadata.finalizers}')"
+kubectl -n "$plain" delete kates plain --timeout=30s >/dev/null
+
+echo "== a restart removes a binding the list does not allow"
+stray=kates-backend.$plain.stray
+kubectl create clusterrolebinding "$stray" --clusterrole=kates-backend-kates-operator \
+  --serviceaccount="$plain:stray" >/dev/null
+kubectl label clusterrolebinding "$stray" app.kubernetes.io/managed-by=kates-operator >/dev/null
+kubectl -n kates-operator rollout restart deploy/kates-operator >/dev/null
+kubectl -n kates-operator rollout status deploy/kates-operator --timeout=120s >/dev/null
+for _ in $(seq 1 60); do kubectl get clusterrolebinding "$stray" >/dev/null 2>&1 || break; sleep 2; done
+check "the stray binding is gone" "" "$(kubectl get clusterrolebinding "$stray" -o name 2>/dev/null)"
+check "the listed namespace keeps its binding" "clusterrolebinding.rbac.authorization.k8s.io/$binding" \
+  "$(kubectl get clusterrolebinding "$binding" -o name 2>/dev/null)"
+
 echo "== deleting the resource removes what it made"
 "${k[@]}" delete kates "$name" --timeout=60s >/dev/null
 "${k[@]}" wait --for=delete "statefulset/$name" "service/$name" "serviceaccount/$name" --timeout=60s >/dev/null \
   && pass "StatefulSet, Service and ServiceAccount gone" || fail "something was left"
+check "the ClusterRoleBinding is gone" "" "$(kubectl get clusterrolebinding "$binding" -o name 2>/dev/null)"
 "${k[@]}" delete deploy,service,secret "$name-db" >/dev/null 2>&1
 "${k[@]}" delete secret "$name-kafka" >/dev/null 2>&1
 

@@ -1,17 +1,22 @@
 //! `Kates`: one backend, as a `StatefulSet` of one pod with its Services. Section 4 of
 //! plans/operator-kates-kind.md. Every object is owned by the resource, so deleting it removes
-//! them, and each is applied whole on every pass.
+//! them, and each is applied whole on every pass. The one exception is the `ClusterRoleBinding`
+//! that gives the pod its rights: a namespaced owner cannot hold a cluster-scoped object, so a
+//! finalizer removes it.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
 use jiff::Timestamp;
 use k8s_openapi::api::apps::v1::StatefulSet;
 use k8s_openapi::api::core::v1::{Service, ServiceAccount};
+use k8s_openapi::api::rbac::v1::ClusterRoleBinding;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
 use kates_crds::{Kates, KatesSpec, KatesStatus, SecretKey};
-use kube::api::{Api, Patch, PatchParams};
+use kube::api::{Api, DeleteParams, ListParams, Patch, PatchParams};
 use kube::runtime::controller::Action;
+use kube::runtime::finalizer::{self, Event as Finalizer};
 use kube::{Resource as _, ResourceExt as _};
 use serde_json::{Value, json};
 
@@ -21,6 +26,7 @@ use crate::status;
 use crate::telemetry::current_trace_id;
 
 const KIND: &str = "Kates";
+pub const FINALIZER: &str = "kates.io/cluster-role-binding";
 const WRITE_RETRY: Duration = Duration::from_secs(30);
 const NAME_RETRY: Duration = Duration::from_mins(1);
 const DEFAULT_IMAGE: &str = "ghcr.io/bmscomp/kates";
@@ -30,6 +36,78 @@ const DEFAULT_IMAGE: &str = "ghcr.io/bmscomp/kates";
 #[tracing::instrument(skip_all, fields(name = %kates.name_any(), namespace = ?kates.namespace()))]
 pub async fn reconcile(kates: Arc<Kates>, ctx: Arc<Context>) -> Result<Action, Error> {
     let _timer = ctx.metrics.reconcile_started(KIND, current_trace_id());
+    let namespace = kates.namespace().ok_or(Error::NoNamespace)?;
+    // Without a role there is no binding, so no finalizer: one in a namespace-scoped install
+    // would hold the namespace's deletion on an operator that is being deleted with it. One left
+    // from when this namespace had a role still runs its cleanup.
+    if ctx.backend_role_in(&namespace).is_none() && !bound_before(&kates) {
+        return apply(&kates, &ctx).await;
+    }
+    let api = Api::<Kates>::namespaced(ctx.client.clone(), &namespace);
+    finalizer::finalizer(&api, FINALIZER, kates, |event| async {
+        match event {
+            Finalizer::Apply(kates) => apply(&kates, &ctx).await,
+            Finalizer::Cleanup(kates) => cleanup(&kates, &ctx).await,
+        }
+    })
+    .await
+    .map_err(|error| Error::Finalizer(Box::new(error)))
+}
+
+fn bound_before(kates: &Kates) -> bool {
+    kates.finalizers().iter().any(|f| f == FINALIZER)
+}
+
+/// Removes the binding, the one object no owner reference removes.
+async fn cleanup(kates: &Kates, ctx: &Context) -> Result<Action, Error> {
+    let namespace = kates.namespace().ok_or(Error::NoNamespace)?;
+    unbind(ctx, &binding_name(&namespace, &kates.name_any())).await?;
+    Ok(Action::await_change())
+}
+
+async fn unbind(ctx: &Context, binding: &str) -> Result<(), kube::Error> {
+    let bindings = Api::<ClusterRoleBinding>::all(ctx.client.clone());
+    match bindings.delete(binding, &DeleteParams::default()).await {
+        Ok(_) => Ok(()),
+        Err(kube::Error::Api(response)) if response.code == 404 => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+/// Removes, at start, the bindings to the backend's role in namespaces the installer does not
+/// name. No pass can be trusted with it: a namespace taken off the list may no longer be watched,
+/// and the finalizer that records a binding is its editors' to remove.
+///
+/// # Errors
+/// A failed list or delete: the operator must not run while a revoked namespace keeps the role.
+pub async fn sweep(ctx: &Context) -> Result<(), kube::Error> {
+    let Some(role) = &ctx.backend_role else {
+        return Ok(());
+    };
+    let ours = ListParams::default().labels("app.kubernetes.io/managed-by=kates-operator");
+    let bindings = Api::<ClusterRoleBinding>::all(ctx.client.clone());
+    for binding in bindings.list(&ours).await? {
+        if revoked(&binding, role, &ctx.backend_namespaces) {
+            tracing::warn!(binding = %binding.name_any(), "namespace not in the list: unbinding");
+            unbind(ctx, &binding.name_any()).await?;
+        }
+    }
+    Ok(())
+}
+
+/// A binding to `role` with a subject outside `namespaces`. Another release's role is not ours.
+#[must_use]
+pub fn revoked(binding: &ClusterRoleBinding, role: &str, namespaces: &BTreeSet<String>) -> bool {
+    binding.role_ref.name == role
+        && binding.subjects.iter().flatten().any(|subject| {
+            subject
+                .namespace
+                .as_ref()
+                .is_none_or(|namespace| !namespaces.contains(namespace))
+        })
+}
+
+async fn apply(kates: &Kates, ctx: &Context) -> Result<Action, Error> {
     let namespace = kates.namespace().ok_or(Error::NoNamespace)?;
     let name = kates.name_any();
     if paused(kates.annotations()) {
@@ -41,7 +119,7 @@ pub async fn reconcile(kates: Arc<Kates>, ctx: Arc<Context>) -> Result<Action, E
     let accounts = Api::<ServiceAccount>::namespaced(client.clone(), &namespace);
     let services = Api::<Service>::namespaced(client.clone(), &namespace);
     let sets = Api::<StatefulSet>::namespaced(client.clone(), &namespace);
-    let objects = objects(&kates);
+    let objects = objects(kates, ctx.backend_role_in(&namespace).is_some());
     let peers = objects.peers["metadata"]["name"]
         .as_str()
         .unwrap_or_default();
@@ -77,6 +155,17 @@ pub async fn reconcile(kates: Arc<Kates>, ctx: Arc<Context>) -> Result<Action, E
         accounts
             .patch(&name, &params, &Patch::Apply(&objects.account))
             .await?;
+        // Before the StatefulSet, so the pod starts with its rights.
+        if let Some(role) = ctx.backend_role_in(&namespace) {
+            let binding = binding(kates, role);
+            Api::<ClusterRoleBinding>::all(client.clone())
+                .patch(
+                    &binding_name(&namespace, &name),
+                    &params,
+                    &Patch::Apply(&binding),
+                )
+                .await?;
+        }
         for service in [&objects.service, &objects.peers] {
             let name = service["metadata"]["name"].as_str().unwrap_or_default();
             services
@@ -86,7 +175,7 @@ pub async fn reconcile(kates: Arc<Kates>, ctx: Arc<Context>) -> Result<Action, E
         let set = sets
             .patch(&name, &params, &Patch::Apply(&objects.set))
             .await?;
-        observe(&kates, &set, &mut after, Timestamp::now());
+        observe(kates, &set, &mut after, Timestamp::now());
     }
 
     if after != before {
@@ -116,7 +205,7 @@ pub async fn reconcile(kates: Arc<Kates>, ctx: Arc<Context>) -> Result<Action, E
                 reason,
                 message,
             };
-            ctx.publish(&*kates, vec![note]).await;
+            ctx.publish(kates, vec![note]).await;
         }
     }
     if reason(&after).as_deref() == Some("NameTaken") {
@@ -151,6 +240,34 @@ fn controlled_by(owners: &[OwnerReference], uid: &str) -> bool {
     owners.iter().any(controls)
 }
 
+/// Dots cannot appear in a namespace or a `Kates` name, so no two resources share one.
+#[must_use]
+pub fn binding_name(namespace: &str, name: &str) -> String {
+    format!("kates-backend.{namespace}.{name}")
+}
+
+/// Binds the pod's `ServiceAccount` to the `ClusterRole` the chart ships. The operator holds
+/// `bind` on that role, never its rights.
+#[must_use]
+pub fn binding(kates: &Kates, role: &str) -> Value {
+    let name = kates.name_any();
+    let namespace = kates.namespace().unwrap_or_default();
+    json!({
+        "apiVersion": "rbac.authorization.k8s.io/v1",
+        "kind": "ClusterRoleBinding",
+        "metadata": {
+            "name": binding_name(&namespace, &name),
+            "labels": {
+                "app.kubernetes.io/name": "kates",
+                "app.kubernetes.io/instance": name,
+                "app.kubernetes.io/managed-by": "kates-operator",
+            },
+        },
+        "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": role},
+        "subjects": [{"kind": "ServiceAccount", "name": name, "namespace": namespace}],
+    })
+}
+
 /// What a `Kates` becomes, each as the manifest that is applied.
 pub struct Objects {
     pub account: Value,
@@ -159,8 +276,9 @@ pub struct Objects {
     pub set: Value,
 }
 
+/// `bound`: the pod's account gets the backend's role, so faults are not turned off.
 #[must_use]
-pub fn objects(kates: &Kates) -> Objects {
+pub fn objects(kates: &Kates, bound: bool) -> Objects {
     let name = kates.name_any();
     let peers = format!("{name}-peers");
     let selector = json!({
@@ -227,7 +345,7 @@ pub fn objects(kates: &Kates) -> Objects {
                                 {"name": "http", "containerPort": 8080, "protocol": "TCP"},
                                 {"name": "grpc", "containerPort": 9000, "protocol": "TCP"},
                             ],
-                            "env": env(spec),
+                            "env": env(spec, bound),
                             "resources": spec.resources,
                             "securityContext": {"allowPrivilegeEscalation": false,
                                 "readOnlyRootFilesystem": true, "runAsNonRoot": true,
@@ -253,8 +371,10 @@ pub fn objects(kates: &Kates) -> Objects {
 
 /// The container's environment: what the typed fields set, then `spec.env`, which replaces a
 /// default of the same name. The CRD refuses the names of the typed fields in `spec.env`.
+/// Unbound, as in the Kates chart's namespace scope, faults default to off: the backend could
+/// read nothing they need.
 #[must_use]
-pub fn env(spec: &KatesSpec) -> Vec<Value> {
+pub fn env(spec: &KatesSpec, bound: bool) -> Vec<Value> {
     let plain = |name: &str, value: &str| json!({"name": name, "value": value});
     let secret = |name: &str, from: &SecretKey| json!({"name": name, "valueFrom": {"secretKeyRef": {"name": from.name, "key": from.key}}});
     let database = |name: &str, key: &str| {
@@ -279,10 +399,10 @@ pub fn env(spec: &KatesSpec) -> Vec<Value> {
         ),
         // Off as in the Kates chart: without a collector every export is a warning.
         plain("QUARKUS_OTEL_ENABLED", "false"),
-        // shortcut: the pod's account is bound to no role yet, so faults are refused; drop this
-        // default when the operator binds the chaos roles.
-        plain("KATES_CHAOS_PROVIDER", "noop"),
     ];
+    if !bound {
+        env.push(plain("KATES_CHAOS_PROVIDER", "noop"));
+    }
     if let Some(protocol) = &spec.kafka.security_protocol {
         env.push(plain("KATES_KAFKA_SECURITY_PROTOCOL", protocol));
     }
@@ -362,8 +482,51 @@ mod tests {
     }
 
     #[test]
+    fn faults_are_off_only_when_the_pod_has_no_role() {
+        let spec = kates(json!({})).spec;
+        let provider = |bound| value(&env(&spec, bound), "KATES_CHAOS_PROVIDER").cloned();
+        assert_eq!(provider(false).unwrap()["value"], "noop");
+        // Bound: the image's own default, as the Kates chart leaves it.
+        assert!(provider(true).is_none());
+    }
+
+    #[test]
+    fn only_this_roles_bindings_outside_the_list_are_revoked() {
+        let listed = BTreeSet::from(["payments".to_owned()]);
+        let bound = |namespace: &str, role: &str| -> ClusterRoleBinding {
+            let mut kates = kates(json!({}));
+            kates.metadata.namespace = Some(namespace.to_owned());
+            serde_json::from_value(binding(&kates, role)).unwrap()
+        };
+        assert!(!revoked(&bound("payments", "r"), "r", &listed));
+        assert!(revoked(&bound("tenant", "r"), "r", &listed));
+        assert!(revoked(&bound("payments", "r"), "r", &BTreeSet::new()));
+        assert!(!revoked(&bound("tenant", "other"), "r", &listed));
+    }
+
+    #[test]
+    fn the_binding_names_the_pods_account_and_only_the_role_given() {
+        let kates = kates(json!({}));
+        let binding = binding(&kates, "kates-backend-kates-operator");
+        assert_eq!(binding["metadata"]["name"], "kates-backend.kates.main");
+        assert_eq!(binding["roleRef"]["name"], "kates-backend-kates-operator");
+        assert_eq!(
+            binding["subjects"],
+            json!([{"kind": "ServiceAccount", "name": "main", "namespace": "kates"}])
+        );
+        let objects = objects(&kates, true);
+        assert_eq!(
+            objects.set["spec"]["template"]["spec"]["serviceAccountName"],
+            objects.account["metadata"]["name"]
+        );
+        serde_json::from_value::<ClusterRoleBinding>(binding).unwrap();
+        // a-b/c and a/b-c would collide on a dash.
+        assert_ne!(binding_name("a-b", "c"), binding_name("a", "b-c"));
+    }
+
+    #[test]
     fn the_database_comes_from_the_secret_and_never_from_a_value() {
-        let env = env(&kates(json!({})).spec);
+        let env = env(&kates(json!({})).spec, true);
         let password = value(&env, "QUARKUS_DATASOURCE_PASSWORD").unwrap();
         assert_eq!(
             password["valueFrom"]["secretKeyRef"],
@@ -380,13 +543,16 @@ mod tests {
 
     #[test]
     fn a_key_turns_security_on_and_sasl_sets_its_three_names() {
-        let env = env(&kates(json!({
-            "apiKeySecretRef": {"name": "keys", "key": "api-key"},
-            "kafka": {"bootstrapServers": "kafka:9093", "securityProtocol": "SASL_PLAINTEXT",
-                "sasl": {"mechanism": "SCRAM-SHA-512", "username": "kates",
-                    "passwordSecretRef": {"name": "kates-backend", "key": "password"}}},
-        }))
-        .spec);
+        let env = env(
+            &kates(json!({
+                "apiKeySecretRef": {"name": "keys", "key": "api-key"},
+                "kafka": {"bootstrapServers": "kafka:9093", "securityProtocol": "SASL_PLAINTEXT",
+                    "sasl": {"mechanism": "SCRAM-SHA-512", "username": "kates",
+                        "passwordSecretRef": {"name": "kates-backend", "key": "password"}}},
+            }))
+            .spec,
+            true,
+        );
         assert_eq!(
             value(&env, "KATES_API_SECURITY_ENABLED").unwrap()["value"],
             "true"
@@ -407,11 +573,14 @@ mod tests {
 
     #[test]
     fn spec_env_replaces_a_default_and_no_name_appears_twice() {
-        let env = env(&kates(json!({"env": [
-            {"name": "KATES_CHAOS_PROVIDER", "value": "kubernetes"},
-            {"name": "KATES_DEFAULTS_REPLICATION_FACTOR", "value": "1"},
-        ]}))
-        .spec);
+        let env = env(
+            &kates(json!({"env": [
+                {"name": "KATES_CHAOS_PROVIDER", "value": "kubernetes"},
+                {"name": "KATES_DEFAULTS_REPLICATION_FACTOR", "value": "1"},
+            ]}))
+            .spec,
+            false,
+        );
         assert_eq!(
             value(&env, "KATES_CHAOS_PROVIDER").unwrap()["value"],
             "kubernetes"
@@ -425,7 +594,7 @@ mod tests {
 
     #[test]
     fn every_object_is_owned_and_the_services_select_the_pod() {
-        let objects = objects(&kates(json!({"image": "registry.local/kates"})));
+        let objects = objects(&kates(json!({"image": "registry.local/kates"})), true);
         for object in [
             &objects.account,
             &objects.service,
