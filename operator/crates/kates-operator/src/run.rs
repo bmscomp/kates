@@ -226,6 +226,8 @@ async fn lead(args: LeadArgs) -> Fallible {
         connections,
         field_manager: format!("kates-operator-{namespace}"),
         kafka,
+        backend_role: Some(env_or("KATES_OPERATOR_BACKEND_ROLE", ""))
+            .filter(|role| !role.is_empty()),
     });
 
     let mut streams: Vec<BoxStream<'static, ()>> = Vec::new();

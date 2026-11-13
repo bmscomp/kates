@@ -16,6 +16,9 @@ pub struct Context {
     pub field_manager: String,
     /// `None` without the Strimzi CRD: compliance then runs on its interval only.
     pub kafka: Option<KafkaWatch>,
+    /// The `ClusterRole` each `Kates` pod is bound to. `None` in a namespace-scoped install,
+    /// which creates nothing cluster-scoped.
+    pub backend_role: Option<String>,
 }
 
 /// The namespaces whose `Kafka`s trigger a check, fixed at start.

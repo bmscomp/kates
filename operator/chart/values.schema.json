@@ -43,7 +43,8 @@
           "additionalProperties": false,
           "properties": { "create": { "type": "boolean" } }
         },
-        "kafkaNamespaceRole": { "type": "boolean" }
+        "kafkaNamespaceRole": { "type": "boolean" },
+        "backendDirectChaos": { "type": "boolean" }
       }
     },
     "connection": {
