@@ -268,6 +268,26 @@ class DisruptionSafetyGuardTest {
         assertFalse(guard.dryRun(plan(2, kill(0), stress)).wouldSucceed(), "the dry run says so too");
     }
 
+    /**
+     * The lease is held through a step's waits and nothing ends one early, so
+     * an observationWindowSec of 300000, a typo for 300, held it for days.
+     */
+    @Test
+    void aStepWaitPastTheLimitIsRefusedNamingItsStep() {
+        createZonedBrokers();
+        DisruptionPlan plan = plan(2, kill(0));
+        plan.setSteps(List.of(new DisruptionPlan.DisruptionStep("step-0", kill(0), -1, 300_000, false)));
+
+        var result = guard.validatePlan(plan);
+
+        assertEquals(
+                List.of(
+                        "Step 'step-0': steadyStateSec -1 is below 0",
+                        "Step 'step-0': observationWindowSec 300000 is above the limit of 3600"
+                                + " (kates.chaos.limits.max-duration-sec)"),
+                result.errors());
+    }
+
     @Test
     void faultInAnotherNamespaceAffectsNoBroker() {
         createZonedBrokers();

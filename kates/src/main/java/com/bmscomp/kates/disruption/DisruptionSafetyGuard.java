@@ -140,8 +140,10 @@ public class DisruptionSafetyGuard {
         // or the Kates API's own.
         String katesNamespace = kubeClient.getNamespace();
         for (TargetedStep t : targeted) {
-            limits.violations(t.spec())
-                    .forEach((field, why) -> errors.add("Step '" + t.step().name() + "': " + field + " " + why));
+            Map<String, String> found = limits.violations(t.spec());
+            limits.checkWait(found, "steadyStateSec", t.step().steadyStateSec());
+            limits.checkWait(found, "observationWindowSec", t.step().observationWindowSec());
+            found.forEach((field, why) -> errors.add("Step '" + t.step().name() + "': " + field + " " + why));
             String namespace = t.spec().targetNamespace();
             if (namespace != null && !namespace.equals(kafkaNamespace) && !namespace.equals(katesNamespace)) {
                 errors.add("Step '" + t.step().name() + "': targetNamespace " + namespace + " is neither "
