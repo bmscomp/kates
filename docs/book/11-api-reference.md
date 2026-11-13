@@ -1472,7 +1472,7 @@ Each status the REST API answers with, and what most often causes it:
 | 403 | Forbidden | Invalid API key, or a key without the endpoint's scope | A key that matches no key the Kates API holds; a principal missing the scope [Scopes and Named Keys](#scopes-and-named-keys) names |
 | 404 | Not Found | Resource does not exist | Unknown test ID, deleted report, non-existent schedule |
 | 409 | Conflict | Conflicts with current state | Cancelling a test that is not running; starting a disruption while one is already running |
-| 422 | Unprocessable Entity | Rejected by the safety guard | No broker pods in the Kafka namespace, a step in a namespace other than the Kafka cluster's and the Kates API's own, a `targetLabel` that doesn't parse, a fault parameter outside its limit, `maxAffectedBrokers` exceeded, every broker hit |
+| 422 | Unprocessable Entity | Rejected by the safety guard | No broker pods in the Kafka namespace, a step in a namespace other than the Kafka cluster's and the Kates API's own, a step that may hit a pod of the Kates API's own release, a `targetLabel` that doesn't parse, a fault parameter outside its limit, `maxAffectedBrokers` exceeded, every broker hit |
 | 429 | Too Many Requests | Too many test runs at once | `kates.engine.max-concurrent-tests` tests already running when another is created; see [Rate Limits](#rate-limits) |
 | 500 | Internal Server Error | Unexpected server failure | Kafka admin call failed, cluster unreachable, a test run the Kates API couldn't save |
 | 503 | Service Unavailable | Dependent system unavailable | Kubernetes API not reachable |

@@ -68,8 +68,8 @@ public class KatesNode {
         return Optional.of(nodeName);
     }
 
-    /** The Kates API's pod name, which Kubernetes sets as the HOSTNAME. */
-    String podName() {
+    /** The Kates API's pod name, which Kubernetes sets as the HOSTNAME; null outside a pod. */
+    public String podName() {
         return System.getenv("HOSTNAME");
     }
 

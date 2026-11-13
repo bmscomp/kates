@@ -1059,6 +1059,89 @@ class DisruptionSafetyGuardTest {
                 guard.validatePlan(plan(1, typeless)).errors());
     }
 
+    // ── A fault never hits the Kates API's own release ──────────────────────
+
+    /** The Kates API as pod kates-7d9 of release kates, with its database and a consumer beside it. */
+    private void katesNamespaceWithItsOwnPods() {
+        guard.katesNode = new com.bmscomp.kates.chaos.KatesNode() {
+            @Override
+            public String podName() {
+                return "kates-7d9";
+            }
+        };
+        String[][] pods = {
+            {"kates-7d9", "app.kubernetes.io/name", "kates"},
+            {"kates-postgresql-0", "app.kubernetes.io/component", "database"},
+            {"orders-consumer-1", "app", "kafka-consumer"}
+        };
+        for (String[] p : pods) {
+            var metadata = new PodBuilder().withNewMetadata().withName(p[0]).withNamespace("kates");
+            if (!p[0].startsWith("orders")) {
+                metadata.addToLabels("app.kubernetes.io/instance", "kates");
+            }
+            client.pods()
+                    .inNamespace("kates")
+                    .resource(metadata.addToLabels(p[1], p[2]).endMetadata().build())
+                    .create();
+        }
+    }
+
+    /**
+     * A partition of the Kates pod cuts it off from the Kubernetes API, so it
+     * could never remove its own policy, and the pod that replaces it carries
+     * the same labels.
+     */
+    @Test
+    void aPartitionOfTheKatesPodIsRefused() {
+        createZonedBrokers();
+        katesNamespaceWithItsOwnPods();
+        FaultSpec cutOff = FaultSpec.builder("cut-off")
+                .disruptionType(DisruptionType.NETWORK_PARTITION)
+                .targetNamespace("kates")
+                .targetPod("kates-7d9")
+                .chaosDurationSec(60)
+                .build();
+
+        assertEquals(
+                List.of("Step 'step-0': it may hit kates-7d9, of the Kates API's own release kates in namespace kates,"
+                        + " and Kates would lose the run it is driving or, under a network partition, the means to"
+                        + " remove it"),
+                guard.validatePlan(plan(-1, cutOff)).errors());
+    }
+
+    /** A random pick may land on any pod the selector matches, the database among them. */
+    @Test
+    void aRandomKillThatMayLandOnTheKatesDatabaseIsRefused() {
+        createZonedBrokers();
+        katesNamespaceWithItsOwnPods();
+        FaultSpec kill = FaultSpec.builder("kill")
+                .disruptionType(DisruptionType.POD_KILL)
+                .targetNamespace("kates")
+                .targetLabel("app.kubernetes.io/instance=kates")
+                .build();
+
+        assertEquals(
+                List.of("Step 'step-0': it may hit kates-7d9, kates-postgresql-0, of the Kates API's own release kates"
+                        + " in namespace kates, and Kates would lose the run it is driving or, under a network"
+                        + " partition, the means to remove it"),
+                guard.validatePlan(plan(-1, kill)).errors());
+    }
+
+    /** The consumer-isolation playbook partitions other pods of that namespace, which is allowed. */
+    @Test
+    void aFaultOnOtherPodsOfTheKatesNamespacePasses() {
+        createZonedBrokers();
+        katesNamespaceWithItsOwnPods();
+        FaultSpec consumers = FaultSpec.builder("consumers")
+                .disruptionType(DisruptionType.NETWORK_PARTITION)
+                .targetNamespace("kates")
+                .targetLabel("app=kafka-consumer")
+                .chaosDurationSec(60)
+                .build();
+
+        assertTrue(guard.validatePlan(plan(-1, consumers)).safe());
+    }
+
     // ── A drain never takes the node the Kates API runs on ──────────────────
 
     /** The Kates API, as if it ran on {@code node}. */
