@@ -157,4 +157,16 @@ class ClusterTopologyServiceTest {
                 + " is forbidden: User \"system:serviceaccount:kates:kates\" cannot " + verb + " resource \""
                 + resource + "\" in API group \"" + group + "\"" + where;
     }
+
+    /** The version running, or else the one asked for; nothing when the resource names neither. */
+    @Test
+    void theKafkaVersionComesFromTheKafkaResource() {
+        Map<String, Object> spec = Map.of("kafka", Map.of("version", "4.0.0"));
+
+        assertEquals(
+                java.util.Optional.of("4.1.0"),
+                ClusterTopologyService.versionOf(Map.of("spec", spec, "status", Map.of("kafkaVersion", "4.1.0"))));
+        assertEquals(java.util.Optional.of("4.0.0"), ClusterTopologyService.versionOf(Map.of("spec", spec)));
+        assertEquals(java.util.Optional.empty(), ClusterTopologyService.versionOf(Map.of()));
+    }
 }

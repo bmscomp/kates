@@ -320,7 +320,8 @@ func mcpCVEHeadlineOf(call *mcpCall, r *client.SecurityCVEReport, err error) mcp
 		// The backend's PASS and PATCHED rest on a comparison that never ran.
 		return mcpCVEHeadline{
 			mcpSecHeadline: mcpSecHeadline{Reason: "The backend had no Kafka version to compare its list of CVEs with, " +
-				"so it compared none; it reports them PATCHED and grade PASS all the same. Section cve lists them as NOT_COMPARED."},
+				"so it compared none (an older backend reports them PATCHED and grade PASS all the same). Section cve lists them " +
+				"as NOT_COMPARED."},
 			KafkaVersion: h.KafkaVersion,
 			Total:        h.Total,
 			Findings:     []string{},

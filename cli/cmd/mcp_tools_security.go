@@ -41,7 +41,8 @@ const mcpSecurityEvidenceDescription = "Security posture of the pinned Kafka clu
 	"config_diff; problems_only keeps what is not passing, and offset and limit page the list. The checks read broker " +
 	"configuration and ACLs through the Kafka admin API: the pentest attacks nothing, the certificate check opens no " +
 	"certificate, and the checks read broker-wide settings, never per-listener ones. The CVE check compares a fixed " +
-	"list of seven CVEs, and the backend does not learn the Kafka version today, so entries come back NOT_COMPARED. " +
+	"list of seven CVEs with the Kafka version of the cluster's Kafka resource; without one, entries come back " +
+	"NOT_COMPARED. " +
 	"Side effect: the backend keeps an in-memory history of audit grades, and every posture read, each page and " +
 	"summary included, runs a fresh audit that appends one entry to it; compliance and drift run the audit too, and " +
 	"a current backend does not append for them, an older one does (auditRuns counts every audit run). So page with " +
@@ -68,7 +69,7 @@ var mcpSecuritySections = []string{
 }
 
 // mcpComplianceFramework names a framework as the tool takes it and as the
-// backend keys it (SecurityService.java:800-802).
+// backend keys it (SecurityService.java:803-805).
 type mcpComplianceFrameworkName struct{ key, name string }
 
 var mcpComplianceFrameworks = []mcpComplianceFrameworkName{
@@ -683,7 +684,7 @@ func mcpSecurityCVEOf(ctx context.Context, call *mcpCall, in mcpSecurityEvidence
 	if s := r.Summary; s != nil {
 		c.Total, c.Vulnerable, c.Patched = s.Total, s.Vulnerable, s.Patched
 	}
-	all := mcpCVEsFrom(call, r.KafkaVersion, r.Vulnerabilities, r.Patched)
+	all := mcpCVEsFrom(call, r.KafkaVersion, r.Vulnerabilities, r.Patched, r.NotCompared)
 	if !c.Compared {
 		c.Grade, c.Vulnerable, c.Patched, c.NotCompared = mcpCVENotEvaluated, 0, 0, len(all)
 	}
@@ -699,11 +700,12 @@ const (
 )
 
 // mcpCVEVersionKnown reports whether the backend compared its CVE list with a
-// version. It reads kafkaVersion from a cluster description that never holds
-// one (ClusterHealthService.describeCluster), so it gets "unknown", and its
-// compareVersions, failing to parse that, calls every entry PATCHED
-// (SecurityService.java:1394,1452,1576-1590). A version counts as known when
-// every dot-separated part holds a digit, as compareVersions needs.
+// version. A current one reads it from the Kafka resource and, without one,
+// answers "unknown" with every entry in notCompared and grade FAIL. An older
+// one read it from a cluster description that never holds one, got "unknown",
+// and its compareVersions, failing to parse that, called every entry PATCHED.
+// A version counts as known when every dot-separated part holds a digit, as
+// compareVersions needs.
 func mcpCVEVersionKnown(v string) bool {
 	if v == "" {
 		return false
@@ -927,7 +929,7 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 		Refs: []string{
 			mcpAnchoredRef(mcpJava+"service/SecurityKafkaHelpers.java:36-65",
 				"fetchBrokerConfig(AdminClient client, int brokerId)", "fetchAcls(AdminClient client)"),
-			mcpAnchoredRef(mcpJava+"service/SecurityService.java:88-97,1059-1065,1297-1301,1515-1523",
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:91-100,1062-1068,1300-1304,1533-1541",
 				"helpers.fetchBrokerConfig(client, brokerId)", "helpers.fetchBrokerConfig(client, bId)"),
 			mcpJava + "service/SecurityPentestService.java:46-51",
 		},
@@ -942,8 +944,8 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 			"pass, and no certificate is opened: expiry, issuer and chain are never read, only whether a keystore and " +
 			"a truststore location are set.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1053-1162", "public Map<String, Object> tlsInspect()"),
-			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1290-1384", "public Map<String, Object> certificateCheck()"),
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1056-1165", "public Map<String, Object> tlsInspect()"),
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1293-1387", "public Map<String, Object> certificateCheck()"),
 		},
 	},
 	{
@@ -970,9 +972,9 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 		Refs: []string{
 			mcpAnchoredRef(mcpJava+"service/SecurityKafkaHelpers.java:74-156",
 				"listener.security.protocol.map", "static boolean saslRequired(", "static String saslMechanisms("),
-			mcpAnchoredRef(mcpJava+"service/SecurityService.java:99-132,332-348,365-401,693-703",
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:102-135,335-351,368-404,696-706",
 				`"SASL Authentication"`, `"SASL Mechanism Strength"`, `"SSL Keystore Configured"`, `"Listener Protocol Map"`),
-			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1053-1162,1290-1314",
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1056-1165,1293-1317",
 				"public Map<String, Object> tlsInspect()", "public Map<String, Object> certificateCheck()"),
 			mcpAnchoredRef(mcpJava+"service/SecurityPentestService.java:127-138,156-168",
 				`"metadata-leak"`, `"unencrypted"`),
@@ -988,7 +990,7 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 			"has but the fresh audit lacks is not listed. Without a saved baseline there is no drift to report, and " +
 			"this server cannot save one: the baseline is a POST, which its transport refuses.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"service/SecurityService.java:912-979,1014-1021",
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:915-982,1017-1024",
 				"public Map<String, Object> securityDrift()", "private int statusRank(String status)"),
 			mcpJava + "api/SecurityResource.java:134-148",
 			"cli/cmd/mcp_guard.go:1110-1145",
@@ -1001,7 +1003,7 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 			"CIS ids are the ones the checks carry, SOC2 and PCI-DSS controls are assigned by check category alone " +
 			"(auth, authz and transport for SOC2; transport, auth and limits for PCI-DSS), and the percentage is the " +
 			"share of mapped checks that pass.",
-		Refs: []string{mcpAnchoredRef(mcpJava+"service/SecurityService.java:792-853,1034-1051",
+		Refs: []string{mcpAnchoredRef(mcpJava+"service/SecurityService.java:795-856,1037-1054",
 			"public Map<String, Object> securityCompliance()", "private String mapToSoc2(String category)")},
 	},
 }, mcpCaveatsScenario)

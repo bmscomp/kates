@@ -184,6 +184,7 @@ type SecurityCVEReport struct {
 	KafkaVersion    string              `json:"kafkaVersion"`
 	Vulnerabilities []SecurityCVE       `json:"vulnerabilities"`
 	Patched         []SecurityCVE       `json:"patched"`
+	NotCompared     []SecurityCVE       `json:"notCompared"` // a current backend without a Kafka version
 	Summary         *SecurityCVESummary `json:"summary"`
 	Grade           string              `json:"grade"` // PASS or FAIL
 	Timestamp       string              `json:"timestamp"`

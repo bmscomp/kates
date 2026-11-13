@@ -364,6 +364,24 @@ public class ClusterTopologyService {
         return Map.of();
     }
 
+    /**
+     * The Kafka version of the cluster, from its Strimzi Kafka resource; empty
+     * when the resource cannot be read or names none.
+     */
+    public java.util.Optional<String> kafkaVersion() {
+        return versionOf(readKafkaCrSpec(new LinkedHashMap<>()));
+    }
+
+    /** status.kafkaVersion, the version running, or else spec.kafka.version, the one asked for. */
+    @SuppressWarnings("unchecked")
+    static java.util.Optional<String> versionOf(Map<String, Object> kafkaCr) {
+        Map<String, Object> status = (Map<String, Object>) kafkaCr.getOrDefault("status", Map.of());
+        Map<String, Object> spec = (Map<String, Object>) kafkaCr.getOrDefault("spec", Map.of());
+        Map<String, Object> kafkaSpec = (Map<String, Object>) spec.getOrDefault("kafka", Map.of());
+        Object version = status.get("kafkaVersion") != null ? status.get("kafkaVersion") : kafkaSpec.get("version");
+        return java.util.Optional.ofNullable(version).map(Object::toString).filter(v -> !v.isBlank());
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> describeKafkaCluster(Map<String, Object> kafkaCr) {
         Map<String, Object> cluster = new LinkedHashMap<>();
@@ -371,13 +389,8 @@ public class ClusterTopologyService {
         cluster.put("namespace", kafkaNamespace);
         cluster.put("kraftMode", true);
 
-        String kafkaVersion = "unknown";
         Map<String, Object> spec = (Map<String, Object>) kafkaCr.getOrDefault("spec", Map.of());
         Map<String, Object> kafkaSpec = (Map<String, Object>) spec.getOrDefault("kafka", Map.of());
-
-        if (kafkaSpec.get("version") != null) {
-            kafkaVersion = kafkaSpec.get("version").toString();
-        }
 
         // Listeners
         if (kafkaSpec.get("listeners") instanceof List<?> listeners) {
@@ -432,10 +445,7 @@ public class ClusterTopologyService {
                 }
             }
         }
-        if (status.get("kafkaVersion") != null) {
-            kafkaVersion = status.get("kafkaVersion").toString();
-        }
-        cluster.put("kafkaVersion", kafkaVersion);
+        cluster.put("kafkaVersion", versionOf(kafkaCr).orElse("unknown"));
 
         // AdminClient cluster info
         int controllerQuorumLeader = -1;

@@ -85,7 +85,7 @@ var mcpTopologyUnreadSections = []struct{ backend, section string }{
 
 // mcpTopologyKafka is the Kafka resource the backend is configured to read.
 // The backend reports its name and namespace from configuration whether or not
-// the resource exists (ClusterTopologyService.java:346-371).
+// the resource exists (ClusterTopologyService.java:346-389).
 type mcpTopologyKafka struct {
 	Name         string `json:"name" jsonschema:"the name the backend is configured to read (kates.topology.kafka-cluster), reported whether or not such a resource exists"`
 	Namespace    string `json:"namespace" jsonschema:"the namespace the backend is configured to read (kates.topology.kafka-namespace)"`
@@ -217,7 +217,7 @@ func mcpClusterTopology(ctx context.Context, call *mcpCall, in mcpClusterTopolog
 			}
 		}
 		// The backend fills clusterId from the admin API, or with "unknown"
-		// when that call failed (ClusterTopologyService.java:440-455).
+		// when that call failed (ClusterTopologyService.java:450-465).
 		if topo.Cluster != nil && topo.Cluster.ClusterID != "unknown" {
 			if err := call.CheckCluster(topo.Cluster.ClusterID); err != nil {
 				return out, err
@@ -261,7 +261,7 @@ func mcpTopologyError(call *mcpCall, err error) *mcpToolError {
 // check read for this call) are added either way.
 //
 // A pod's roles are its pool's: the backend gives each node only the first of
-// them (ClusterTopologyService.java:685-686), which would hide the controller
+// them (ClusterTopologyService.java:695-696), which would hide the controller
 // in a pool whose roles are [broker, controller].
 //
 // Names from Kubernetes are passed on only in the shape Kubernetes allows
@@ -274,7 +274,7 @@ func mcpTopologyNodes(call *mcpCall, topo *client.MCPClusterTopology, out *mcpCl
 	others := []mcpTopologyPod{}
 	brokers := map[int]*mcpTopologyBroker{}
 	// Pods whose name ends in no number all get id -1 from the backend
-	// (ClusterTopologyService.java:1424-1431); keyed by id they would collapse
+	// (ClusterTopologyService.java:1434-1441); keyed by id they would collapse
 	// into one, so they are kept apart.
 	var unnumbered []mcpTopologyBroker
 	if topo != nil {
@@ -316,7 +316,7 @@ func mcpTopologyNodes(call *mcpCall, topo *client.MCPClusterTopology, out *mcpCl
 		}
 		// The backend lists the pools, then their pods pool by pool, and a
 		// read that fails is logged and left out: the pods listed before it
-		// are kept (ClusterTopologyService.java:568-642,645-735). So an empty
+		// are kept (ClusterTopologyService.java:578-652,655-745). So an empty
 		// list, or a pool with fewer pods than replicas, is not evidence that
 		// the nodes are missing.
 		if len(topo.NodePools) == 0 || len(topo.Nodes) == 0 || short {

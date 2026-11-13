@@ -180,6 +180,13 @@ var securityCVECmd = &cobra.Command{
 			output.KeyValue("Total CVEs Checked", fmt.Sprintf("%v", summary["total"]))
 			output.KeyValue("Vulnerable", output.ErrorStyle.Render(fmt.Sprintf("%v", summary["vulnerable"])))
 			output.KeyValue("Patched", output.SuccessStyle.Render(fmt.Sprintf("%v", summary["patched"])))
+			if n, ok := summary["notCompared"]; ok {
+				output.KeyValue("Not Compared", output.ErrorStyle.Render(fmt.Sprintf("%v", n)))
+			}
+		}
+		// Why a backend without a Kafka version compared nothing.
+		if reason, ok := result["reason"].(string); ok && reason != "" {
+			output.Warn(output.Printable(reason))
 		}
 		return nil
 	},

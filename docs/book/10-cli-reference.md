@@ -1993,7 +1993,7 @@ kates sec certificates
 
 #### security cve
 
-Check for known CVEs.
+Check the cluster's Kafka version against a fixed list of known Apache Kafka CVEs. The Kates API reads the version from the cluster's Strimzi `Kafka` resource, `status.kafkaVersion` or else `spec.kafka.version`. When it can't read one, it compares nothing: the grade is `FAIL`, every CVE counts as not compared, and the command prints why.
 
 ```bash
 kates security cve
