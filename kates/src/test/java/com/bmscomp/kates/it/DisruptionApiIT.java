@@ -337,6 +337,17 @@ class DisruptionApiIT {
                 .body("cronExpression", equalTo("30 3 * * *"))
                 .body("enabled", is(false));
 
+        // A rename that leaves enabled out must not switch a disabled fault
+        // schedule back on: it would inject at its next matching minute.
+        given().contentType(ContentType.JSON)
+                .body(Map.of("name", "renamed"))
+                .when()
+                .put("/api/disruptions/schedules/" + id)
+                .then()
+                .statusCode(200)
+                .body("name", equalTo("renamed"))
+                .body("enabled", is(false));
+
         given().when().delete("/api/disruptions/schedules/" + id).then().statusCode(204);
         given().when().delete("/api/disruptions/schedules/" + id).then().statusCode(404);
         given().contentType(ContentType.JSON)
