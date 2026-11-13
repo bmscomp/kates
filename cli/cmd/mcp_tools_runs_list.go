@@ -427,13 +427,14 @@ type mcpRunTaskOut struct {
 	Error               mcpUntrusted `json:"error,omitempty" jsonschema:"the error the task ended with"`
 }
 
-// mcpRunSummaryOut is the report summary without the two fields the backend
-// always sends as 0 (p999LatencyMs and durationMs, MetricUtils.java:114,118).
+// mcpRunSummaryOut is the report summary without p999LatencyMs, which the
+// backend always sends as 0 (MetricUtils.java:126), and durationMs, which an
+// older backend sends as 0 too.
 type mcpRunSummaryOut struct {
-	TotalRecords            int64   `json:"totalRecords" jsonschema:"records sent, summed over tasks"`
-	AvgThroughputRecPerSec  float64 `json:"avgThroughputRecPerSec" jsonschema:"the mean of the rates of the tasks that have started, not their sum"`
+	TotalRecords            int64   `json:"totalRecords" jsonschema:"records the producers sent; an older Kates API adds the consumers' records too"`
+	AvgThroughputRecPerSec  float64 `json:"avgThroughputRecPerSec" jsonschema:"the records the producers sent over the time they ran, first start to last end; an older Kates API reports the mean of the started tasks' rates, consumers included"`
 	PeakThroughputRecPerSec float64 `json:"peakThroughputRecPerSec" jsonschema:"the fastest task's rate"`
-	AvgThroughputMBPerSec   float64 `json:"avgThroughputMBPerSec" jsonschema:"the mean of the rates of the tasks that have started"`
+	AvgThroughputMBPerSec   float64 `json:"avgThroughputMBPerSec" jsonschema:"the producers' megabytes over the time they ran; an older Kates API reports the mean of the started tasks' rates"`
 	AvgLatencyMs            float64 `json:"avgLatencyMs" jsonschema:"the mean latency of the tasks that measured latency, weighted by records"`
 	P50LatencyMs            float64 `json:"p50LatencyMs" jsonschema:"the p50 of the tasks that measured latency; with several, the highest"`
 	P95LatencyMs            float64 `json:"p95LatencyMs" jsonschema:"the p95 of the tasks that measured latency; with several, the highest"`
@@ -1025,7 +1026,7 @@ var mcpCaveatsRunsList = []mcpCaveat{
 			"that lost any sends reads 1. An older Kates API divided by the records sent instead. The backend " +
 			"always sends p99.9 and duration as 0.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"util/MetricUtils.java:62-181",
+			mcpAnchoredRef(mcpJava+"util/MetricUtils.java:62-239",
 				"public static ReportSummary computeSummary(", "filter(r -> !notStarted(r))",
 				"result.getStatus() == TestResult.TaskStatus.PENDING", "private static double highest("),
 			mcpAnchoredRef(mcpJava+"report/ReportGenerator.java:220-249,283-294",

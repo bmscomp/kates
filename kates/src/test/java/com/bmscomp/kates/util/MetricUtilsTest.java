@@ -250,16 +250,50 @@ class MetricUtilsTest {
         assertFalse(MetricUtils.measuredLatency(null));
     }
 
+    /** The consumer reads back what the producer sent: its records and rate are not the run's. */
     @Test
-    void throughputStillAveragesTheConsumer() {
+    void theConsumerIsLeftOutOfTheRecordsAndTheRate() {
         TestResult produce = producer(10_000, 12.0, 8.0, 25.0, 40.0, 95.0).withThroughputRecordsPerSec(1_000.0);
         TestResult consume = nativeConsumer(10_000).withThroughputRecordsPerSec(900.0);
 
         ReportSummary s = MetricUtils.computeSummary(List.of(produce, consume));
 
-        assertEquals(950.0, s.avgThroughputRecPerSec(), 0.001);
+        assertEquals(1_000.0, s.avgThroughputRecPerSec(), 0.001);
         assertEquals(1_000.0, s.peakThroughputRecPerSec(), 0.001);
-        assertEquals(20_000, s.totalRecords());
+        assertEquals(10_000, s.totalRecords());
+    }
+
+    private static TestResult sending(String startTime, long records, double rate) {
+        return new TestResult()
+                .withPhaseName("produce")
+                .withStartTime(startTime)
+                .withRecordsSent(records)
+                .withThroughputRecordsPerSec(rate)
+                .withThroughputMBPerSec(rate / 1024.0); // 1 KiB records
+    }
+
+    /** Five producers at 40,000 records a second send 200,000 a second, not their mean of 40,000. */
+    @Test
+    void producersRunningTogetherAddUp() {
+        List<TestResult> five = java.util.Collections.nCopies(5, sending("2026-11-14T10:00:00Z", 400_000, 40_000.0));
+
+        ReportSummary s = MetricUtils.computeSummary(five);
+
+        assertEquals(200_000.0, s.avgThroughputRecPerSec(), 0.001);
+        assertEquals(200_000.0 / 1024.0, s.avgThroughputMBPerSec(), 0.001);
+        assertEquals(2_000_000, s.totalRecords());
+        assertEquals(10_000, s.durationMs());
+        assertEquals(40_000.0, s.peakThroughputRecPerSec(), 0.001);
+    }
+
+    /** Phases taking turns do not add up: two of 10 s at 1,000 records a second are 1,000 over 20 s. */
+    @Test
+    void phasesTakingTurnsDoNotAddUp() {
+        ReportSummary s = MetricUtils.computeSummary(List.of(
+                sending("2026-11-14T10:00:00Z", 10_000, 1_000.0), sending("2026-11-14T10:00:10Z", 10_000, 1_000.0)));
+
+        assertEquals(1_000.0, s.avgThroughputRecPerSec(), 0.001);
+        assertEquals(20_000, s.durationMs());
     }
 
     /** A scenario's later phase, stored as it waits for its turn: PENDING, nothing measured. */
