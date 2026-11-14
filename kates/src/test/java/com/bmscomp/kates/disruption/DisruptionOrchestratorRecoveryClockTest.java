@@ -187,7 +187,7 @@ class DisruptionOrchestratorRecoveryClockTest {
             return inject(inv.getArgument(0), inv.getArgument(1));
         });
 
-        DisruptionReport report = orchestrator.execute(plan(DELAY));
+        DisruptionReport report = orchestrator.execute("d-1", plan(DELAY));
 
         DisruptionReport.StepReport step = report.getStepReports().getFirst();
         assertEquals("Pass", step.chaosOutcome().verdict());
@@ -229,7 +229,7 @@ class DisruptionOrchestratorRecoveryClockTest {
         when(orchestrator.chaosCoordinator.triggerFault(any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(outcome));
 
-        DisruptionReport report = orchestrator.execute(plan(Duration.ZERO));
+        DisruptionReport report = orchestrator.execute("d-1", plan(Duration.ZERO));
 
         DisruptionReport.StepReport step = report.getStepReports().getFirst();
         assertEquals(outcome.verdict(), step.chaosOutcome().verdict());

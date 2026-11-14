@@ -62,7 +62,7 @@ class DisruptionOrchestratorFaultWaitTest {
                         0,
                         false));
 
-        assertEquals("COMPLETED", orchestrator.execute(plan).getStatus());
+        assertEquals("COMPLETED", orchestrator.execute("d-1", plan).getStatus());
         verify(fault).get(300 + 30 + 120, TimeUnit.SECONDS);
     }
 }

@@ -742,7 +742,7 @@ func mcpPreviewStepFrom(call *mcpCall, ds client.StepPreview, fs *mcpFaultSpecVi
 // mcpTargetingOf names how a step picks its pods, in the precedence
 // PodTargets.mode applies (chaos/PodTargets.java:40-51) after the orchestrator
 // has turned a targetTopic into the partition leader's broker id
-// (DisruptionOrchestrator.java:253-261). SCALE_DOWN picks node pools instead
+// (DisruptionOrchestrator.java:255-263). SCALE_DOWN picks node pools instead
 // (DisruptionSafetyGuard.java:497-503).
 func mcpTargetingOf(fs *mcpFaultSpecView) string {
 	switch {

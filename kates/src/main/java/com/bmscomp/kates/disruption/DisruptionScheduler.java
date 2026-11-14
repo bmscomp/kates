@@ -105,8 +105,8 @@ public class DisruptionScheduler {
                 return;
             }
 
-            DisruptionReport report = orchestrator.execute(plan);
             String runId = UUID.randomUUID().toString().substring(0, 8);
+            DisruptionReport report = orchestrator.execute(runId, plan);
 
             String grade =
                     report.getSlaVerdict() != null ? report.getSlaVerdict().grade() : null;

@@ -27,6 +27,10 @@ public class DisruptionEventBus {
         subscribers.remove(listener);
     }
 
+    int subscriberCount() {
+        return subscribers.size();
+    }
+
     public void emit(DisruptionEvent event) {
         LOG.debugf("Event: %s — %s", event.type(), event.message());
         for (Consumer<DisruptionEvent> sub : subscribers) {

@@ -745,9 +745,7 @@ kates disruption watch <id>
 - Rollback events, when a step rolls back after its recovery timeout
 - Final SLA grade and completion status
 
-::: {.callout-warning title="Known limitation: kates disruption watch receives no events"}
-The Kates API emits these events under the plan's name, not under the disruption ID that `kates disruption run` returns, so `kates disruption watch <id>` connects and then receives nothing. Follow a run with `kates disruption status <id>` instead, which shows its status and each finished step.
-:::
+The stream sends only the events that come after it connects. `kates disruption status <id>` shows a run's status and each finished step.
 
 ## Resilience Runs: A Fault Inside a Test
 

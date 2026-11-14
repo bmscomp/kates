@@ -129,7 +129,7 @@ public class DisruptionLauncher {
     // The outcome is saved under the placeholder's id, and replaces it.
     private void runPlan(String id, DisruptionPlan plan) {
         try {
-            DisruptionReport report = orchestrator.execute(plan);
+            DisruptionReport report = orchestrator.execute(id, plan);
             DisruptionPersistence.persistReport(id, report, repository, objectMapper);
         } catch (Exception e) {
             LOG.error("Disruption plan failed: " + id, e);
