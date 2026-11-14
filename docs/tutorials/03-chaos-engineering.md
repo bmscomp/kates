@@ -24,8 +24,8 @@ make chaos-status
 ```
 
 The experiments the chart installs are `pod-delete`, `pod-cpu-hog`,
-`pod-memory-hog`, `pod-network-partition`, `pod-io-stress`, `pod-dns-error`
-(all namespaced) and `node-drain` (cluster-scoped).
+`pod-memory-hog`, `pod-network-partition`, `pod-io-stress`, `pod-dns-error`,
+`disk-fill`, `pod-network-latency` (all namespaced) and `node-drain` (cluster-scoped).
 
 Running one means creating a `ChaosEngine`. Declaratively, that is an entry
 under the chart's `engines:` map:

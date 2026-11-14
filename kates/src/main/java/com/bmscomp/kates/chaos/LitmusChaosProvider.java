@@ -12,6 +12,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Named;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientException;
 import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.chaos.litmus.*;
@@ -230,33 +231,32 @@ public class LitmusChaosProvider implements ChaosProvider {
         return future;
     }
 
+    /**
+     * The experiment the ChaosEngine names, which must be installed in the
+     * target namespace: Litmus writes no ChaosResult for an engine whose
+     * experiment is missing, so the fault would wait out its whole timeout.
+     */
     private String resolveExperiment(FaultSpec spec) {
-        if (spec.disruptionType() != null) {
-            String mapped = EXPERIMENT_MAP.get(spec.disruptionType());
-
-            // Try to dynamically discover installed ChaosExperiments
-            try {
-                if (mapped != null) {
-                    var exps = client.resources(ChaosExperiment.class)
-                            .inNamespace(spec.targetNamespace())
-                            .list()
-                            .getItems();
-
-                    for (ChaosExperiment exp : exps) {
-                        if (exp.getMetadata().getName().equals(mapped)) {
-                            return mapped;
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                LOG.debug("Failed to list ChaosExperiments dynamically", e);
-            }
-
-            if (mapped != null) {
-                return mapped;
-            }
+        String mapped = spec.disruptionType() == null ? null : EXPERIMENT_MAP.get(spec.disruptionType());
+        String experiment = mapped != null ? mapped : spec.experimentName();
+        ChaosExperiment installed;
+        try {
+            installed = client.resources(ChaosExperiment.class)
+                    .inNamespace(spec.targetNamespace())
+                    .withName(experiment)
+                    .get();
+        } catch (KubernetesClientException e) {
+            // Unreadable here is left to Litmus, as it was before this check.
+            LOG.debugf("Could not read ChaosExperiment %s: %s", experiment, e.getMessage());
+            return experiment;
         }
-        return spec.experimentName();
+        if (installed == null) {
+            throw new IllegalStateException("ChaosExperiment " + experiment
+                    + (mapped != null ? " (which " + spec.disruptionType() + " runs on litmus-crd)" : "")
+                    + " is not installed in namespace " + spec.targetNamespace()
+                    + ": install it there, e.g. in the kates-chaos chart's experiments.definitions");
+        }
+        return experiment;
     }
 
     ChaosEngine buildChaosEngine(FaultSpec spec, String engineName, String experimentName) {

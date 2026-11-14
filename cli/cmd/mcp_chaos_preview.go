@@ -90,7 +90,7 @@ var mcpAdHocBounds = map[string]mcpAdHocBound{
 // sizes it by fillPercentage as well as ioWorkers
 // (LitmusChaosProvider.java:319-323). Both honour gracePeriodSec: litmus-crd
 // hands a POD_DELETE to the kubernetes provider, which deletes the pod with it
-// (LitmusChaosProvider.java:41-59,86-88; KubernetesChaosProvider.java:205-213).
+// (LitmusChaosProvider.java:42-60,87-89; KubernetesChaosProvider.java:205-213).
 // fillPercentage stays out of ad-hoc plans with DISK_FILL, the one type it is
 // meant for.
 var mcpAdHocTypeParam = map[string]string{
@@ -773,7 +773,7 @@ func mcpTargetingOf(fs *mcpFaultSpecView) string {
 // experiment and routes those four, POD_DELETE, NETWORK_PARTITION,
 // ROLLING_RESTART and SCALE_DOWN, to the kubernetes provider: experimentName
 // picks the experiment only for a step without a type
-// (LitmusChaosProvider.java:29-59,86-88,233-260), and otherwise only names
+// (LitmusChaosProvider.java:30-60,87-89,239-260), and otherwise only names
 // the fault. The plan's wording is a follow-up.
 //
 // A targetNamespace is within them when it is kafkaNamespace, the one the

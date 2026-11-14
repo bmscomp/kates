@@ -87,7 +87,7 @@ The table compares the four values. A stock install uses `litmus-crd`, the first
 
 So `NETWORK_LATENCY`, `MEMORY_STRESS`, `DNS_ERROR`, `DISK_FILL` and `NODE_DRAIN` need LitmusChaos, and [The Hybrid Provider](#the-hybrid-provider) shows how `hybrid` picks.
 
-On a stock install you already have LitmusChaos: `kates deploy`, and so `make all`, installs the `kates-chaos` chart unless you pass `--with-chaos=false`. The chart installs seven experiments in its target namespaces, `kafka` by default: `pod-delete`, `pod-cpu-hog`, `pod-memory-hog`, `pod-network-partition`, `pod-io-stress`, `pod-dns-error` and `node-drain`; Kates doesn't use `pod-network-partition`. It installs no `disk-fill` and no `pod-network-latency`, so `DISK_FILL` and `NETWORK_LATENCY` steps fail until you add those experiments yourself.
+On a stock install you already have LitmusChaos: `kates deploy`, and so `make all`, installs the `kates-chaos` chart unless you pass `--with-chaos=false`. The chart installs nine experiments in its target namespaces, `kafka` by default: `pod-delete`, `pod-cpu-hog`, `pod-memory-hog`, `pod-network-partition`, `pod-io-stress`, `pod-dns-error`, `disk-fill`, `pod-network-latency` and `node-drain`; Kates doesn't use `pod-network-partition`. A step whose experiment isn't installed in the target namespace fails at once, with the missing experiment named, before any ChaosEngine exists.
 
 When Kates picks the provider, it checks that the provider can work, and falls back to `noop` when it can't or when the setting names no provider. For `litmus-crd` the check is only that Kates can list ChaosEngines: it proves the CRDs exist, not that the Litmus [operator](appendix-a-glossary.md#gl-operator) runs. A fallback is easy to miss. The Kates API logs it once, at ERROR, with the words `falling back to noop`, and every fault after that comes back `Skipped`, so a plan ends `PARTIAL` and a resilience run `CHAOS_FAILED`. A provider that works logs `Chaos provider:` and its name instead.
 
@@ -132,10 +132,10 @@ On the default `litmus-crd` provider, Kates maps every disruption type but four 
 
 | Type | Litmus Experiment | Effect |
 |------|-------------------|--------|
-| `NETWORK_LATENCY` | `pod-network-latency` | Adds configurable latency to broker traffic; the `kates-chaos` chart doesn't install the experiment |
+| `NETWORK_LATENCY` | `pod-network-latency` | Adds configurable latency to broker traffic |
 | `MEMORY_STRESS` | `pod-memory-hog` | Consumes memory on the broker pod |
 | `DNS_ERROR` | `pod-dns-error` | Injects DNS resolution failures on broker pods |
-| `DISK_FILL` | `disk-fill` | Litmus `disk-fill` at `fillPercentage`; the `kates-chaos` chart doesn't install the experiment |
+| `DISK_FILL` | `disk-fill` | Litmus `disk-fill` at `fillPercentage` |
 | `NODE_DRAIN` | `node-drain` | Drains the node that runs the pod Kates picks, as in a node or [zone](appendix-a-glossary.md#gl-zone) failure: see [Targeting Pods](#targeting-pods) |
 
 The two providers don't treat every field alike. Both wait `delayBeforeSec` before they pick the pods and inject the fault, so on `litmus-crd` the ChaosEngine appears only after the delay. A plan step's recovery times start when the provider injects the fault, so the delay isn't counted in them. A step whose fault is never injected, such as every step on `noop`, has no recovery times and doesn't wait for recovery. On `litmus-crd`, `chaosDurationSec` becomes the experiment's `TOTAL_CHAOS_DURATION`, and Kates waits up to two minutes past it for the ChaosResult. `POD_KILL` and `LEADER_ELECTION` run `pod-delete` there with `FORCE=true`, which deletes the pod at once. On `kubernetes`, `POD_KILL`, `POD_DELETE` and `LEADER_ELECTION` delete each target once, and `chaosDurationSec` doesn't lengthen them. A `POD_DELETE` runs that way on both providers, with `gracePeriodSec` as the pod's grace period, and leaves no ChaosEngine.
@@ -407,7 +407,7 @@ steps:
 
 ### storage-pressure
 
-Fills broker disk to 90% with the LitmusChaos `disk-fill` experiment, to observe the cluster under storage pressure. The `kates-chaos` chart doesn't install `disk-fill`, and the `kubernetes` chaos provider can't run `DISK_FILL`, so add the experiment to `kafka` before you run this playbook.
+Fills broker disk to 90% with the LitmusChaos `disk-fill` experiment, to observe the cluster under storage pressure. The `kubernetes` chaos provider can't run `DISK_FILL`, so the playbook needs `litmus-crd` (or `hybrid`) and the `disk-fill` experiment the `kates-chaos` chart installs.
 
 ```yaml
 name: storage-pressure

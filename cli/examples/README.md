@@ -127,7 +127,7 @@ that sets a field its run doesn't read, or that the API would refuse.
 | `resilience-test.yaml` | `POD_KILL` | Hard crash, no grace period | brokers-alpha |
 | `resilience-pod-delete.yaml` | `POD_DELETE` | Graceful shutdown, 30s grace (forced on `litmus-crd`) | brokers-gamma |
 | `resilience-network-partition.yaml` | `NETWORK_PARTITION` | Zone isolation | brokers-sigma |
-| `resilience-network-latency.yaml` | `NETWORK_LATENCY` | 200ms egress latency (needs `pod-network-latency`) | brokers-alpha |
+| `resilience-network-latency.yaml` | `NETWORK_LATENCY` | 200ms egress latency (Litmus `pod-network-latency`) | brokers-alpha |
 | `resilience-cpu-stress.yaml` | `CPU_STRESS` | 1 core | brokers-gamma |
 | `resilience-memory-stress.yaml` | `MEMORY_STRESS` | 500 MB native memory | brokers-sigma |
 | `resilience-io-stress.yaml` | `IO_STRESS` | 80% disk saturation | brokers-alpha |
