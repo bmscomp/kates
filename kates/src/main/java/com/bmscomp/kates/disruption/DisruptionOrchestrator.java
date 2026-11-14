@@ -77,8 +77,11 @@ public class DisruptionOrchestrator {
      * Executes a plan, refusing to start while another disruption holds the
      * cluster's lease. Plans from every entry point take it here; compound runs
      * and resilience faults take the same lease themselves.
+     *
+     * @param disruptionId the id the report is saved under, which its events
+     *     carry: a stream subscriber asks for them by that id
      */
-    public DisruptionReport execute(DisruptionPlan plan) {
+    public DisruptionReport execute(String disruptionId, DisruptionPlan plan) {
         String target = concurrencyGuard.currentTarget();
         String token = plan.getName() + "#" + UUID.randomUUID();
 
@@ -97,15 +100,14 @@ public class DisruptionOrchestrator {
         }
 
         try {
-            return executePlan(plan);
+            return executePlan(disruptionId, plan);
         } finally {
             concurrencyGuard.release(target, token);
         }
     }
 
-    private DisruptionReport executePlan(DisruptionPlan plan) {
+    private DisruptionReport executePlan(String disruptionId, DisruptionPlan plan) {
         long startMs = System.currentTimeMillis();
-        String disruptionId = plan.getName();
         DisruptionReport report = new DisruptionReport();
         report.setPlanName(plan.getName());
         eventBus.emit(
@@ -151,7 +153,7 @@ public class DisruptionOrchestrator {
                         step.name(),
                         "Step started: " + step.name());
 
-                DisruptionReport.StepReport stepReport = executeStep(step, plan, prometheusAvailable);
+                DisruptionReport.StepReport stepReport = executeStep(disruptionId, step, plan, prometheusAvailable);
                 stepReports.add(stepReport);
 
                 if (stepReport.chaosOutcome() != null
@@ -239,7 +241,7 @@ public class DisruptionOrchestrator {
     }
 
     private DisruptionReport.StepReport executeStep(
-            DisruptionPlan.DisruptionStep step, DisruptionPlan plan, boolean prometheusAvailable) {
+            String disruptionId, DisruptionPlan.DisruptionStep step, DisruptionPlan plan, boolean prometheusAvailable) {
 
         K8sPodWatcher.WatchSession session = null;
         KafkaIntelligenceService.IsrTracker isrTracker = null;
@@ -288,7 +290,7 @@ public class DisruptionOrchestrator {
                 preMetrics = prometheusCapture.toReportSummary(baseline, Duration.ofSeconds(step.steadyStateSec()));
                 LOG.info("  Captured baseline Prometheus snapshot");
                 eventBus.emit(
-                        plan.getName(),
+                        disruptionId,
                         DisruptionEventBus.EventType.METRICS_BASELINE,
                         step.name(),
                         "Baseline metrics captured");
@@ -301,7 +303,7 @@ public class DisruptionOrchestrator {
 
             LOG.info("  Injecting fault: " + spec.experimentName());
             eventBus.emit(
-                    plan.getName(),
+                    disruptionId,
                     DisruptionEventBus.EventType.FAULT_INJECTED,
                     step.name(),
                     "Fault injected: " + spec.experimentName());
@@ -331,7 +333,7 @@ public class DisruptionOrchestrator {
                 }
                 LOG.info("  Captured post-disruption Prometheus snapshot");
                 eventBus.emit(
-                        plan.getName(),
+                        disruptionId,
                         DisruptionEventBus.EventType.METRICS_CAPTURED,
                         step.name(),
                         "Post-disruption metrics captured");
@@ -354,7 +356,7 @@ public class DisruptionOrchestrator {
             if (step.requireRecovery() && injected) {
                 LOG.info("  Waiting for recovery (timeout=" + recoveryTimeoutSec + "s)");
                 eventBus.emit(
-                        plan.getName(),
+                        disruptionId,
                         DisruptionEventBus.EventType.RECOVERY_WAITING,
                         step.name(),
                         "Waiting for recovery (timeout=" + recoveryTimeoutSec + "s)");
@@ -369,7 +371,7 @@ public class DisruptionOrchestrator {
                     LOG.warn("  Recovery timeout — triggering auto-rollback for " + step.name());
                     safetyGuard.rollback(spec, outcome.engineName());
                     eventBus.emit(
-                            plan.getName(),
+                            disruptionId,
                             DisruptionEventBus.EventType.ROLLBACK,
                             step.name(),
                             "Auto-rollback triggered for " + step.name());

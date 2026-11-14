@@ -8,6 +8,7 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.sse.OutboundSseEvent;
 import jakarta.ws.rs.sse.Sse;
+import jakarta.ws.rs.sse.SseBroadcaster;
 import jakarta.ws.rs.sse.SseEventSink;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -48,6 +49,9 @@ public class DisruptionStreamResource {
 
         LOG.info("SSE client connected for disruption: " + disruptionId);
 
+        // A broadcaster of this one sink, for its close callback: the listener
+        // goes when the run ends or the client hangs up.
+        SseBroadcaster broadcaster = sse.newBroadcaster();
         Consumer<DisruptionEventBus.DisruptionEvent> listener = event -> {
             if (!event.disruptionId().equals(disruptionId)) return;
 
@@ -57,17 +61,18 @@ public class DisruptionStreamResource {
                         .name(event.type().name())
                         .data(json)
                         .build();
-                sink.send(sseEvent);
+                broadcaster.broadcast(sseEvent);
 
                 if (event.type() == DisruptionEventBus.EventType.COMPLETED
                         || event.type() == DisruptionEventBus.EventType.FAILED) {
-                    sink.close();
+                    broadcaster.close();
                 }
             } catch (Exception e) {
                 LOG.warn("Failed to send SSE event", e);
             }
         };
-
+        broadcaster.onClose(closed -> eventBus.unsubscribe(listener));
+        broadcaster.register(sink);
         eventBus.subscribe(listener);
 
         sink.send(sse.newEventBuilder()

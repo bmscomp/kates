@@ -55,7 +55,7 @@ class DisruptionLauncherDrainTest {
     @Test
     void anAcceptedPlanIsCountedUntilItsReportIsSaved() {
         validation(List.of());
-        when(launcher.orchestrator.execute(any())).thenReturn(new DisruptionReport());
+        when(launcher.orchestrator.execute(any(), any())).thenReturn(new DisruptionReport());
 
         assertTrue(launcher.launch(plan).accepted());
         assertEquals(1, launcher.concurrencyGuard.inFlight());
@@ -67,7 +67,7 @@ class DisruptionLauncherDrainTest {
     @Test
     void aPlanThatFailsIsCountedOutOnce() {
         validation(List.of());
-        when(launcher.orchestrator.execute(any())).thenThrow(new IllegalStateException("no cluster"));
+        when(launcher.orchestrator.execute(any(), any())).thenThrow(new IllegalStateException("no cluster"));
 
         assertTrue(launcher.launch(plan).accepted());
         handedOff.get(0).run();

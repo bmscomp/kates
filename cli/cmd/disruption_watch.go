@@ -36,9 +36,8 @@ var disruptionWatchCmd = &cobra.Command{
 	Long: `Stream a disruption's progress events until it completes or fails, for at
 most 30 minutes.
 
-The backend emits the events under the plan's name, not under the ID that
-'kates disruption run' returns, so for that ID no events arrive yet. Until it
-does, follow a run with 'kates disruption status <id>'.`,
+The stream starts with the events that come after it connects; to see a step
+that has already finished, use 'kates disruption status <id>'.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		disruptionID := args[0]
