@@ -100,4 +100,22 @@ class DisruptionConcurrencyGuardTest {
         assertTrue(done.await(10, TimeUnit.SECONDS));
         assertEquals(1, winners.get());
     }
+
+    @Test
+    @DisplayName("a draining guard counts no new work in, and keeps what was counted")
+    void aDrainRefusesNewWorkAndKeepsTheCount() {
+        assertTrue(guard.enter());
+        assertEquals(1, guard.inFlight());
+
+        guard.setDraining(true);
+        assertFalse(guard.enter());
+        assertEquals(1, guard.inFlight());
+
+        guard.exit();
+        assertEquals(0, guard.inFlight());
+
+        guard.setDraining(false);
+        assertTrue(guard.enter());
+        guard.exit();
+    }
 }

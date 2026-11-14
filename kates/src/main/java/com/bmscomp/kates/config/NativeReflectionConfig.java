@@ -31,6 +31,8 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
             com.bmscomp.kates.domain.BulkDeleteRequest.class,
             com.bmscomp.kates.domain.BulkDeleteResponse.class,
             com.bmscomp.kates.domain.PruneResponse.class,
-            com.bmscomp.kates.api.WhoAmIResource.WhoAmI.class
+            com.bmscomp.kates.api.WhoAmIResource.WhoAmI.class,
+            com.bmscomp.kates.api.DrainResource.DrainRequest.class,
+            com.bmscomp.kates.api.DrainResource.DrainStatus.class
         })
 public class NativeReflectionConfig {}

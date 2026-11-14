@@ -1349,6 +1349,31 @@ class TestOrchestratorTest {
         }
 
         @Test
+        void aDrainRefusesARunAndAScenarioAndGivesThePermitBack() {
+            TestOrchestrator engine = withBackend("native");
+            engine.setDraining(true);
+            CreateTestRequest plain = new CreateTestRequest();
+            plain.setType(TestType.LOAD);
+            plain.setSpec(new TestSpec());
+            CreateTestRequest phased = scenario(new TestSpec(), phase("steady", ScenarioPhase.PhaseType.STEADY));
+
+            // More refusals than there are permits: none of them may keep one.
+            for (int i = 0; i < 5; i++) {
+                assertInstanceOf(
+                        DrainingException.class,
+                        engine.executeTest(plain).asFailure().orElseThrow());
+                assertInstanceOf(
+                        DrainingException.class,
+                        engine.executeTest(phased).asFailure().orElseThrow());
+            }
+            assertEquals(0, engine.liveRuns());
+            assertTrue(submitted.isEmpty());
+
+            engine.setDraining(false);
+            assertTrue(engine.executeTest(phased).isSuccess());
+        }
+
+        @Test
         void aScenarioWithNoTypeIsRefusedBeforeTakingAPermit() {
             // POST /api/resilience and a schedule run no bean validation, so a
             // scenario could come with no type, its own or the request's. It

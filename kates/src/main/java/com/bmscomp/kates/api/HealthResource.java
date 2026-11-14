@@ -55,7 +55,7 @@ public class HealthResource {
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("status", kafkaReachable ? "UP" : "DEGRADED");
-        response.put("capabilities", List.of("clientKey"));
+        response.put("capabilities", List.of("clientKey", "drain"));
 
         response.put(
                 "engine",

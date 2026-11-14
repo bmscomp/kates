@@ -38,6 +38,8 @@ Find the call you need here, by family, and follow its link to the entry:
 |----------|--------------|
 | [GET /api/whoami](#authentication) | Names the key's principal and its scopes |
 | [GET /api/health](#get-apihealth) | Reports whether the Kates API is up and reaches Kafka; public |
+| [GET /api/drain](#get-apidrain) | Reports whether the Kates API is draining and what work is still live |
+| [PUT /api/drain](#put-apidrain) | Starts or lifts a drain: no new run or fault while live ones finish |
 | [POST /api/tests](#post-apitests) | Creates and starts a test run |
 | [GET /api/tests](#get-apitests) | Lists test runs, by type or status |
 | [GET /api/tests/types](#get-apiteststypes) | Lists the test types the Kates API accepts |
@@ -235,6 +237,39 @@ curl -s "$BASE/api/health"
 
 The response also contains a `tests` object with the resolved default configuration for every test type. When Kafka is unreachable, the endpoint still returns `200 OK`, but with `"status": "DEGRADED"` and `"kafka.status": "DOWN"`.
 
+#### GET /api/drain
+
+Reports the drain switch and the work still live. Use it before you replace the pod of the Kates API: a run or a fault that is live when the pod stops is lost. Requires the `read` scope.
+
+```bash
+curl -s -H "X-API-Key: $KATES_API_KEY" "$BASE/api/drain"
+```
+
+**Response:** `200 OK`
+
+```json
+{ "draining": true, "liveRuns": 1, "faultsInFlight": 0, "drained": false }
+```
+
+`liveRuns` counts the test runs still going. `faultsInFlight` counts the disruption plans, compound runs and resilience tests between their request and their saved report. `drained` is true once `draining` is true, both counts are zero and no fault holds the disruption lease.
+
+#### PUT /api/drain
+
+Starts a drain with `{"draining": true}` and lifts it with `{"draining": false}`. Requires the `admin` scope. The answer is the state `GET /api/drain` returns.
+
+```bash
+curl -s -X PUT -H "X-API-Key: $KATES_API_KEY" -H "Content-Type: application/json" \
+  -d '{"draining": true}' "$BASE/api/drain"
+```
+
+While the API is draining:
+
+- Every request that would start a test run, a disruption, a compound run or a resilience test is answered `503 Service Unavailable` with a `Retry-After: 60` header. Two answers differ: a full engine still answers `429`, and `POST /api/tests/bulk` answers `202` with every item failed.
+- Test and disruption schedules don't fire. A firing that falls inside the drain is skipped, not run later.
+- Live runs and faults go on to their end. A dry run, a cancel and every read are answered as usual.
+
+The switch is kept in memory: a restarted pod is not draining. A body without `draining` is a `400`.
+
 ### Test Management
 
 These endpoints start performance test runs, then find, follow and delete them. A run executes in the background, so you create it and then poll it; `kates test` wraps these calls, and [Test Types Deep Dive](05-test-types.md) explains what each type measures.
@@ -340,8 +375,9 @@ A run can also fail to start for a reason that no field of the request explains.
 | 400 | Bad Request | The request, or its `scenario`, names a `backend` the Kates API doesn't have; `message` lists the benchmark backends it has |
 | 429 | Too Many Requests | `kates.engine.max-concurrent-tests` tests are already running, as [Rate Limits](#rate-limits) describes |
 | 500 | Internal Server Error | A fault in the Kates API, such as its database being unreachable, or a `kates.engine.default-backend` that names no benchmark backend it has |
+| 503 | Service Unavailable | The Kates API is draining, as [PUT /api/drain](#put-apidrain) describes |
 
-Only the `400` asks you to change the request. After a `429` or a `500`, the same request can start a run later: after the 60 seconds, or once the fault is fixed. The cause of a `500` is in the Kates API's log, not in the answer.
+Only the `400` asks you to change the request. After a `429`, a `500` or a `503`, the same request can start a run later: after the 60 seconds, once the fault is fixed, or once the drain is lifted. The cause of a `500` is in the Kates API's log, not in the answer.
 
 **Response:** `202 Accepted`
 
@@ -1475,7 +1511,7 @@ Each status the REST API answers with, and what most often causes it:
 | 422 | Unprocessable Entity | Rejected by the safety guard | No broker pods in the Kafka namespace, a step in a namespace other than the Kafka cluster's and the Kates API's own, a step that may hit a pod of the Kates API's own release, a `targetLabel` that doesn't parse, a fault parameter outside its limit, `maxAffectedBrokers` exceeded, every broker hit |
 | 429 | Too Many Requests | Too many test runs at once | `kates.engine.max-concurrent-tests` tests already running when another is created; see [Rate Limits](#rate-limits) |
 | 500 | Internal Server Error | Unexpected server failure | Kafka admin call failed, cluster unreachable, a test run the Kates API couldn't save |
-| 503 | Service Unavailable | Dependent system unavailable | Kubernetes API not reachable |
+| 503 | Service Unavailable | Dependent system unavailable, or the API is draining | Kubernetes API not reachable; a run or a fault requested during a drain, see [PUT /api/drain](#put-apidrain) |
 
 ### Error Examples
 

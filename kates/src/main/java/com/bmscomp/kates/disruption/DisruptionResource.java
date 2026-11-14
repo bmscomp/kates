@@ -68,6 +68,7 @@ public class DisruptionResource {
                     "Validates a disruption plan and starts it asynchronously. Returns 202 with a report id; poll GET /api/disruptions/{id} for progress and the final report.")
     @APIResponse(responseCode = "202", description = "Disruption accepted for execution")
     @APIResponse(responseCode = "409", description = "Another disruption is already running against this cluster")
+    @APIResponse(responseCode = "503", description = "The API is draining and starts nothing — retry later")
     @APIResponse(responseCode = "422", description = "Disruption rejected by safety guard")
     public Response executeDisruption(
             DisruptionPlan plan,
@@ -120,6 +121,7 @@ public class DisruptionResource {
                 Response.status(409)
                         .entity(ApiError.of(409, "Conflict", String.join(" ", result.messages())))
                         .build();
+            case DRAINING -> com.bmscomp.kates.api.DrainResource.refused(String.join(" ", result.messages()));
         };
     }
 

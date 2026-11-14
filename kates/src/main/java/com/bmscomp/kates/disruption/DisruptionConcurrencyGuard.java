@@ -4,6 +4,7 @@ import java.util.LinkedHashSet;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -135,5 +136,45 @@ public class DisruptionConcurrencyGuard {
     /** True when a plan is running against {@code target}. */
     public boolean isBusy(String target) {
         return activeByTarget.containsKey(target);
+    }
+
+    public static final String DRAINING = "Kates is draining: no new fault is started until the drain is lifted";
+
+    private final AtomicInteger inFlight = new AtomicInteger();
+    private volatile boolean draining;
+
+    /**
+     * Counts a piece of fault work in, from its request to its saved report,
+     * or returns false while Kates is draining. Whoever gets true must call
+     * {@link #exit()} when the work is over.
+     *
+     * <p>Counted before the flag is read, so once a drain is set and
+     * {@link #inFlight()} reads zero, no request that saw the old value can
+     * still inject a fault. The lease is not the gate: a resilience test
+     * takes it minutes after it was admitted, and must still get its fault.
+     */
+    public boolean enter() {
+        inFlight.incrementAndGet();
+        if (draining) {
+            inFlight.decrementAndGet();
+            return false;
+        }
+        return true;
+    }
+
+    public void exit() {
+        inFlight.decrementAndGet();
+    }
+
+    public int inFlight() {
+        return inFlight.get();
+    }
+
+    public boolean isDraining() {
+        return draining;
+    }
+
+    public void setDraining(boolean draining) {
+        this.draining = draining;
     }
 }

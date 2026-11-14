@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicInteger;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -70,6 +71,11 @@ public class TestOrchestrator {
     private final long maxDurationMs;
 
     private final Semaphore concurrencyGuard;
+    /** Set by PUT /api/drain. Read after a permit is taken, see {@link #liveRuns()}. */
+    private volatile boolean draining;
+    /** Settles between giving back their permit and stopping their tasks; counted in {@link #liveRuns()}. */
+    private final AtomicInteger settling = new AtomicInteger();
+
     private final Map<String, List<BenchmarkHandle>> activeHandles = new ConcurrentHashMap<>();
 
     /**
@@ -176,6 +182,10 @@ public class TestOrchestrator {
 
         if (!concurrencyGuard.tryAcquire()) {
             return com.bmscomp.kates.util.Result.failure(new ConcurrencyLimitException(maxConcurrentTests));
+        }
+        if (draining) {
+            concurrencyGuard.release();
+            return com.bmscomp.kates.util.Result.failure(new DrainingException());
         }
 
         com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
@@ -366,6 +376,10 @@ public class TestOrchestrator {
         // they take a permit on the same terms.
         if (!concurrencyGuard.tryAcquire()) {
             return com.bmscomp.kates.util.Result.failure(new ConcurrencyLimitException(maxConcurrentTests));
+        }
+        if (draining) {
+            concurrencyGuard.release();
+            return com.bmscomp.kates.util.Result.failure(new DrainingException());
         }
 
         com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
@@ -903,11 +917,17 @@ public class TestOrchestrator {
         // be reclaimed even when there is nothing left to stop, and before a
         // backend that fails to stop can get in the way.
         benchmarkMetrics.endRun(runId);
-        releasePermit(runId);
-        if (handles == null) {
-            return;
+        // Counted before the permit goes back, so a drain never reads zero
+        // live runs while this run's tasks are still being stopped.
+        settling.incrementAndGet();
+        try {
+            releasePermit(runId);
+            if (handles != null) {
+                stopTasks(runId, handles);
+            }
+        } finally {
+            settling.decrementAndGet();
         }
-        stopTasks(runId, handles);
     }
 
     /**
@@ -2149,5 +2169,24 @@ public class TestOrchestrator {
             updatedResults.add(result);
         }
         return run.withResults(updatedResults);
+    }
+
+    /** Whether new runs are refused so that the live ones can finish. */
+    public boolean isDraining() {
+        return draining;
+    }
+
+    public void setDraining(boolean draining) {
+        this.draining = draining;
+    }
+
+    /**
+     * The runs that hold a permit, counted from the permit itself. A request
+     * takes its permit before it reads {@link #draining}, so once a drain is
+     * set and this reads zero, no request that saw the old value can still
+     * start a run. A run being settled counts until its tasks are stopped.
+     */
+    public int liveRuns() {
+        return maxConcurrentTests - concurrencyGuard.availablePermits() + settling.get();
     }
 }

@@ -571,6 +571,31 @@ class ResilienceResourceTest {
      * broker each, two of three down together.
      */
     @Test
+    void aRunDuringADrainIsRefusedAndCountsNothing() {
+        concurrencyGuard.setDraining(true);
+        try {
+            given().contentType("application/json")
+                    .body("{\"testRequest\":{\"type\":\"LOAD\"},\"chaosSpec\":{\"experimentName\":\"kill\","
+                            + "\"disruptionType\":\"POD_KILL\",\"chaosDurationSec\":30}}")
+                    .when()
+                    .post("/api/resilience")
+                    .then()
+                    .statusCode(503)
+                    .header("Retry-After", "60")
+                    .body("message", is("Kates is draining: no new fault is started until the drain is lifted"));
+            given().contentType("application/json")
+                    .body("{\"testRequest\":{\"type\":\"LOAD\"}}")
+                    .when()
+                    .post("/api/resilience/scenarios/broker-crash")
+                    .then()
+                    .statusCode(503);
+            assertEquals(0, concurrencyGuard.inFlight());
+        } finally {
+            concurrencyGuard.setDraining(false);
+        }
+    }
+
+    @Test
     void aRunWhileADisruptionHoldsTheLeaseIsAConflict() {
         String target = concurrencyGuard.currentTarget();
         assertTrue(concurrencyGuard.tryAcquire(target, "leader-cascade#1"));

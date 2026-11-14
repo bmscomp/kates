@@ -50,6 +50,10 @@ public class TestScheduler {
 
     @Scheduled(every = "60s", identity = "kates-schedule-evaluator")
     void evaluateSchedules() {
+        // A draining instance fires nothing, and leaves the lease to one that may.
+        if (orchestrator.isDraining()) {
+            return;
+        }
         // With replicas > 1 every instance fires this — only the lease holder
         // may trigger runs, or each schedule would execute once per replica.
         if (!leases.tryAcquire("test-scheduler", java.time.Duration.ofSeconds(55))) {

@@ -316,8 +316,8 @@ var mcpCaveatsChaos = []mcpCaveat{
 			mcpJava + "disruption/DisruptionOrphanReconciler.java:54-55,63-70,86-93,171-222",
 			mcpJava + "disruption/DisruptionReportRepository.java:35-60,93-102",
 			mcpJava + "disruption/DisruptionPersistence.java:26-37",
-			mcpJava + "disruption/DisruptionLauncher.java:95-102,110-123",
-			mcpJava + "disruption/DisruptionResource.java:146-152,164-171",
+			mcpJava + "disruption/DisruptionLauncher.java:114-121,129-144",
+			mcpJava + "disruption/DisruptionResource.java:148-154,166-173",
 		},
 	},
 }

@@ -197,6 +197,21 @@ class GrpcTestServiceCreateTest {
      * fault in the Kates API.
      */
     @Test
+    void aDrainIsUnavailableForTheCallerToRetry() {
+        TestOrchestrator orchestrator = mock(TestOrchestrator.class);
+        when(orchestrator.executeTest(any()))
+                .thenReturn(Result.failure(new com.bmscomp.kates.engine.DrainingException()));
+        service.orchestrator = orchestrator;
+
+        var e = refused(load());
+
+        assertEquals(Status.Code.UNAVAILABLE, e.getStatus().getCode());
+        assertEquals(
+                "Kates is draining: no new run is started until the drain is lifted",
+                e.getStatus().getDescription());
+    }
+
+    @Test
     void aFullEngineIsResourceExhaustedForTheCallerToRetry() {
         engine.fill();
 

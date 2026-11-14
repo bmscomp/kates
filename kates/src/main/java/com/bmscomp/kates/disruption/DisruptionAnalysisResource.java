@@ -130,6 +130,10 @@ public class DisruptionAnalysisResource {
     @APIResponse(
             responseCode = "409",
             description = "Another disruption is running against this cluster; no fault is triggered")
+    @APIResponse(
+            responseCode = "503",
+            description = "The Kates API is draining, see PUT /api/drain; no fault is started. Retry-After says when to"
+                    + " try again")
     public Response executeCompound(DisruptionDtos.CompoundChaosRequest request) {
         if (request.faults == null || request.faults.isEmpty()) {
             return Response.status(400)
@@ -168,9 +172,13 @@ public class DisruptionAnalysisResource {
 
         // The lease a plan holds, so a compound run and a plan don't take
         // down brokers together or undo each other's faults.
+        if (!concurrencyGuard.enter()) {
+            return com.bmscomp.kates.api.DrainResource.refused(DisruptionConcurrencyGuard.DRAINING);
+        }
         String target = concurrencyGuard.currentTarget();
         String token = "compound#" + UUID.randomUUID();
         if (!concurrencyGuard.tryAcquire(target, token)) {
+            concurrencyGuard.exit();
             return Response.status(409)
                     .entity(ApiError.of(
                             409,
@@ -190,6 +198,7 @@ public class DisruptionAnalysisResource {
                     .build();
         } finally {
             concurrencyGuard.release(target, token);
+            concurrencyGuard.exit();
         }
     }
 

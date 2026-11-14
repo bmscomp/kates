@@ -241,6 +241,9 @@ public final class InMemoryEngine {
         /** Runs inside each poll before it answers, as whatever the poll races would. */
         public volatile Consumer<BenchmarkHandle> onPoll = handle -> {};
 
+        /** Runs inside each stop before it lands. */
+        public volatile Consumer<BenchmarkHandle> onStop = handle -> {};
+
         public RecordingBackend(String name) {
             this.name = name;
         }
@@ -266,6 +269,7 @@ public final class InMemoryEngine {
 
         @Override
         public void stop(BenchmarkHandle handle) {
+            onStop.accept(handle);
             if (!stopped.contains(handle.taskId())) {
                 stopped.add(handle.taskId());
             }
