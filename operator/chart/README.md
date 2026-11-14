@@ -214,7 +214,21 @@ In a namespace named in `rbac.backendNamespaces`, its pod gets the rights a Helm
 
 In any other namespace the pod gets no role, no finalizer is added, and `KATES_CHAOS_PROVIDER` defaults to `noop`, as in the Kates chart's namespace scope. Load and integrity tests need no role. A namespace taken off the list loses its bindings when the operator restarts, as it does on the `helm upgrade` that changes the list, whether or not the namespace is still watched. With `rbac.clusterRoles.create=false` nothing cluster-scoped is created and no namespace gets the role.
 
-`kubectl get kates` shows the version every pod runs and whether the backend is Ready. A change to `spec.version` replaces the pod, and `Ready` is false until the new one answers.
+`kubectl get kates` shows the version every pod runs, whether the backend is Ready, its mode and whether it is drained. A change to `spec.version` replaces the pod, and `Ready` is false until the new one answers. The operator deletes the old pod itself (the StatefulSet's `updateStrategy` is `OnDelete`), so it can wait for a drain first.
+
+### Upgrade without losing a run
+
+A run or a fault that is live when its pod goes is lost. To upgrade without that, set `mode: Drain` with the new version, or before it:
+
+```bash
+kubectl patch kates main --type merge -p '{"spec":{"mode":"Drain","version":"1.41.0-native"}}'
+kubectl wait --for=jsonpath='{.status.version}'=1.41.0-native kates/main --timeout=30m
+kubectl patch kates main --type merge -p '{"spec":{"mode":"Active"}}'
+```
+
+Under `Drain` the operator sets the backend's `PUT /api/drain`: new runs, faults and resilience tests are answered 503, schedules stop firing, and live work goes on to its end. The `Drained` condition reports what is still live, and turns true once nothing is. Only then is a pod on an old version replaced, and the new pod is drained again as soon as it answers. The operator never sets the mode back to `Active`: you do, and the condition goes once the drain is lifted.
+
+To call the API the operator reads the key `apiKeySecretRef` names, and its chart lets it read only a Secret named `kates-api-key`, as the Kates chart names it. A key in any other Secret leaves `Drained` false with reason `KeyUnreadable`, and the pod is not replaced while the mode is `Drain`. The key needs the `admin` scope. A backend older than the drain switch gives reason `DrainUnsupported`: upgrade it under `Active`, which replaces the pod at once.
 
 The operator never takes over an object it did not create. If a ServiceAccount, Service or StatefulSet of the resource's name already exists, nothing is applied and `Ready` is false with reason `NameTaken`: rename one of them.
 

@@ -3,6 +3,9 @@
 //! them, and each is applied whole on every pass. The one exception is the `ClusterRoleBinding`
 //! that gives the pod its rights: a namespaced owner cannot hold a cluster-scoped object, so a
 //! finalizer removes it.
+//!
+//! The pod is replaced by the operator, not by the `StatefulSet` (`OnDelete`): under `mode: Drain`
+//! it asks the backend to start nothing new and waits for `/api/drain` to say nothing is live.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -10,14 +13,16 @@ use std::time::Duration;
 
 use jiff::Timestamp;
 use k8s_openapi::api::apps::v1::StatefulSet;
-use k8s_openapi::api::core::v1::{Service, ServiceAccount};
+use k8s_openapi::api::core::v1::{Pod, Secret, Service, ServiceAccount};
 use k8s_openapi::api::rbac::v1::ClusterRoleBinding;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
-use kates_crds::{Kates, KatesSpec, KatesStatus, SecretKey};
-use kube::api::{Api, DeleteParams, ListParams, Patch, PatchParams};
+use kates_client::Drain;
+use kates_crds::{Kates, KatesSpec, KatesStatus, Mode, SecretKey};
+use kube::api::{Api, DeleteParams, ListParams, Patch, PatchParams, Preconditions};
 use kube::runtime::controller::Action;
 use kube::runtime::finalizer::{self, Event as Finalizer};
 use kube::{Resource as _, ResourceExt as _};
+use secrecy::SecretString;
 use serde_json::{Value, json};
 
 use super::{Error, paused};
@@ -30,6 +35,12 @@ pub const FINALIZER: &str = "kates.io/cluster-role-binding";
 const WRITE_RETRY: Duration = Duration::from_secs(30);
 const NAME_RETRY: Duration = Duration::from_mins(1);
 const DEFAULT_IMAGE: &str = "ghcr.io/bmscomp/kates";
+const DRAINED: &str = "Drained";
+// The one Secret name the chart lets the operator read for the key: RBAC narrows only by name.
+const KEY_SECRET: &str = "kates-api-key";
+// /api/drain is not watched: while live work finishes, the operator looks again this often.
+const DRAIN_POLL: Duration = Duration::from_secs(5);
+const REVISION: &str = "controller-revision-hash";
 
 /// # Errors
 /// A failed Kubernetes write.
@@ -126,6 +137,7 @@ async fn apply(kates: &Kates, ctx: &Context) -> Result<Action, Error> {
 
     let before = kates.status.clone().unwrap_or_default();
     let mut after = before.clone();
+    let (mut drain, mut replaced) = (None, None);
     // Applying over an object of the same name would hand it to whoever may create a Kates:
     // an existing ServiceAccount to run their image as, or a Service to point elsewhere.
     let taken = [
@@ -175,7 +187,7 @@ async fn apply(kates: &Kates, ctx: &Context) -> Result<Action, Error> {
         let set = sets
             .patch(&name, &params, &Patch::Apply(&objects.set))
             .await?;
-        observe(kates, &set, &mut after, Timestamp::now());
+        (drain, replaced) = roll(kates, ctx, &set, &before, &mut after).await?;
     }
 
     if after != before {
@@ -189,31 +201,286 @@ async fn apply(kates: &Kates, ctx: &Context) -> Result<Action, Error> {
             .patch_status(&name, &params, &Patch::Apply(patch))
             .await?;
     }
+    announce(kates, ctx, &before, &after, taken, replaced).await;
     let reason = |status: &KatesStatus| {
         let ready = status::find(&status.conditions, "Ready");
         ready.map(|condition| condition.reason.clone())
     };
-    if reason(&after) != reason(&before) {
-        let note = match reason(&after).as_deref() {
+    if reason(&after).as_deref() == Some("NameTaken") {
+        // The other object is not watched, so its removal is only seen by looking again.
+        return Ok(Action::requeue(NAME_RETRY));
+    }
+    // The StatefulSet is watched: its next change starts the next pass. Neither /api/drain nor
+    // the key's Secret is.
+    Ok(match &drain {
+        Some(Ok(state)) if kates.spec.mode == Mode::Drain && !state.drained => {
+            Action::requeue(DRAIN_POLL)
+        }
+        Some(Err(unknown)) if unknown.retry => Action::requeue(WRITE_RETRY),
+        Some(Err(_)) => Action::requeue(NAME_RETRY),
+        _ => Action::await_change(),
+    })
+}
+
+/// Tells `kubectl describe` of a change of Ready and of a pod replaced.
+async fn announce(
+    kates: &Kates,
+    ctx: &Context,
+    before: &KatesStatus,
+    after: &KatesStatus,
+    taken: Option<String>,
+    replaced: Option<String>,
+) {
+    let reason = |status: &KatesStatus| {
+        let ready = status::find(&status.conditions, "Ready");
+        ready.map(|condition| condition.reason.clone())
+    };
+    let mut notes = Vec::new();
+    if reason(after) != reason(before) {
+        let note = match reason(after).as_deref() {
             Some("Running") => Some((false, "Ready", format!("running {}", kates.spec.version))),
             Some("NameTaken") => taken.map(|what| (true, "NameTaken", format!("{what} exists"))),
             _ => None,
         };
         if let Some((warning, reason, message)) = note {
-            let note = Note {
+            notes.push(Note {
                 warning,
                 reason,
                 message,
-            };
-            ctx.publish(kates, vec![note]).await;
+            });
         }
     }
-    if reason(&after).as_deref() == Some("NameTaken") {
-        // The other object is not watched, so its removal is only seen by looking again.
-        return Ok(Action::requeue(NAME_RETRY));
+    if let Some(pod) = replaced {
+        notes.push(Note {
+            warning: false,
+            reason: "Replacing",
+            message: format!("replacing {pod} with {}", kates.spec.version),
+        });
     }
-    // The StatefulSet is watched: its next change starts the next pass.
-    Ok(Action::await_change())
+    if !notes.is_empty() {
+        ctx.publish(kates, notes).await;
+    }
+}
+
+/// Reads the `StatefulSet` and the drain into `after`, and replaces a stale pod unless a drain
+/// holds it. Answers the drain and the pod replaced.
+async fn roll(
+    kates: &Kates,
+    ctx: &Context,
+    set: &StatefulSet,
+    before: &KatesStatus,
+    after: &mut KatesStatus,
+) -> Result<(Option<Result<Drain, Unknown>>, Option<String>), Error> {
+    let namespace = kates.namespace().ok_or(Error::NoNamespace)?;
+    let now = Timestamp::now();
+    observe(kates, set, after, now);
+    let drain = sync_drain(kates, ctx, &namespace, before, after.ready_replicas > 0).await;
+    mark_drain(kates, drain.as_ref(), after, now);
+    let Some(pod) = stale_pod(ctx, &namespace, set).await? else {
+        return Ok((drain, None));
+    };
+    if held(kates.spec.mode, drain.as_ref()) {
+        let message = "the pod is replaced once the drain ends";
+        let generation = kates.metadata.generation;
+        let conditions = &mut after.conditions;
+        status::set(
+            conditions,
+            "Ready",
+            "False",
+            "RollingOut",
+            message,
+            generation,
+            now,
+        );
+        return Ok((drain, None));
+    }
+    replace(ctx, &namespace, &pod).await?;
+    Ok((drain, Some(pod.name_any())))
+}
+
+/// Why the backend's drain state is not known this pass.
+#[derive(Debug)]
+pub struct Unknown {
+    reason: &'static str,
+    message: String,
+    /// The backend may answer on the next try; otherwise something only a person changes.
+    retry: bool,
+}
+
+/// Sets the backend's switch to the mode and answers its state. `None`: Active and never
+/// drained, so there is nothing to lift and no call.
+async fn sync_drain(
+    kates: &Kates,
+    ctx: &Context,
+    namespace: &str,
+    before: &KatesStatus,
+    ready: bool,
+) -> Option<Result<Drain, Unknown>> {
+    let want = kates.spec.mode == Mode::Drain;
+    if !want && status::find(&before.conditions, DRAINED).is_none() {
+        return None;
+    }
+    if !ready {
+        return Some(Err(Unknown {
+            reason: "NotReady",
+            message: "the pod is not ready".to_owned(),
+            retry: false,
+        }));
+    }
+    Some(ask(kates, ctx, namespace, want).await)
+}
+
+async fn ask(kates: &Kates, ctx: &Context, namespace: &str, want: bool) -> Result<Drain, Unknown> {
+    let key = key(kates, ctx, namespace).await?;
+    let url = format!("http://{}.{namespace}.svc:8080", kates.name_any());
+    let api = ctx.connections.client_for(&url).map_err(|error| Unknown {
+        reason: "Unavailable",
+        message: error.to_string(),
+        retry: true,
+    })?;
+    let state = api.drain(&key).await.map_err(|error| refused(&error))?;
+    if state.draining == want {
+        return Ok(state);
+    }
+    api.set_drain(&key, want)
+        .await
+        .map_err(|error| refused(&error))
+}
+
+/// The key the pod runs with. Without `apiKeySecretRef` the API asks for none.
+async fn key(kates: &Kates, ctx: &Context, namespace: &str) -> Result<SecretString, Unknown> {
+    let Some(from) = &kates.spec.api_key_secret_ref else {
+        return Ok(SecretString::from(String::new()));
+    };
+    let unreadable = |why: &str| Unknown {
+        reason: "KeyUnreadable",
+        message: format!(
+            "key {} of Secret {}: {why}; the operator's chart lets it read only a Secret named {KEY_SECRET}",
+            from.key, from.name
+        ),
+        retry: false,
+    };
+    let secrets = Api::<Secret>::namespaced(ctx.client.clone(), namespace);
+    let secret = secrets
+        .get_opt(&from.name)
+        .await
+        .map_err(|error| unreadable(&error.to_string()))?
+        .ok_or_else(|| unreadable("not found"))?;
+    let value = secret
+        .data
+        .as_ref()
+        .and_then(|data| data.get(&from.key))
+        .ok_or_else(|| unreadable("no such key"))?;
+    let text = std::str::from_utf8(&value.0).map_err(|_| unreadable("not text"))?;
+    Ok(SecretString::from(text.trim().to_owned()))
+}
+
+#[must_use]
+pub fn refused(error: &kates_client::Error) -> Unknown {
+    use kates_client::Error as E;
+    match error {
+        E::Rejected { status: 404, .. }
+        | E::Unavailable {
+            status: Some(404), ..
+        } => Unknown {
+            reason: "DrainUnsupported",
+            message: "the backend has no /api/drain: its version predates the drain switch"
+                .to_owned(),
+            retry: false,
+        },
+        E::InvalidKey | E::MissingScope => Unknown {
+            reason: "KeyRefused",
+            message: format!("{error}: the drain needs the admin scope"),
+            retry: false,
+        },
+        _ => Unknown {
+            reason: "Unavailable",
+            message: error.to_string(),
+            retry: true,
+        },
+    }
+}
+
+/// The `Drained` condition, shown only while there is a drain to report or to lift.
+pub fn mark_drain(
+    kates: &Kates,
+    drain: Option<&Result<Drain, Unknown>>,
+    status: &mut KatesStatus,
+    now: Timestamp,
+) {
+    let generation = kates.metadata.generation;
+    let conditions = &mut status.conditions;
+    let mut set = |value, reason, message: &str| {
+        status::set(conditions, DRAINED, value, reason, message, generation, now);
+    };
+    match (kates.spec.mode, drain) {
+        (Mode::Active, None | Some(Ok(_))) => status::remove(conditions, DRAINED),
+        (Mode::Drain, Some(Ok(state))) if state.drained => {
+            set("True", "Drained", "nothing is live");
+        }
+        (Mode::Drain, Some(Ok(state))) => set(
+            "False",
+            "Draining",
+            &format!(
+                "{} runs, {} faults and {} webhook deliveries live, or a fault still holds its lease",
+                state.live_runs, state.faults_in_flight, state.webhooks_in_flight
+            ),
+        ),
+        // Kept while Active too, so the next pass tries the lift again.
+        (_, Some(Err(unknown))) => set("False", unknown.reason, &unknown.message),
+        (Mode::Drain, None) => {}
+    }
+}
+
+/// Whether a stale pod must wait: under Drain, until the backend says nothing is live.
+#[must_use]
+pub fn held(mode: Mode, drain: Option<&Result<Drain, Unknown>>) -> bool {
+    mode == Mode::Drain && !matches!(drain, Some(Ok(state)) if state.drained)
+}
+
+/// The pod, when it runs a revision the `StatefulSet` no longer asks for. With `OnDelete` it
+/// stays until the operator deletes it.
+async fn stale_pod(
+    ctx: &Context,
+    namespace: &str,
+    set: &StatefulSet,
+) -> Result<Option<Pod>, kube::Error> {
+    let observed = set.status.clone().unwrap_or_default();
+    let Some(update) = observed
+        .update_revision
+        .filter(|_| observed.observed_generation == set.metadata.generation)
+    else {
+        return Ok(None);
+    };
+    let pods = Api::<Pod>::namespaced(ctx.client.clone(), namespace);
+    let pod = pods.get_opt(&format!("{}-0", set.name_any())).await?;
+    Ok(pod.filter(|pod| stale(pod, &update)))
+}
+
+#[must_use]
+pub fn stale(pod: &Pod, update_revision: &str) -> bool {
+    pod.metadata.deletion_timestamp.is_none()
+        && pod
+            .labels()
+            .get(REVISION)
+            .is_some_and(|revision| revision != update_revision)
+}
+
+/// Deletes that pod and no other: a pod recreated since the read keeps running.
+async fn replace(ctx: &Context, namespace: &str, pod: &Pod) -> Result<(), kube::Error> {
+    let pods = Api::<Pod>::namespaced(ctx.client.clone(), namespace);
+    let params = DeleteParams {
+        preconditions: Some(Preconditions {
+            uid: pod.uid(),
+            resource_version: None,
+        }),
+        ..DeleteParams::default()
+    };
+    match pods.delete(&pod.name_any(), &params).await {
+        Ok(_) => Ok(()),
+        Err(kube::Error::Api(response)) if matches!(response.code, 404 | 409) => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -330,6 +597,8 @@ pub fn objects(kates: &Kates, bound: bool) -> Objects {
             "spec": {
                 "replicas": 1,
                 "serviceName": peers,
+                // The operator replaces the pod, once a drain allows it.
+                "updateStrategy": {"type": "OnDelete"},
                 "selector": {"matchLabels": selector},
                 "template": {
                     "metadata": {"labels": labels},
@@ -433,9 +702,10 @@ pub fn env(spec: &KatesSpec, bound: bool) -> Vec<Value> {
 /// resource asks for now, so a roll in progress is not Ready.
 pub fn observe(kates: &Kates, set: &StatefulSet, status: &mut KatesStatus, now: Timestamp) {
     let observed = set.status.clone().unwrap_or_default();
+    // Not currentRevision: under OnDelete the StatefulSet never moves it.
     let rolled_out = observed.observed_generation == set.metadata.generation
         && observed.update_revision.is_some()
-        && observed.update_revision == observed.current_revision;
+        && observed.updated_replicas.unwrap_or(0) >= 1;
     status.ready_replicas = observed.ready_replicas.unwrap_or(0);
     status.observed_generation = kates.metadata.generation;
     let (value, reason, message) = match (rolled_out, status.ready_replicas > 0) {
@@ -637,6 +907,96 @@ mod tests {
         assert!(!controlled_by(&[owner("uid", None)], "uid"));
     }
 
+    fn state(drained: bool) -> Drain {
+        Drain {
+            draining: true,
+            drained,
+            live_runs: u32::from(!drained),
+            faults_in_flight: 0,
+            webhooks_in_flight: 0,
+        }
+    }
+
+    #[test]
+    fn a_stale_pod_waits_for_the_drain_only_under_drain() {
+        let busy = Some(Ok(state(false)));
+        let done = Some(Ok(state(true)));
+        let unknown = Some(Err(refused(&kates_client::Error::InvalidKey)));
+        assert!(held(Mode::Drain, busy.as_ref()));
+        assert!(held(Mode::Drain, unknown.as_ref()));
+        assert!(held(Mode::Drain, None));
+        assert!(!held(Mode::Drain, done.as_ref()));
+        // Active replaces at once, as a RollingUpdate did.
+        assert!(!held(Mode::Active, busy.as_ref()));
+        assert!(!held(Mode::Active, None));
+    }
+
+    #[test]
+    fn drained_reports_the_backend_and_goes_once_a_drain_is_lifted() {
+        let mark = |mode: Mode, drain: Option<Result<Drain, Unknown>>, status: &mut KatesStatus| {
+            let mut kates = kates(json!({}));
+            kates.spec.mode = mode;
+            mark_drain(&kates, drain.as_ref(), status, Timestamp::UNIX_EPOCH);
+            status::find(&status.conditions, DRAINED).map(|c| (c.status.clone(), c.reason.clone()))
+        };
+        let mut status = KatesStatus::default();
+        let busy = mark(Mode::Drain, Some(Ok(state(false))), &mut status);
+        assert_eq!(busy, Some(("False".into(), "Draining".into())));
+        let done = mark(Mode::Drain, Some(Ok(state(true))), &mut status);
+        assert_eq!(done, Some(("True".into(), "Drained".into())));
+        // A failed lift keeps the condition, so the next pass calls the backend again.
+        let unreachable = kates_client::Error::Unavailable {
+            status: None,
+            api_message: None,
+            detail: "refused".into(),
+        };
+        let failed = mark(Mode::Active, Some(Err(refused(&unreachable))), &mut status);
+        assert_eq!(failed, Some(("False".into(), "Unavailable".into())));
+        assert_eq!(
+            mark(Mode::Active, Some(Ok(state(false))), &mut status),
+            None
+        );
+    }
+
+    #[test]
+    fn an_old_backend_is_told_apart_from_a_refused_key_and_an_outage() {
+        let rejected = kates_client::Error::Rejected {
+            status: 404,
+            message: String::new(),
+            field_errors: std::collections::BTreeMap::new(),
+        };
+        let old = refused(&rejected);
+        assert_eq!((old.reason, old.retry), ("DrainUnsupported", false));
+        let key = refused(&kates_client::Error::MissingScope);
+        assert_eq!((key.reason, key.retry), ("KeyRefused", false));
+        let down = refused(&kates_client::Error::Unavailable {
+            status: Some(503),
+            api_message: None,
+            detail: String::new(),
+        });
+        assert_eq!((down.reason, down.retry), ("Unavailable", true));
+    }
+
+    #[test]
+    fn only_a_live_pod_on_another_revision_is_stale() {
+        let pod = |revision: &str, deleting: bool| {
+            let mut pod = Pod::default();
+            pod.metadata.labels = Some([(REVISION.to_owned(), revision.to_owned())].into());
+            if deleting {
+                pod.metadata.deletion_timestamp = Some(
+                    k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(Timestamp::UNIX_EPOCH),
+                );
+            }
+            pod
+        };
+        assert!(stale(&pod("old", false), "new"));
+        assert!(!stale(&pod("new", false), "new"));
+        assert!(!stale(&pod("old", true), "new"));
+        assert!(!stale(&Pod::default(), "new"));
+        let set = objects(&kates(json!({})), true).set;
+        assert_eq!(set["spec"]["updateStrategy"]["type"], "OnDelete");
+    }
+
     #[test]
     fn ready_needs_a_ready_pod_on_the_revision_asked_for() {
         let observe = |status: StatefulSetStatus| {
@@ -653,6 +1013,7 @@ mod tests {
             current_revision: Some(current.to_owned()),
             update_revision: Some(update.to_owned()),
             ready_replicas: Some(ready),
+            updated_replicas: Some(i32::from(current == update)),
             ..StatefulSetStatus::default()
         };
         let running = observe(revision("a", "a", 1));

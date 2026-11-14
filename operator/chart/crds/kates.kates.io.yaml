@@ -17,6 +17,12 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
       type: string
+    - jsonPath: .spec.mode
+      name: Mode
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Drained')].status
+      name: Drained
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -29,7 +35,9 @@ spec:
             description: One Kates backend, installed and kept running by the operator.
             properties:
               apiKeySecretRef:
-                description: The Secret holding the API key. Without it the API asks for no key.
+                description: |-
+                  The Secret holding the API key. Without it the API asks for no key. The operator reads it
+                  to drain the backend, and its chart lets it read only a Secret named kates-api-key.
                 nullable: true
                 properties:
                   key:
@@ -227,6 +235,16 @@ spec:
                 required:
                 - bootstrapServers
                 type: object
+              mode:
+                default: Active
+                description: |-
+                  Drain: the backend starts no new run or fault and lets the live ones finish, and a pod
+                  whose version changed is replaced only once nothing is live. The operator never sets it
+                  back to Active.
+                enum:
+                - Active
+                - Drain
+                type: string
               resources:
                 description: ResourceRequirements describes the compute resource requirements.
                 nullable: true

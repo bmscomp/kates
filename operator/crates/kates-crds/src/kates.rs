@@ -21,6 +21,8 @@ use serde::{Deserialize, Serialize};
         .message("name must start with a letter and hold at most 52 lower-case letters, digits and -: it names the Service and the pods"),
     printcolumn = r#"{"name":"Version","type":"string","jsonPath":".status.version"}"#,
     printcolumn = r#"{"name":"Ready","type":"string","jsonPath":".status.conditions[?(@.type=='Ready')].status"}"#,
+    printcolumn = r#"{"name":"Mode","type":"string","jsonPath":".spec.mode"}"#,
+    printcolumn = r#"{"name":"Drained","type":"string","jsonPath":".status.conditions[?(@.type=='Drained')].status"}"#,
     printcolumn = r#"{"name":"Age","type":"date","jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")]
@@ -28,12 +30,18 @@ pub struct KatesSpec {
     /// The image tag to run, such as 1.39.1 or 1.39.1-native.
     #[schemars(length(min = 1, max = 128))]
     pub version: String,
+    /// Drain: the backend starts no new run or fault and lets the live ones finish, and a pod
+    /// whose version changed is replaced only once nothing is live. The operator never sets it
+    /// back to Active.
+    #[serde(default)]
+    pub mode: Mode,
     /// The image repository. Empty: ghcr.io/bmscomp/kates.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
     pub database: Database,
     pub kafka: Kafka,
-    /// The Secret holding the API key. Without it the API asks for no key.
+    /// The Secret holding the API key. Without it the API asks for no key. The operator reads it
+    /// to drain the backend, and its chart lets it read only a Secret named kates-api-key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key_secret_ref: Option<SecretKey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -48,6 +56,13 @@ pub struct KatesSpec {
     #[x_kube(merge_strategy = ListMerge::Map(vec!["name".into()]))]
     #[schemars(length(max = 256))]
     pub env: Vec<EnvVar>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Mode {
+    #[default]
+    Active,
+    Drain,
 }
 
 /// The `PostgreSQL` database Kates stores its results in. The operator does not create it.

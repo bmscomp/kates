@@ -63,10 +63,15 @@ imagePullSecrets:
 - apiGroups: ["events.k8s.io"]
   resources: ["events"]
   verbs: ["create", "patch"]
+{{- /* Under OnDelete the operator replaces a Kates pod itself, once a drain allows it. */}}
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "delete"]
+{{- /* kates-api-key: the one key Secret it reads, to set /api/drain. */}}
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["get"]
-  resourceNames: ["kates-connection"]
+  resourceNames: ["kates-connection", "kates-api-key"]
 {{- end -}}
 
 {{- define "kates-operator.podSecurityContext" -}}

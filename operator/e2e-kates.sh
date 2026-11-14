@@ -7,6 +7,10 @@
 # On the stack operator/e2e-stack.sh leaves, in a namespace the operator
 # watches. It brings its own PostgreSQL, and reads the Kafka settings from the
 # Helm-installed Kates, so both backends talk to the same brokers.
+#
+# KATES_IMAGE and KATES_TAG pick the image (default: the chart's release, native), and
+# KATES_NEXT_TAG the version the Drain check moves to (default: the first one with -next, a tag
+# the nodes must already hold; CI loads one).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -60,6 +64,7 @@ kind: Kates
 metadata: {name: $name}
 spec:
   version: "${KATES_TAG:-$tag-native}"
+  ${KATES_IMAGE:+image: $KATES_IMAGE}
   database: {secretRef: {name: $name-db}}
   kafka:
     bootstrapServers: "$(helm_kates KATES_KAFKA_BOOTSTRAP_SERVERS)"
@@ -84,11 +89,17 @@ check "the pod's account is bound to the backend role" "kates-backend-kates-oper
   "$(kubectl get clusterrolebinding "$binding" -o jsonpath='{.roleRef.name} {.subjects[0].kind}/{.subjects[0].name}')"
 
 echo "== the API answers and runs a test"
-"${k[@]}" port-forward "service/$name" 18099:8080 >/dev/null 2>&1 &
-forward=$!
-trap 'kill $forward 2>/dev/null' EXIT
 api=http://localhost:18099
-for _ in $(seq 1 15); do curl -sf "$api/q/health/ready" >/dev/null && break; sleep 1; done
+forward=
+# A port-forward ends with its pod, so a replaced pod needs a new one.
+connect() {
+  [ -n "$forward" ] && kill "$forward" 2>/dev/null
+  "${k[@]}" port-forward "service/$name" 18099:8080 >/dev/null 2>&1 &
+  forward=$!
+  for _ in $(seq 1 15); do curl -sf "$api/q/health/ready" >/dev/null && break; sleep 1; done
+}
+trap 'kill $forward 2>/dev/null' EXIT
+connect
 check "GET /api/health" 200 "$(curl -s -o /dev/null -w '%{http_code}' "$api/api/health")"
 id=$(curl -s -X POST "$api/api/tests" -H 'Content-Type: application/json' \
   -d '{"type":"LOAD","spec":{"numRecords":2000,"recordSize":128,"replicationFactor":1,"minInsyncReplicas":1}}' | sed -nE 's/.*"id":"([^"]+)".*/\1/p')
@@ -127,6 +138,35 @@ echo "== a pod that dies comes back"
 "${k[@]}" delete pod "$name-0" --wait=false >/dev/null
 "${k[@]}" wait --for=condition=Ready=false "kates/$name" --timeout=60s >/dev/null && pass "not Ready meanwhile" || fail "stayed Ready"
 "${k[@]}" wait --for=condition=Ready "kates/$name" --timeout=4m >/dev/null && pass "Ready again" || fail "did not come back"
+
+echo "== a version change under Drain waits for the live run"
+next=${KATES_NEXT_TAG:-${KATES_TAG:-$tag-native}-next}
+connect
+uid=$("${k[@]}" get pod "$name-0" -o jsonpath='{.metadata.uid}')
+# About 40 s at 1000 records a second: still live when the version changes.
+id=$(curl -s -X POST "$api/api/tests" -H 'Content-Type: application/json' \
+  -d '{"type":"LOAD","spec":{"numRecords":40000,"throughput":1000,"recordSize":128,"replicationFactor":1,"minInsyncReplicas":1}}' | sed -nE 's/.*"id":"([^"]+)".*/\1/p')
+[ -n "$id" ] && pass "run $id started" || fail "no run started"
+"${k[@]}" patch kates "$name" --type merge -p "{\"spec\":{\"mode\":\"Drain\",\"version\":\"$next\"}}" >/dev/null
+"${k[@]}" wait --for=jsonpath='{.status.conditions[?(@.type=="Drained")].reason}'=Draining "kates/$name" --timeout=60s >/dev/null \
+  && pass "Drained is False while the run is live" || fail "no Draining condition"
+check "a new run is refused" 503 "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$api/api/tests" -H 'Content-Type: application/json' \
+  -d '{"type":"LOAD","spec":{"numRecords":10,"replicationFactor":1,"minInsyncReplicas":1}}')"
+check "Ready waits for the drain" RollingOut \
+  "$("${k[@]}" get kates "$name" -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}')"
+check "the run is still live" RUNNING "$(curl -s "$api/api/tests/$id" | sed -nE 's/.*"status":"([A-Z]+)".*/\1/p')"
+check "the pod is the same one" "$uid" "$("${k[@]}" get pod "$name-0" -o jsonpath='{.metadata.uid}')"
+"${k[@]}" wait --for=jsonpath='{.status.version}'="$next" "kates/$name" --timeout=6m >/dev/null \
+  && pass "running $next" || fail "never reached $next"
+"${k[@]}" wait --for=condition=Drained "kates/$name" --timeout=2m >/dev/null && pass "the new pod is drained too" || fail "the new pod is not drained"
+connect
+check "the run finished before the pod went" DONE "$(curl -s "$api/api/tests/$id" | sed -nE 's/.*"status":"([A-Z]+)".*/\1/p')"
+check "the new pod refuses runs" true "$(curl -s "$api/api/drain" | jq -r .draining)"
+"${k[@]}" patch kates "$name" --type merge -p '{"spec":{"mode":"Active"}}' >/dev/null
+drained() { "${k[@]}" get kates "$name" -o jsonpath='{.status.conditions[?(@.type=="Drained")].status}'; }
+for _ in $(seq 1 30); do [ -z "$(drained)" ] && break; sleep 2; done
+check "Active removes Drained" "" "$(drained)"
+check "the drain is lifted" false "$(curl -s "$api/api/drain" | jq -r .draining)"
 
 echo "== a name already taken is left alone"
 taken=taken-$(date +%s)
