@@ -1,3 +1,5 @@
+# Deprecated: this kind goes in kates-operator 0.3.0. The chart README's
+# "Replacing the run kinds" shows the CronJob that replaces it.
 apiVersion: kates.io/v1alpha1
 kind: KafkaCompliance
 metadata:

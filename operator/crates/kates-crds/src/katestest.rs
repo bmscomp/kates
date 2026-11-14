@@ -15,6 +15,7 @@ use crate::wire;
     namespaced,
     status = "KatesTestStatus",
     doc = "One Kates run. crd-version: 1",
+    deprecated = "kates.io/v1alpha1 KatesTest is deprecated and goes in kates-operator 0.3.0: run kates test apply from a CronJob instead",
     cel,
     validation = Rule::new("has(self.spec.spec) != has(self.spec.scenario)")
         .message("exactly one of spec.spec and spec.scenario is required"),

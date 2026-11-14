@@ -13,6 +13,7 @@ use serde_json::Value;
     namespaced,
     status = "KafkaComplianceStatus",
     doc = "A standing compliance check of one Kafka. crd-version: 1",
+    deprecated = "kates.io/v1alpha1 KafkaCompliance is deprecated and goes in kates-operator 0.3.0: run kates compliance check from a CronJob instead",
     cel,
     validation = Rule::new("self.metadata.name.matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$')")
         .message("name must be a DNS label (at most 63 lower-case letters, digits and -): it names the stored compliance check"),
