@@ -1,7 +1,9 @@
 package com.bmscomp.kates.chaos;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -42,7 +44,7 @@ public class CompoundChaosOrchestrator {
      *         outside the chaos limits; no fault is triggered then
      */
     public CompoundOutcome executeConcurrent(List<CompoundFault> faults, int timeoutSec) {
-        checkLimits(faults);
+        checkLimits(faults, Map.of("timeoutSec", timeoutSec));
         List<CompletableFuture<ProviderOutcome>> futures = new ArrayList<>();
 
         for (CompoundFault fault : faults) {
@@ -105,7 +107,7 @@ public class CompoundChaosOrchestrator {
      *         outside the chaos limits; no fault is triggered then
      */
     public CompoundOutcome executeSequential(List<CompoundFault> faults, int delayBetweenSec) {
-        checkLimits(faults);
+        checkLimits(faults, Map.of("delayBetweenSec", delayBetweenSec));
         List<ProviderOutcome> results = new ArrayList<>();
         boolean allOk = true;
 
@@ -180,7 +182,18 @@ public class CompoundChaosOrchestrator {
      * the safety guard, and holds the disruption lease while the faults run.
      */
     public void checkLimits(List<CompoundFault> faults) {
+        checkLimits(faults, Map.of());
+    }
+
+    /**
+     * {@link #checkLimits(List)}, and the run's own waits too, by name: the
+     * lease is held through them.
+     */
+    public void checkLimits(List<CompoundFault> faults, Map<String, Integer> waits) {
         List<String> refused = new ArrayList<>();
+        Map<String, String> badWaits = new LinkedHashMap<>();
+        waits.forEach((field, seconds) -> limits.checkWait(badWaits, field, seconds));
+        badWaits.forEach((field, why) -> refused.add(field + " " + why));
         for (int i = 0; i < faults.size(); i++) {
             String path = "faults[" + i + "].faultSpec";
             FaultSpec spec = faults.get(i).spec();

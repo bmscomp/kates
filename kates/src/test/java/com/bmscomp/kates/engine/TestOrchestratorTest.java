@@ -205,13 +205,20 @@ class TestOrchestratorTest {
             assertEquals(500000, tasks.get(1).getMaxMessages());
         }
 
+        /** The consumer's too: its MB/s is records times this, and it read every run as 1 KiB records. */
         @Test
         void recordSizeMatchesSpec() {
             TestSpec spec = specWith(1000, 1);
             spec.setRecordSize(2048);
-            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.LOAD, spec, "run-1");
+            for (TestType type : List.of(TestType.LOAD, TestType.ENDURANCE)) {
+                List<BenchmarkTask> tasks = orchestrator.buildTasks(type, spec, "run-1");
 
-            assertEquals(2048, tasks.get(0).getRecordSize());
+                assertEquals(BenchmarkTask.WorkloadType.CONSUME, tasks.get(1).getWorkloadType(), type.name());
+                assertEquals(
+                        List.of(2048, 2048),
+                        tasks.stream().map(BenchmarkTask::getRecordSize).toList(),
+                        type.name());
+            }
         }
     }
 

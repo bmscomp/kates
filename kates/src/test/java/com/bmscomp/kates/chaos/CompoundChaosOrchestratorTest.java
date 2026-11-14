@@ -64,6 +64,24 @@ class CompoundChaosOrchestratorTest {
         assertEquals(List.of(), triggered, "the pod kill listed first did not go in either");
     }
 
+    /** The lease is held through these waits, and nothing ends one early. */
+    @Test
+    void aWaitPastTheLimitStopsTheRunBeforeAnyFaultGoesIn() {
+        List<CompoundFault> faults = List.of(fault(KILL));
+
+        IllegalArgumentException concurrent =
+                assertThrows(IllegalArgumentException.class, () -> orchestrator.executeConcurrent(faults, 360_000));
+        IllegalArgumentException sequential =
+                assertThrows(IllegalArgumentException.class, () -> orchestrator.executeSequential(faults, -5));
+
+        assertEquals(
+                "No fault was triggered: timeoutSec 360000 is above the limit of 3600"
+                        + " (kates.chaos.limits.max-duration-sec)",
+                concurrent.getMessage());
+        assertEquals("No fault was triggered: delayBetweenSec -5 is below 0", sequential.getMessage());
+        assertTrue(triggered.isEmpty(), triggered.toString());
+    }
+
     @Test
     void aFaultWithoutASpecIsRefusedByItsPlace() {
         List<CompoundFault> faults = new ArrayList<>();

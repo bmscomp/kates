@@ -24,7 +24,9 @@ public final class DisruptionDtos {
     public static class CreateDisruptionScheduleRequest {
         public String name;
         public String cronExpression;
-        public boolean enabled = true;
+        // Absent on a PUT means "leave it": a rename must not re-arm a disabled
+        // fault schedule. Absent on a POST means enabled.
+        public Boolean enabled;
         public String playbookName;
         public DisruptionPlan plan;
     }

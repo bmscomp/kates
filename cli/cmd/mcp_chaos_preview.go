@@ -52,7 +52,7 @@ const (
 	mcpDefaultFaultLabel     = "strimzi.io/component-type=kafka"
 
 	// mcpRandomSelectionSuffix marks the pod a dry run shows for a step that
-	// picks one at random (DisruptionSafetyGuard.java:464).
+	// picks one at random (DisruptionSafetyGuard.java:533).
 	mcpRandomSelectionSuffix = " (random selection)"
 
 	mcpPreviewMaxPods     = 50
@@ -574,7 +574,7 @@ func mcpRunPreview(ctx context.Context, call *mcpCall, in mcpPreviewIn, adHoc []
 
 // mcpPreviewSteps describes each step the dry run returned, joined by
 // position with the plan's own steps (the dry run walks them in order,
-// DisruptionSafetyGuard.java:243-305), and gathers the controllers they hit.
+// DisruptionSafetyGuard.java:248-310), and gathers the controllers they hit.
 func mcpPreviewSteps(call *mcpCall, dry []client.StepPreview, view *mcpPlanView, ctrl *mcpKRaftControllerIndex) ([]mcpPreviewStep, mcpPreviewControllers) {
 	summary := ctrl.summary()
 	touched := map[string]bool{}
@@ -603,7 +603,7 @@ func mcpPreviewSteps(call *mcpCall, dry []client.StepPreview, view *mcpPlanView,
 }
 
 // mcpDryRunNamespaceRE finds the namespace the dry run names when a step hits
-// nothing there (DisruptionSafetyGuard.java:264-268): the one it reads Kafka
+// nothing there (DisruptionSafetyGuard.java:269-273): the one it reads Kafka
 // pods from, kates.chaos.kafka.namespace. The warning ends with it, after the
 // step's label, so the last match is the one.
 var mcpDryRunNamespaceRE = regexp.MustCompile(`no broker(?: pod)? in namespace '([^']*)'`)
@@ -614,7 +614,7 @@ var mcpDryRunNamespaceRE = regexp.MustCompile(`no broker(?: pod)? in namespace '
 // other one the guard lets it target, acts there when it runs. A step that
 // leaves targetNamespace out is in kates.chaos.kafka.namespace, the FaultSpec
 // default and the namespace the dry run reads, so never in another. A named
-// pod is previewed whatever its namespace (DisruptionSafetyGuard.java:436-446).
+// pod is previewed whatever its namespace (DisruptionSafetyGuard.java:505-515).
 // The dry run names its namespace in its warning; when that text cannot be
 // read, the topology's namespace (kates.topology.kafka-namespace) stands in:
 // a setting apart from the dry run's, but "kafka" by default for both, and the
@@ -743,7 +743,7 @@ func mcpPreviewStepFrom(call *mcpCall, ds client.StepPreview, fs *mcpFaultSpecVi
 // PodTargets.mode applies (chaos/PodTargets.java:40-51) after the orchestrator
 // has turned a targetTopic into the partition leader's broker id
 // (DisruptionOrchestrator.java:253-261). SCALE_DOWN picks node pools instead
-// (DisruptionSafetyGuard.java:428-434).
+// (DisruptionSafetyGuard.java:497-503).
 func mcpTargetingOf(fs *mcpFaultSpecView) string {
 	switch {
 	case fs == nil:
