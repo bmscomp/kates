@@ -124,8 +124,8 @@ public class KubernetesChaosProvider implements ChaosProvider {
             case ROLLING_RESTART -> executeRollingRestart(spec);
             case SCALE_DOWN -> executeScaleDown(spec);
             case LEADER_ELECTION -> executePodKill(spec);
-            case CPU_STRESS -> executeCpuStress(spec);
-            case IO_STRESS -> executeIoStress(spec);
+            case CPU_STRESS -> executeCpuStress(spec, engineName);
+            case IO_STRESS -> executeIoStress(spec, engineName);
             default ->
                 throw new UnsupportedOperationException(
                         "DisruptionType " + spec.disruptionType() + " not supported by kubernetes provider");
@@ -506,13 +506,19 @@ public class KubernetesChaosProvider implements ChaosProvider {
         return true;
     }
 
-    private void executeCpuStress(FaultSpec spec) {
+    /**
+     * Adds a stress container to each target pod, then waits out
+     * {@code chaosDurationSec}, as the partition does: the stress runs that
+     * long, and a fault reported done before then ended its plan, and released
+     * its lease, while the pods were still under it.
+     */
+    private void executeCpuStress(FaultSpec spec, String engineName) throws InterruptedException {
         for (String podName : PodTargets.resolve(client, spec)) {
             LOG.info("CPU_STRESS: injecting stress-ng ephemeral container into " + podName);
             injectEphemeralContainer(
                     spec.targetNamespace(),
                     podName,
-                    "chaos-cpu-stress",
+                    stressContainerName("chaos-cpu-stress", engineName),
                     stressImage,
                     "stress",
                     "--cpu",
@@ -520,15 +526,17 @@ public class KubernetesChaosProvider implements ChaosProvider {
                     "--timeout",
                     spec.chaosDurationSec() + "s");
         }
+        Thread.sleep(Math.max(0, spec.chaosDurationSec()) * 1000L);
     }
 
-    private void executeIoStress(FaultSpec spec) {
+    /** As {@link #executeCpuStress}, with IO workers. */
+    private void executeIoStress(FaultSpec spec, String engineName) throws InterruptedException {
         for (String podName : PodTargets.resolve(client, spec)) {
             LOG.info("IO_STRESS: injecting stress-ng ephemeral container into " + podName);
             injectEphemeralContainer(
                     spec.targetNamespace(),
                     podName,
-                    "chaos-io-stress",
+                    stressContainerName("chaos-io-stress", engineName),
                     stressImage,
                     "stress",
                     "--io",
@@ -536,6 +544,17 @@ public class KubernetesChaosProvider implements ChaosProvider {
                     "--timeout",
                     spec.chaosDurationSec() + "s");
         }
+        Thread.sleep(Math.max(0, spec.chaosDurationSec()) * 1000L);
+    }
+
+    /**
+     * An ephemeral container is never removed, and a pod refuses a second one
+     * of the same name, so each fault names its own: the prefix and the engine
+     * id's timestamp. Not the whole engine id, whose experiment name is free
+     * text and a container name a DNS label.
+     */
+    static String stressContainerName(String prefix, String engineName) {
+        return prefix + "-" + engineName.substring(engineName.lastIndexOf('-') + 1);
     }
 
     static final String DEFAULT_STRESS_IMAGE = "docker.io/polinux/stress:1.0.4";
