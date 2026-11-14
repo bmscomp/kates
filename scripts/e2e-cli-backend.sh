@@ -31,8 +31,10 @@ kubectl -n kates port-forward svc/kates 18080:8080 >"$work/port-forward.log" 2>&
 forward=$!
 trap 'kill "$forward" 2>/dev/null || true; rm -rf "$work"' EXIT
 
-# The CLI reads no config file of the runner's: only these.
-export HOME=$work KATES_URL=http://127.0.0.1:18080
+# The CLI reads no config file of the runner's: only these, and HOME=$work
+# for each CLI call (check below), not for kubectl, which finds its
+# kubeconfig through HOME on a runner.
+export KATES_URL=http://127.0.0.1:18080
 KATES_API_KEY=$(kubectl -n kates get secret kates-api-key -o jsonpath='{.data.api-key}' | base64 -d)
 export KATES_API_KEY
 for _ in $(seq 60); do
@@ -46,7 +48,7 @@ check() {
   local want=$1 what=$2
   shift 2
   set +e
-  out=$("$@" 2>&1)
+  out=$(HOME="$work" "$@" 2>&1)
   local got=$?
   set -e
   if [ "$got" = "$want" ]; then
