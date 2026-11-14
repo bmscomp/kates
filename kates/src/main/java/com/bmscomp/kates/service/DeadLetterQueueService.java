@@ -85,7 +85,7 @@ public class DeadLetterQueueService {
      * Polls the DLQ topic every 30 seconds and processes any dead-lettered
      * messages.
      */
-    @Scheduled(every = "30s", identity = "dlq-poller")
+    @Scheduled(every = "30s", identity = "dlq-poller", skipExecutionIf = Scheduled.ApplicationNotRunning.class)
     void pollDlq() {
         if (!running || consumer == null) return;
 
@@ -107,6 +107,10 @@ public class DeadLetterQueueService {
             });
 
             consumer.commitSync(Duration.ofSeconds(5));
+        } catch (org.apache.kafka.common.errors.InterruptException e) {
+            // Shutdown interrupts a poll in flight: expected, not a failure.
+            Thread.currentThread().interrupt();
+            LOG.debug("DLQ poll interrupted", e);
         } catch (Exception e) {
             LOG.error("DLQ poll failed", e);
         }
