@@ -632,7 +632,7 @@ Recovery time objective: how long recovery from a failure may take [@swanson2010
 
 ### Safety Guard {#gl-safety-guard}
 
-The check Kates runs on a disruption plan before any fault, and on a compound or resilience run before it starts. It refuses the run when a step targets a namespace other than the Kafka cluster's and the Kates API's own, when no broker pod matches, when a plan's steps would hit more brokers than `maxAffectedBrokers`, or when no broker would be left untouched. Before each step's fault, a plan also requires every Kafka pod, controllers included, to be Running and Ready; a resilience run's fault gets no such check. It never counts controllers and doesn't check under-replicated partitions or the KRaft quorum. See [Chaos Engineering in Practice](07-chaos-practice.md#safety-guardrails).
+The check Kates runs on a disruption plan before any fault, and on a compound or resilience run before it starts. It refuses the run when a step targets a namespace other than the Kafka cluster's and the Kates API's own, when a step may hit a pod of the Kates API's own Helm release, when no broker pod matches, when a plan's steps would hit more brokers than `maxAffectedBrokers`, or when no broker would be left untouched. Before each step's fault, a plan also requires every Kafka pod, controllers included, to be Running and Ready; a resilience run's fault gets no such check. It never counts controllers and doesn't check under-replicated partitions or the KRaft quorum. See [Chaos Engineering in Practice](07-chaos-practice.md#safety-guardrails).
 
 ### Saturation Point {#gl-saturation-point}
 

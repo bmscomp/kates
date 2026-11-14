@@ -149,6 +149,9 @@ public class DisruptionSafetyGuard {
                 errors.add("Step '" + t.step().name() + "': targetNamespace " + namespace + " is neither "
                         + kafkaNamespace + ", the Kafka cluster's namespace (kates.chaos.kafka.namespace), nor the"
                         + " Kates API's own" + (katesNamespace != null ? ", " + katesNamespace : ""));
+            } else {
+                katesPodsRefusal(t.spec(), katesNamespace)
+                        .ifPresent(why -> errors.add("Step '" + t.step().name() + "': " + why));
             }
         }
 
@@ -421,6 +424,70 @@ public class DisruptionSafetyGuard {
      *
      * @throws IllegalArgumentException when {@code targetLabel} is not a valid selector
      */
+    /**
+     * Why a step is refused for the pods of the Kates API's own Helm release it
+     * may hit: its own pod, and every pod sharing that pod's
+     * {@code app.kubernetes.io/instance} label, such as the bundled PostgreSQL.
+     * A partition of the Kates pod cuts it off from the Kubernetes API, so it
+     * can never remove the policy, and a pod that replaces it carries the same
+     * labels; a kill of it or of its database ends the run it is driving.
+     * Empty when the step is not in the Kates API's namespace, or the Kates API
+     * is not in a pod (dev mode), which is all a drain or a scale-down needs:
+     * {@link com.bmscomp.kates.chaos.KatesNode} keeps drains off its node.
+     */
+    private Optional<String> katesPodsRefusal(FaultSpec spec, String katesNamespace) {
+        String namespace = spec.targetNamespace() != null ? spec.targetNamespace() : kafkaNamespace;
+        String self = katesNode != null ? katesNode.podName() : null;
+        if (self == null
+                || self.isBlank()
+                || !namespace.equals(katesNamespace)
+                || drainsANode(spec)
+                || spec.disruptionType() == DisruptionType.SCALE_DOWN) {
+            return Optional.empty();
+        }
+        List<Pod> pods;
+        try {
+            pods = kubeClient.pods().inNamespace(namespace).list().getItems();
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            return Optional.of("the pods of namespace " + namespace + ", where the Kates API runs, could not be listed"
+                    + " to keep the step off the Kates API's own: " + e.getMessage());
+        }
+        String release = pods.stream()
+                .filter(p -> p.getMetadata().getName().equals(self))
+                .findFirst()
+                .map(p -> labelsOf(p).get(KATES_RELEASE_LABEL))
+                .orElse(null);
+        Set<String> own = new HashSet<>(Set.of(self));
+        pods.stream()
+                .filter(p -> release != null && release.equals(labelsOf(p).get(KATES_RELEASE_LABEL)))
+                .forEach(p -> own.add(p.getMetadata().getName()));
+
+        List<Pod> matching = List.of();
+        if (spec.targetLabel() != null && !spec.targetLabel().isBlank()) {
+            ParsedLabelSelector selector = ParsedLabelSelector.parse(spec.targetLabel());
+            matching = pods.stream()
+                    .filter(p -> selector.matches(p.getMetadata().getLabels()))
+                    .toList();
+        }
+        // A random pick may land on any pod the selector matches.
+        List<String> mayHit = PodTargets.mode(spec) == PodTargets.Mode.ONE_RANDOM
+                ? matching.stream().map(p -> p.getMetadata().getName()).toList()
+                : PodTargets.select(spec, matching);
+        List<String> hit =
+                mayHit.stream().filter(own::contains).distinct().sorted().toList();
+        if (hit.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of("it may hit " + String.join(", ", hit) + ", of the Kates API's own release"
+                + (release != null ? " " + release : "") + " in namespace " + namespace + ", and Kates would lose"
+                + " the run it is driving or, under a network partition, the means to remove it");
+    }
+
+    private static Map<String, String> labelsOf(Pod pod) {
+        Map<String, String> labels = pod.getMetadata().getLabels();
+        return labels != null ? labels : Map.of();
+    }
+
     Impact impact(FaultSpec spec, List<Pod> kafkaPods) {
         if (drainsANode(spec)) {
             return drain(spec, kafkaPods).impact();
@@ -496,6 +563,9 @@ public class DisruptionSafetyGuard {
     /** The node the Kates API runs on, which a drain never takes. */
     @Inject
     com.bmscomp.kates.chaos.KatesNode katesNode;
+
+    /** The Helm release label, which every pod the Kates chart makes carries. */
+    static final String KATES_RELEASE_LABEL = "app.kubernetes.io/instance";
 
     /** The Litmus settings that pick the node a node-drain drains. */
     private static final String TARGET_NODE = "TARGET_NODE";

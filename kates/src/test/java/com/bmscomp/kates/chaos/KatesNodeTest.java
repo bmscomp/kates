@@ -21,7 +21,7 @@ class KatesNodeTest {
     private KatesNode inPod(String pod) {
         KatesNode node = new KatesNode() {
             @Override
-            String podName() {
+            public String podName() {
                 return pod;
             }
         };

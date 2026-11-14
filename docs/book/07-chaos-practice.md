@@ -556,6 +556,7 @@ A refused plan starts nothing. Over the API it returns `422` with status `REJECT
 | `Step '…': probes[N] is a cmdProbe, which a fault may not carry; …` | Drop the probe, or move it to a resilience run's top-level `probes` |
 | `Step '…': targetTopic isn't a Kafka topic name: …` | Name the topic, or a `DNS_ERROR`'s host, with letters, digits, `.`, `_` or `-` only |
 | `Step '…': targetNamespace … is neither …, the Kafka cluster's namespace (kates.chaos.kafka.namespace), nor the Kates API's own, …` | Aim the step at the Kafka cluster's namespace or the Kates API's own. No setting adds another |
+| `Step '…': it may hit …, of the Kates API's own release … in namespace …` | Narrow `targetLabel` or `targetPod` to pods outside the Kates release. A step never hits the Kates API's pod or another pod of its Helm release, such as the bundled PostgreSQL: a partition would cut Kates off from the Kubernetes API, so it could never remove the policy |
 | `Plan would affect N brokers but maxAffectedBrokers=M` | Narrow the selectors, or raise the limit if you mean it |
 | `Plan would affect ALL N brokers — cluster would lose availability` | Narrow the selectors: Kates never runs a plan that hits every broker |
 
