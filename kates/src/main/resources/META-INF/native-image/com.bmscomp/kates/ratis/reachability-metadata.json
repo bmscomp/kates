@@ -1,0 +1,433 @@
+{
+ "reflection": [
+  {
+   "type": "org.apache.ratis.grpc.GrpcFactory",
+   "methods": [
+    {
+     "name": "<init>",
+     "parameterTypes": [
+      "org.apache.ratis.conf.Parameters"
+     ]
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.server.DisabledDataStreamServerFactory",
+   "methods": [
+    {
+     "name": "<init>",
+     "parameterTypes": [
+      "org.apache.ratis.conf.Parameters"
+     ]
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.server.RaftServerMXBean"
+  },
+  {
+   "type": "org.apache.ratis.server.impl.RaftServerJmxAdapter"
+  },
+  {
+   "type": "org.apache.ratis.server.impl.ServerImplUtils",
+   "methods": [
+    {
+     "name": "newRaftServer",
+     "parameterTypes": [
+      "org.apache.ratis.protocol.RaftPeerId",
+      "org.apache.ratis.protocol.RaftGroup",
+      "org.apache.ratis.server.storage.RaftStorage$StartupOption",
+      "org.apache.ratis.statemachine.StateMachine$Registry",
+      "java.lang.ThreadGroup",
+      "org.apache.ratis.conf.RaftProperties",
+      "org.apache.ratis.conf.Parameters"
+     ]
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.com.codahale.metrics.jmx.JmxReporter$JmxCounter"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.com.codahale.metrics.jmx.JmxReporter$JmxCounterMBean"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.com.codahale.metrics.jmx.JmxReporter$JmxGauge"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.com.codahale.metrics.jmx.JmxReporter$JmxGaugeMBean"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.com.codahale.metrics.jmx.JmxReporter$JmxTimer"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.com.codahale.metrics.jmx.JmxReporter$JmxTimerMBean"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.com.google.common.util.concurrent.AbstractFutureState",
+   "fields": [
+    {
+     "name": "listenersField"
+    },
+    {
+     "name": "valueField"
+    },
+    {
+     "name": "waitersField"
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.com.google.common.util.concurrent.AbstractFutureState$Waiter",
+   "fields": [
+    {
+     "name": "next"
+    },
+    {
+     "name": "thread"
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.com.google.protobuf.ExtensionRegistry",
+   "methods": [
+    {
+     "name": "getEmptyRegistry",
+     "parameterTypes": []
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.census.InternalCensusStatsAccessor"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.census.InternalCensusTracingAccessor"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.internal.SerializingExecutor"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.netty.NettyServer$1"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.netty.NettyServerHandler"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.netty.ProtocolNegotiators$GrpcNegotiationHandler"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.netty.ProtocolNegotiators$ServerTlsHandler"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.netty.ProtocolNegotiators$WaitUntilActiveHandler"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.netty.WriteBufferingAndExceptionHandler"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.override.ContextStorageOverride"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.bootstrap.ServerBootstrap$1"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.bootstrap.ServerBootstrap$ServerBootstrapAcceptor"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.buffer.AbstractByteBufAllocator"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.buffer.AbstractReferenceCountedByteBuf",
+   "fields": [
+    {
+     "name": "refCnt"
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.channel.AbstractChannelHandlerContext"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.channel.ChannelOutboundBuffer"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.channel.DefaultChannelConfig"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.channel.DefaultChannelPipeline"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.channel.DefaultChannelPipeline$HeadContext"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.channel.DefaultChannelPipeline$TailContext"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.channel.DefaultFileRegion"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.channel.epoll.Epoll",
+   "methods": [
+    {
+     "name": "isAvailable",
+     "parameterTypes": []
+    },
+    {
+     "name": "unavailabilityCause",
+     "parameterTypes": []
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.channel.epoll.NativeDatagramPacketArray$NativeDatagramPacket"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.channel.unix.PeerCredentials"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.handler.ssl.SslHandler"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.util.AbstractReferenceCounted",
+   "fields": [
+    {
+     "name": "refCnt"
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.util.DefaultAttributeMap"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.util.Recycler$DefaultHandle"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.util.ReferenceCountUtil"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.util.ResourceLeakDetector$DefaultResourceLeak"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.util.concurrent.DefaultPromise"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.util.concurrent.SingleThreadEventExecutor"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.util.internal.NativeLibraryUtil",
+   "methods": [
+    {
+     "name": "loadLibrary",
+     "parameterTypes": [
+      "java.lang.String",
+      "boolean"
+     ]
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.util.internal.shaded.org.jctools.queues.BaseMpscLinkedArrayQueueColdProducerFields",
+   "fields": [
+    {
+     "name": "producerLimit"
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.util.internal.shaded.org.jctools.queues.BaseMpscLinkedArrayQueueConsumerFields",
+   "fields": [
+    {
+     "name": "consumerIndex"
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.util.internal.shaded.org.jctools.queues.BaseMpscLinkedArrayQueueProducerFields",
+   "fields": [
+    {
+     "name": "producerIndex"
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.util.internal.shaded.org.jctools.queues.unpadded.MpscUnpaddedArrayQueueConsumerIndexField",
+   "fields": [
+    {
+     "name": "consumerIndex"
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.util.internal.shaded.org.jctools.queues.unpadded.MpscUnpaddedArrayQueueProducerIndexField",
+   "fields": [
+    {
+     "name": "producerIndex"
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.util.internal.shaded.org.jctools.queues.unpadded.MpscUnpaddedArrayQueueProducerLimitField",
+   "fields": [
+    {
+     "name": "producerLimit"
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.perfmark.impl.SecretPerfMarkImpl$PerfMarkImpl"
+  },
+  {
+   "type": "org.apache.ratis.proto.RaftProtos$RaftPeerProto",
+   "methods": [
+    {
+     "name": "getAddress",
+     "parameterTypes": []
+    },
+    {
+     "name": "getAdminAddress",
+     "parameterTypes": []
+    },
+    {
+     "name": "getClientAddress",
+     "parameterTypes": []
+    },
+    {
+     "name": "getDataStreamAddress",
+     "parameterTypes": []
+    },
+    {
+     "name": "getId",
+     "parameterTypes": []
+    },
+    {
+     "name": "getPriority",
+     "parameterTypes": []
+    },
+    {
+     "name": "getStartupRoleValue",
+     "parameterTypes": []
+    },
+    {
+     "name": "hasStartupRole",
+     "parameterTypes": []
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.proto.RaftProtos$RaftPeerProto$Builder"
+  },
+  {
+   "type": "org.apache.ratis.proto.RaftProtos$RaftPeerRole"
+  },
+  {
+   "type": "org.apache.ratis.server.leader.LogAppenderDefault"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.internal.JndiResourceResolverFactory",
+   "methods": [
+    {
+     "name": "<init>",
+     "parameterTypes": []
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.netty.NettyClientHandler"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.netty.ProtocolNegotiators$ClientTlsHandler"
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.netty.channel.socket.nio.NioSocketChannel",
+   "methods": [
+    {
+     "name": "<init>",
+     "parameterTypes": []
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.metrics.impl.MetricRegistriesImpl",
+   "methods": [
+    {
+     "name": "<init>",
+     "parameterTypes": []
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.internal.DnsNameResolverProvider",
+   "methods": [
+    {
+     "name": "<init>",
+     "parameterTypes": []
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.netty.UdsNameResolverProvider",
+   "methods": [
+    {
+     "name": "<init>",
+     "parameterTypes": []
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.internal.PickFirstLoadBalancerProvider",
+   "methods": [
+    {
+     "name": "<init>",
+     "parameterTypes": []
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.util.OutlierDetectionLoadBalancerProvider",
+   "methods": [
+    {
+     "name": "<init>",
+     "parameterTypes": []
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.util.RandomSubsettingLoadBalancerProvider",
+   "methods": [
+    {
+     "name": "<init>",
+     "parameterTypes": []
+    }
+   ]
+  },
+  {
+   "type": "org.apache.ratis.thirdparty.io.grpc.util.SecretRoundRobinLoadBalancerProvider$Provider",
+   "methods": [
+    {
+     "name": "<init>",
+     "parameterTypes": []
+    }
+   ]
+  }
+ ],
+ "resources": [
+  {
+   "glob": "META-INF/native/liborg_apache_ratis_thirdparty_netty_tcnative_osx_aarch_64.dylib"
+  },
+  {
+   "glob": "META-INF/native/liborg_apache_ratis_thirdparty_netty_tcnative_osx_aarch_64.jnilib"
+  },
+  {
+   "glob": "META-INF/services/org.apache.ratis.metrics.MetricRegistries"
+  },
+  {
+   "glob": "ratis-version.properties"
+  },
+  {
+   "glob": "META-INF/services/org.apache.ratis.thirdparty.io.grpc.LoadBalancerProvider"
+  },
+  {
+   "glob": "META-INF/services/org.apache.ratis.thirdparty.io.grpc.NameResolverProvider"
+  }
+ ]
+}

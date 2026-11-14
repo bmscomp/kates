@@ -16,6 +16,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import com.bmscomp.kates.config.TestTypeDefaults;
 import com.bmscomp.kates.engine.TestOrchestrator;
+import com.bmscomp.kates.quorum.Quorum;
 import com.bmscomp.kates.service.ClusterHealthService;
 
 // Kubernetes probes and anyone checking the API call this without a key.
@@ -28,6 +29,7 @@ public class HealthResource {
     private final ClusterHealthService clusterHealthService;
     private final TestOrchestrator orchestrator;
     private final TestTypeDefaults typeDefaults;
+    private final Quorum quorum;
     private final String defaultBackend;
     private final String bootstrapServers;
 
@@ -36,11 +38,13 @@ public class HealthResource {
             ClusterHealthService clusterHealthService,
             TestOrchestrator orchestrator,
             TestTypeDefaults typeDefaults,
+            Quorum quorum,
             @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native") String defaultBackend,
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
         this.clusterHealthService = clusterHealthService;
         this.orchestrator = orchestrator;
         this.typeDefaults = typeDefaults;
+        this.quorum = quorum;
         this.defaultBackend = defaultBackend;
         this.bootstrapServers = bootstrapServers;
     }
@@ -55,7 +59,7 @@ public class HealthResource {
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("status", kafkaReachable ? "UP" : "DEGRADED");
-        response.put("capabilities", List.of("clientKey", "drain"));
+        response.put("capabilities", List.of("clientKey", "drain", "quorum"));
 
         response.put(
                 "engine",
@@ -67,6 +71,8 @@ public class HealthResource {
                         "status", kafkaReachable ? "UP" : "DOWN",
                         "bootstrapServers", bootstrapServers,
                         "message", kafkaReachable ? "Kafka cluster is reachable" : "Cannot connect to Kafka cluster"));
+
+        response.put("quorum", quorum.health());
 
         Map<String, Object> testConfigs = new LinkedHashMap<>();
         typeDefaults.allConfigs().forEach((name, cfg) -> testConfigs.put(name, cfg.toMap()));

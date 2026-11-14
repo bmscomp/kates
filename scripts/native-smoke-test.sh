@@ -269,4 +269,72 @@ WITHOUT_KEY="$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/api/tests" || tru
 [ "${WITHOUT_KEY}" = "401" ] || fail "GET /api/tests without a key answered ${WITHOUT_KEY}, not 401"
 info "  ok   /api/tests (200 with the named key, 401 without one)"
 
+# --- The members' quorum ---------------------------------------------------
+# Three members over mutual TLS elect one leader, and another once it goes.
+# Native only: Ratis' shaded Netty and gRPC are what an image can break (see
+# kates/src/main/java/com/bmscomp/kates/quorum/RatisSubstitutions.java).
+step "🗳  Starting three quorum members over mutual TLS..."
+docker rm -f "${APP}" >/dev/null
+PKI="$(mktemp -d)"
+QUORUM_PORT=9300
+MEMBERS=(0 1 2)
+QUORUM_APP="${APP}"
+member() { echo "${QUORUM_APP}-q$1"; }
+PEERS=""
+quorum_cleanup() {
+    for i in "${MEMBERS[@]}"; do docker rm -f "$(member "$i")" >/dev/null 2>&1 || true; done
+    rm -rf "${PKI}"
+    cleanup
+}
+trap quorum_cleanup EXIT
+for i in "${MEMBERS[@]}"; do PEERS="${PEERS:+${PEERS},}$(member "$i")=$(member "$i"):${QUORUM_PORT}"; done
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 -subj /CN=kates-quorum-ca \
+    -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign \
+    -keyout "${PKI}/ca.key" -out "${PKI}/ca.crt" >/dev/null 2>&1 || fail "openssl could not make the CA"
+for i in "${MEMBERS[@]}"; do
+    m="$(member "$i")"
+    openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj "/CN=${m}" \
+        -keyout "${PKI}/${m}.key" -out "${PKI}/${m}.csr" >/dev/null 2>&1
+    printf 'subjectAltName=DNS:%s\nextendedKeyUsage=serverAuth,clientAuth\n' "${m}" >"${PKI}/${m}.ext"
+    openssl x509 -req -days 1 -in "${PKI}/${m}.csr" -CA "${PKI}/ca.crt" -CAkey "${PKI}/ca.key" -CAcreateserial \
+        -extfile "${PKI}/${m}.ext" -out "${PKI}/${m}.crt" >/dev/null 2>&1 || fail "openssl could not sign ${m}"
+done
+chmod 0644 "${PKI}"/*
+for i in "${MEMBERS[@]}"; do
+    m="$(member "$i")"
+    docker run -d --name "${m}" --network "${NET}" -p "$((APP_PORT + 1 + i)):8080" \
+        -e QUARKUS_DATASOURCE_JDBC_URL="jdbc:postgresql://${DB}:5432/kates" \
+        -e QUARKUS_DATASOURCE_USERNAME=kates -e QUARKUS_DATASOURCE_PASSWORD=kates \
+        -e KATES_KAFKA_BOOTSTRAP_SERVERS=localhost:9092 -e KATES_HEALTH_KAFKA_REFRESH_INTERVAL=off \
+        -e KATES_KAFKA_SECURITY_PROTOCOL=PLAINTEXT -e KATES_API_SECURITY_ENABLED=false \
+        -e KATES_QUORUM_PEERS="${PEERS}" -e KATES_QUORUM_MEMBER_ID="${m}" -e KATES_QUORUM_DIR=/tmp/quorum \
+        -e KATES_QUORUM_TLS_CERT="/pki/${m}.crt" -e KATES_QUORUM_TLS_KEY="/pki/${m}.key" \
+        -e KATES_QUORUM_TLS_CA=/pki/ca.crt -v "${PKI}:/pki:ro" \
+        "${IMAGE}" >/dev/null
+done
+APP="$(member 0)" # fail() shows this member's log
+health() { curl -sf "http://localhost:$((APP_PORT + 1 + $1))/api/health" 2>/dev/null || true; }
+# leaders <member...>: the members among those that say they lead.
+leaders() { for i in "$@"; do health "$i" | grep -q '"leader":true' && echo "$i"; done; }
+one_leader() { # one_leader <timeout> <member...>
+    local timeout=$1
+    shift
+    for _ in $(seq 1 "${timeout}"); do
+        found="$(leaders "$@")"
+        [ -n "${found}" ] && [ "$(echo "${found}" | wc -l)" -eq 1 ] && { echo "${found}"; return; }
+        sleep 1
+    done
+}
+LEADER="$(one_leader "${BOOT_TIMEOUT}" "${MEMBERS[@]}")"
+[ -n "${LEADER}" ] || fail "no single leader among three members within ${BOOT_TIMEOUT}s.
+   Health was: $(health 0)"
+info "  ok   $(member "${LEADER}") leads: $(health "${LEADER}" | grep -o '"quorum":{[^}]*}')"
+REST=()
+for i in "${MEMBERS[@]}"; do [ "${i}" = "${LEADER}" ] || REST+=("${i}"); done
+APP="$(member "${REST[0]}")"
+docker rm -f "$(member "${LEADER}")" >/dev/null
+NEXT="$(one_leader 30 "${REST[@]}")"
+[ -n "${NEXT}" ] || fail "no new leader within 30s of removing $(member "${LEADER}")"
+info "  ok   $(member "${NEXT}") leads once $(member "${LEADER}") is gone: $(health "${NEXT}" | grep -o '"term":[0-9]*')"
+
 info "✅ Native image smoke test passed: ${IMAGE}"
