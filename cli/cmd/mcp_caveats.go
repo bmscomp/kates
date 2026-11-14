@@ -96,7 +96,7 @@ var mcpCaveatsCore = []mcpCaveat{
 			"each run it fails, and of each run a restart left RUNNING, so such a run has no tasks. Neither " +
 			"/api/health nor a run says which of these the API is.",
 		Refs: []string{
-			"kates/src/main/resources/application.properties:333-347",
+			"kates/src/main/resources/application.properties:336-350",
 			mcpAnchoredRef(mcpJava+"engine/TestTimeoutReaper.java:49-51,67-76,161-164,192-205",
 				"TestResult.TaskStatus.STOPPING", "kates.engine.reaper-grace-ms", "\"-submission\"", "\"Timeout: still \""),
 			mcpJava + "engine/TestOrchestrator.java:132-163,197-200,366,1142-1205,1271-1280,1335-1367",
@@ -215,7 +215,7 @@ var mcpCaveatsCore = []mcpCaveat{
 			"measure out of its grade and lists it, with the reason, under unevaluated (with nothing measured the grade " +
 			"is \"-\"), so read a grade that has unevaluated checks as partial.",
 		Refs: []string{
-			mcpAnchoredRef("kates/src/main/resources/application.properties:326-331",
+			mcpAnchoredRef("kates/src/main/resources/application.properties:329-334",
 				"# Prometheus server (for disruption metrics capture)",
 				"kates.prometheus.url=http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090"),
 			mcpAnchoredRef("charts/kates/values.yaml:449-459",
@@ -277,7 +277,7 @@ var mcpCaveatsCore = []mcpCaveat{
 // Kates API runs, so they hold a run to both: an older API fails every run
 // mcpReaperOlderLimitMs after its creation, and a current one refuses a run
 // set to last longer than kates.engine.max-duration-ms, mcpReaperMaxDurationMs
-// as Kates ships it (application.properties:338).
+// as Kates ships it (application.properties:341).
 // TestMCPReaperLimitsMatchTheBackend holds the second to the backend.
 const (
 	mcpReaperOlderLimitMs  = 30 * 60 * 1000
