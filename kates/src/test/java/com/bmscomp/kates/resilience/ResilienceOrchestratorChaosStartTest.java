@@ -47,7 +47,7 @@ class ResilienceOrchestratorChaosStartTest {
     @BeforeEach
     void wire() {
         orchestrator.testOrchestrator = mock(TestOrchestrator.class);
-        when(orchestrator.testOrchestrator.executeTest(any())).thenReturn(Result.success(run));
+        when(orchestrator.testOrchestrator.executeAdmitted(any())).thenReturn(Result.success(run));
         when(orchestrator.testOrchestrator.refreshStatus(run.getId())).thenReturn(run);
 
         orchestrator.chaosCoordinator = mock(ChaosCoordinator.class);

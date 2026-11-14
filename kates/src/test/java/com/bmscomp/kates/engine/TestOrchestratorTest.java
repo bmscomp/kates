@@ -1373,6 +1373,29 @@ class TestOrchestratorTest {
             assertTrue(engine.executeTest(phased).isSuccess());
         }
 
+        /**
+         * A resilience test is counted as fault work from its request, and
+         * starts its benchmark later. A drain set in between refused that
+         * benchmark, failing work accepted before the drain.
+         */
+        @Test
+        void workADrainAdmittedStartsItsRunDuringTheDrain() {
+            TestOrchestrator engine = withBackend("native");
+            engine.setDraining(true);
+            CreateTestRequest plain = new CreateTestRequest();
+            plain.setType(TestType.LOAD);
+            plain.setSpec(new TestSpec());
+
+            assertTrue(engine.executeAdmitted(plain).isSuccess());
+            assertTrue(engine.executeAdmitted(scenario(new TestSpec(), phase("steady", ScenarioPhase.PhaseType.STEADY)))
+                    .isSuccess());
+            assertFalse(submitted.isEmpty(), "the scenario's tasks were submitted");
+            assertInstanceOf(
+                    DrainingException.class,
+                    engine.executeTest(plain).asFailure().orElseThrow(),
+                    "a request the drain did not admit is still refused");
+        }
+
         @Test
         void aScenarioWithNoTypeIsRefusedBeforeTakingAPermit() {
             // POST /api/resilience and a schedule run no bean validation, so a

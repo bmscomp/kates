@@ -1032,7 +1032,7 @@ var mcpCaveatsRunsList = []mcpCaveat{
 			mcpAnchoredRef(mcpJava+"report/ReportGenerator.java:220-249,283-294",
 				"report.setSummary(MetricUtils.computeSummary(results));",
 				"summaries.put(phase, MetricUtils.computeSummary(rows))"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:441-450,2142-2158",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:467-476,2197-2213",
 				"TestResult.TaskStatus.PENDING : TestResult.TaskStatus.RUNNING",
 				"private static TestRun withUnfinishedTasksFailed("),
 		},
@@ -1071,7 +1071,7 @@ var mcpCaveatsRunsList = []mcpCaveat{
 			"except for a run cancelled before its tasks existed; a cancel through the REST API also leaves a CANCEL " +
 			"audit row.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:2093-2171",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:2144-2226",
 				`"Cancelled by user"`, `EventKind.FAILED, "cancelled"`, "return run.withResults(updatedResults);"),
 			mcpAnchoredRef(mcpJava+"api/TestResource.java:571-616",
 				`@Path("/{id}/cancel")`, `auditService.record("CANCEL"`, `"Test cancelled; it is stored as FAILED"`),
@@ -1104,14 +1104,14 @@ var mcpCaveatsRunsList = []mcpCaveat{
 			"say which the API is, but a scenario run's tasks do: on an older API they all start within moments " +
 			"of one another.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:362-364,417-428,430-446",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:388-390,443-454,456-472",
 				"applyTypeDefaults(type, scenario.getBaseSpec())", ".withRequestedSpec(",
 				"long phaseStartMs = System.currentTimeMillis();", "scenario.resolveSpecForPhase(phase, baseSpec)",
 				"phaseStartMs = saturatedSum(phaseStartMs", "backend.submit(task)", "TestResult.TaskStatus.PENDING"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1494-1522,1535-1543,1603-1642,1652-1664",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1545-1573,1586-1594,1654-1693,1703-1715",
 				"MAX_RAMP_STEPS = 100", "scenarioInapplicableFields(TestScenario scenario", "is a SPIKE phase",
 				"has none (", "check no record CRCs", "has the name of an earlier phase"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1789-1858", "List<BenchmarkTask> buildPhaseTask(",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1840-1909", "List<BenchmarkTask> buildPhaseTask(",
 				"int baseTarget = Math.max(1, spec.getThroughput() / steps);", "saturatedSum(startAtMs, s * stepMs)",
 				`taskId + "-spike"`),
 			mcpAnchoredRef(mcpJava+"domain/TestScenario.java:115-190",

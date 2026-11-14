@@ -45,12 +45,16 @@ public class DrainResource {
     @Inject
     com.bmscomp.kates.service.AuditService audit;
 
+    @Inject
+    com.bmscomp.kates.webhook.WebhookService webhooks;
+
     @GET
     @Operation(
             summary = "Whether the API is draining",
             description = "draining says whether new runs and faults are refused. liveRuns counts the test runs"
                     + " still going, and faultsInFlight the disruption plans, compound runs and resilience tests"
-                    + " between their request and their saved report. drained is true once draining is set, both"
+                    + " between their request and their saved report, and webhooksInFlight the webhook deliveries"
+                    + " of ended runs still being sent or retried. drained is true once draining is set, all three"
                     + " read zero and no fault holds the disruption lease: the pod can then be replaced without"
                     + " losing a run or leaving a fault in.")
     @APIResponse(responseCode = "200", description = "The drain state")
@@ -60,10 +64,15 @@ public class DrainResource {
         boolean draining = orchestrator.isDraining() && faults.isDraining();
         int liveRuns = orchestrator.liveRuns();
         int faultsInFlight = faults.inFlight();
+        int webhooksInFlight = webhooks.deliveriesInFlight();
         // A fault that outlived its request keeps the lease until it is undone.
         boolean leased = faults.isBusy(faults.currentTarget());
         return new DrainStatus(
-                draining, liveRuns, faultsInFlight, draining && liveRuns == 0 && faultsInFlight == 0 && !leased);
+                draining,
+                liveRuns,
+                faultsInFlight,
+                webhooksInFlight,
+                draining && liveRuns == 0 && faultsInFlight == 0 && webhooksInFlight == 0 && !leased);
     }
 
     @PUT
@@ -103,5 +112,6 @@ public class DrainResource {
 
     public record DrainRequest(Boolean draining) {}
 
-    public record DrainStatus(boolean draining, int liveRuns, int faultsInFlight, boolean drained) {}
+    public record DrainStatus(
+            boolean draining, int liveRuns, int faultsInFlight, int webhooksInFlight, boolean drained) {}
 }

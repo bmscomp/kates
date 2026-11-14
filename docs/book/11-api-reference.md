@@ -248,10 +248,10 @@ curl -s -H "X-API-Key: $KATES_API_KEY" "$BASE/api/drain"
 **Response:** `200 OK`
 
 ```json
-{ "draining": true, "liveRuns": 1, "faultsInFlight": 0, "drained": false }
+{ "draining": true, "liveRuns": 1, "faultsInFlight": 0, "webhooksInFlight": 0, "drained": false }
 ```
 
-`liveRuns` counts the test runs still going. `faultsInFlight` counts the disruption plans, compound runs and resilience tests between their request and their saved report. `drained` is true once `draining` is true, both counts are zero and no fault holds the disruption lease.
+`liveRuns` counts the test runs still going, and a cancelled or timed-out run until its `FAILED` row is written. `faultsInFlight` counts the disruption plans, compound runs and resilience tests between their request and their saved report. `webhooksInFlight` counts the webhook deliveries of ended runs that are still being sent or retried: an event is marked handled before it is delivered, so a delivery cut off by the pod's replacement is not sent again. `drained` is true once `draining` is true, all three counts are zero and no fault holds the disruption lease.
 
 #### PUT /api/drain
 
@@ -266,7 +266,7 @@ While the API is draining:
 
 - Every request that would start a test run, a disruption, a compound run or a resilience test is answered `503 Service Unavailable` with a `Retry-After: 60` header. Two answers differ: a full engine still answers `429`, and `POST /api/tests/bulk` answers `202` with every item failed.
 - Test and disruption schedules don't fire. A firing that falls inside the drain is skipped, not run later.
-- Live runs and faults go on to their end. A dry run, a cancel and every read are answered as usual.
+- Live runs and faults go on to their end. A resilience test admitted before the drain still starts its benchmark when it reaches it. A dry run, a cancel and every read are answered as usual.
 
 The switch is kept in memory: a restarted pod is not draining. A body without `draining` is a `400`.
 

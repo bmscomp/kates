@@ -49,7 +49,7 @@ class ResilienceOrchestratorRecoveryTest {
     void wire() {
         TestRun running = new TestRun(TestType.LOAD, new TestSpec()).withStatus(TaskStatus.RUNNING);
         orchestrator.testOrchestrator = mock(TestOrchestrator.class);
-        when(orchestrator.testOrchestrator.executeTest(any())).thenReturn(Result.success(running));
+        when(orchestrator.testOrchestrator.executeAdmitted(any())).thenReturn(Result.success(running));
         when(orchestrator.testOrchestrator.refreshStatus(running.getId())).thenReturn(running);
 
         // Each call that answers a future gets the fault's outcome: these tests
