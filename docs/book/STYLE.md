@@ -141,7 +141,7 @@ Use the left column in prose; commands, fields, flags, UI labels and resource na
 | disruption | disruption test, chaos run, chaos test | One run of a disruption plan or playbook: its ID, status, report, timeline and, when the plan has `sla`, its SLA grade |
 | resilience run | chaos test, combined test; "resilience test" only when quoting the CLI's help or the REST API's section | One Kates test with one fault injected after `steadyStateSec`, run by `kates resilience run`. It reports before-and-after impact, with no safety guard, rollback or grade |
 | chaos experiment | a name for a Kates object | Chaos engineering's unit: faults injected to test a steady-state hypothesis. In Kates you run one as a disruption or a resilience run |
-| Game Day | GameDay, game day | The human session: a team, a hypothesis, a rollback plan, a debrief. `make gameday` runs `scripts/gameday.sh`, its automated pipeline |
+| Game Day | GameDay, game day | The human session: a team, a hypothesis, a rollback plan, a debrief |
 | LitmusChaos | — | Full name on first use per chapter; "Litmus" after |
 | Kafka UI | kafka-ui in prose | `kafka-ui` only as a resource or user name |
 | Kubernetes | K8s in prose | K8s only in space-constrained tables and diagram labels |

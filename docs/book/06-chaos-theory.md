@@ -157,22 +157,6 @@ You run the payments platform, and a hypothesis has to carry its targets into nu
 
 Each clause names where Kates reads it. `kates cluster check` counts offline partitions, and `kates test get <id>` gives the INTEGRITY run's `Lost` and `Verdict`. A plan that names `payments-integrity` in `isrTrackingTopic` adds the ISR's recovery, through `kates disruption kafka-metrics <id>`. That makes the hypothesis testable: every clause is a number with a place to read it.
 
-### The Automated Game Day {#game-day-pipeline}
-
-`make gameday` runs `scripts/gameday.sh`, an automated pass through Execute in seven script phases. It deletes a broker pod with `kubectl` instead of going through the Kates API, so no plan report or safety guard covers its fault. The table says what each script phase does, and which Game Day phase it belongs to:
-
-| Script phase | What `make gameday` does | Game Day phase |
-|--------------|--------------------------|----------------|
-| `pre-flight` | Waits for `krafter` to be Ready, counts running Kafka pods, and checks that the Kates API and Prometheus answer | Prepare |
-| `baseline` | Starts a 100,000-record LOAD run and records two broker message counters | Execute |
-| `chaos-inject` | Deletes `krafter-brokers-alpha-0` with `kubectl`, then waits 60 seconds | Execute |
-| `chaos-observe` | Reads offline and under-replicated partitions, consumer lag and the incoming message rate | Execute |
-| `chaos-recover` | Waits up to 300 seconds for no under-replicated partition, then for every Kafka pod to be Ready | Execute |
-| `post-flight` | Starts a 50,000-record LOAD run, checks that `krafter` is Ready, and counts firing alerts | Analyze |
-| `report` | Prints the recorded values and the file that holds them | Analyze |
-
-The script grades nothing and checks no data for loss. The hypothesis, the rollback plan, the loss check, the grade and the whole Follow-up phase stay with you.
-
 ## Kafka-Specific Failure Modes
 
 Three Kafka behaviors decide what a fault costs, and a hypothesis has to bound each of them: leader election, ISR shrink and consumer-group rebalance.

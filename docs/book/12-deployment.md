@@ -1233,22 +1233,11 @@ The table groups the targets by what they touch; the ones you run daily are `mak
 | `make litmus-gameday` | Trigger Game Day validation via the chaos chart |
 | `make chaos-status` | Check chaos status |
 | `make chaos-ui` | Explain chaos access — the chart deploys the execution plane only, so there is no UI |
-| `make gameday` | Run the seven-phase Game Day pipeline (`scripts/gameday.sh`), as [Game Day Validation](#game-day-validation) describes |
 | `make velero` | Deploy Velero backup |
 | `make chart-lint` | Lint Kates Helm chart |
 | `make ports` | Start port forwarding |
 | `make status` | Check cluster status |
 | `make destroy` | Destroy everything |
-
-## Game Day Validation
-
-`make gameday` runs `scripts/gameday.sh`, the automated pipeline of a [Game Day](appendix-a-glossary.md#gl-game-day), in seven phases: pre-flight, baseline, chaos-inject, chaos-observe, chaos-recover, post-flight and report.
-
-```bash
-make gameday
-```
-
-[The Game Day Methodology](06-chaos-theory.md#the-game-day-methodology) in Chaos Engineering Theory explains the human session the pipeline supports.
 
 ## Troubleshooting
 
