@@ -1116,7 +1116,7 @@ var mcpCaveatsRunsList = []mcpCaveat{
 			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:129-133,192-202,247-257,464-465",
 				"Thread.ofVirtual()", "awaitStart(task, state)", "task.getStartAtMs() - System.currentTimeMillis()",
 				"1_000_000_000L / task.getTargetMessagesPerSec()"),
-			mcpAnchoredRef(mcpJava+"engine/TrogdorBackend.java:110-121,178-179",
+			mcpAnchoredRef(mcpJava+"engine/TrogdorBackend.java:114-125,182-183",
 				"spec.setStartMs(task.getStartAtMs())", "Integer.MAX_VALUE"),
 		},
 	},

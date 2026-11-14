@@ -121,7 +121,7 @@ class TrogdorClientTest {
 
     @Test
     void aSubmittedTaskIsPostedWithItsAgentAndTopic() {
-        TrogdorBackend backend = new TrogdorBackend(client, List.of("node0"));
+        TrogdorBackend backend = new TrogdorBackend(client, List.of("node0"), "kafka:9092");
         BenchmarkTask task = BenchmarkTask.builder("run-1-produce-0", BenchmarkTask.WorkloadType.PRODUCE)
                 .topic("perf")
                 .partitions(6)
@@ -148,7 +148,7 @@ class TrogdorClientTest {
 
     @Test
     void aTaskTheCoordinatorAnswers404ForHasFailed() {
-        TrogdorBackend backend = new TrogdorBackend(client, List.of("node0"));
+        TrogdorBackend backend = new TrogdorBackend(client, List.of("node0"), "kafka:9092");
 
         BenchmarkStatus status = backend.poll(new BenchmarkHandle("trogdor", "t-gone"));
 

@@ -43,7 +43,7 @@ import com.bmscomp.kates.trogdor.spec.TrogdorSpec;
 class TrogdorBackendTest {
 
     private final TrogdorClient client = mock(TrogdorClient.class);
-    private final TrogdorBackend backend = new TrogdorBackend(client, List.of("agent-0"));
+    private final TrogdorBackend backend = new TrogdorBackend(client, List.of("agent-0"), "kafka:9092");
 
     private static final Map<String, String> PRODUCER = Map.of(
             "bootstrap.servers", "broker:9092",
@@ -78,6 +78,8 @@ class TrogdorBackendTest {
         ConsumeBenchSpec spec = (ConsumeBenchSpec) backend.toTrogdorSpec(task);
 
         assertEquals("perf-cg", spec.getConsumerGroup());
+        assertEquals(
+                "kafka:9092", spec.getBootstrapServers(), "a consume task has no producer config to read them from");
         assertEquals(Map.of("fetch.min.bytes", "65536", "fetch.max.wait.ms", "100"), spec.getConsumerConf());
     }
 
@@ -266,7 +268,7 @@ class TrogdorBackendTest {
 
     @Test
     void tasksTakeTheAgentsInTurn() {
-        TrogdorBackend twoAgents = new TrogdorBackend(client, List.of("agent-0", "agent-1"));
+        TrogdorBackend twoAgents = new TrogdorBackend(client, List.of("agent-0", "agent-1"), "kafka:9092");
         BenchmarkTask produce =
                 BenchmarkTask.builder("p", BenchmarkTask.WorkloadType.PRODUCE).build();
         BenchmarkTask consume =

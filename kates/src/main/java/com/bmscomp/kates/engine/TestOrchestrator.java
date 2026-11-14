@@ -553,8 +553,8 @@ public class TestOrchestrator {
         List<com.bmscomp.kates.domain.SlaViolation> slaViolations = new java.util.ArrayList<>();
         boolean polledAnything = false;
         for (TestResult result : run.getResults()) {
-            if (result.getStatus() == TestResult.TaskStatus.RUNNING
-                    || result.getStatus() == TestResult.TaskStatus.PENDING) {
+            // STOPPING too: Trogdor reports it before DONE, and such a row was never polled again.
+            if (ORPHAN_STATUSES.contains(result.getStatus())) {
                 BenchmarkHandle handle = handleMap.get(result.getTaskId());
                 if (handle != null) {
                     try {

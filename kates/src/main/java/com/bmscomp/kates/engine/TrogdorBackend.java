@@ -42,15 +42,19 @@ public class TrogdorBackend implements BenchmarkBackend {
 
     private final AtomicInteger nextAgent = new AtomicInteger();
 
+    private final String bootstrapServers;
+
     @Inject
     public TrogdorBackend(
             @RestClient TrogdorClient trogdorClient,
-            @ConfigProperty(name = "kates.trogdor.agent-nodes", defaultValue = "node0") List<String> agentNodes) {
+            @ConfigProperty(name = "kates.trogdor.agent-nodes", defaultValue = "node0") List<String> agentNodes,
+            @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
         if (agentNodes.isEmpty()) {
             throw new IllegalArgumentException("kates.trogdor.agent-nodes names no Trogdor agent");
         }
         this.trogdorClient = trogdorClient;
         this.agentNodes = List.copyOf(agentNodes);
+        this.bootstrapServers = bootstrapServers;
     }
 
     @Override
@@ -192,9 +196,11 @@ public class TrogdorBackend implements BenchmarkBackend {
         return conf;
     }
 
+    // A consume task has no producer config and a scenario phase's has no
+    // servers, so both ran against localhost:9092 on the agent.
     private String resolveBootstrapServers(BenchmarkTask task) {
         String servers = task.getProducerConfig().get("bootstrap.servers");
-        return servers != null ? servers : "localhost:9092";
+        return servers != null ? servers : bootstrapServers;
     }
 
     /**
