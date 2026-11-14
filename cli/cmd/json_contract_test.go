@@ -27,10 +27,10 @@ import (
 
 // jsonContractRoutes is the fake API: a GET path and its body.
 var jsonContractRoutes = map[string]string{
-	"/api/health":                     `{"status":"UP","version":"1.0.0","uptimeSeconds":60,"kafka":{"status":"UP","bootstrapServers":"kafka:9092"},"engine":{"activeBackend":"native"}}`,
-	"/api/tests":                      `{"items":[{"id":"run-1","testType":"LOAD","status":"DONE","backend":"native","createdAt":"2026-01-01T00:00:00Z"}],"page":0,"size":20,"total":1,"totalPages":1,"count":1}`,
+	"/api/health":                     `{"status":"UP","kafka":{"status":"UP","bootstrapServers":"kafka:9092"},"engine":{"activeBackend":"native"}}`,
+	"/api/tests":                      `{"items":[{"id":"run-1","testType":"LOAD","status":"DONE","backend":"native","createdAt":"2026-01-01T00:00:00Z"}],"page":0,"size":20,"total":1,"count":1}`,
 	"/api/tests/run-1":                `{"id":"run-1","testType":"LOAD","status":"DONE","spec":{"batchSize":16384},"results":[{"phaseName":"produce","status":"DONE","recordsSent":1000,"throughputRecordsPerSec":25000,"p99LatencyMs":12.5}]}`,
-	"/api/tests/run-1/report":         `{"testId":"run-1","summary":{"totalRecords":1000,"avgThroughputRecPerSec":25000,"p99LatencyMs":12.5}}`,
+	"/api/tests/run-1/report":         `{"summary":{"totalRecords":1000,"avgThroughputRecPerSec":25000,"p99LatencyMs":12.5}}`,
 	"/api/tests/run-1/report/summary": `{"totalRecords":1000,"avgThroughputRecPerSec":25000,"p99LatencyMs":12.5}`,
 	"/api/tests/types":                `["LOAD","STRESS"]`,
 	"/api/tests/backends":             `["native"]`,

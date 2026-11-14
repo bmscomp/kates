@@ -1491,10 +1491,6 @@ velero:  ## Deploy Velero backup
 	@echo "💾 Deploying Velero backup..."
 	./scripts/deploy-velero.sh
 
-gameday:  ## Run automated GameDay validation
-	@echo "🎮 Running Automated GameDay Validation..."
-	./scripts/gameday.sh
-
 # Status check
 status:  ## Check cluster status
 	@echo "📊 Cluster Status:"

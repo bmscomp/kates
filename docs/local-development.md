@@ -98,7 +98,6 @@ helm plugin install https://github.com/helm-unittest/helm-unittest \
 |:-------|:------------|
 | `make test` | Runs a standard Kafka performance test producing 1 million messages to validate cluster throughput. |
 | `make test-unit` | Runs the Java and Go unit tests, with no Docker required. |
-| `make gameday` | Executes an automated Game Day validation pipeline combining performance tests with chaos experiments. |
 | `make helm-test-all` | Runs the Helm tests across every deployed component, with a summary. |
 
 ## Image management

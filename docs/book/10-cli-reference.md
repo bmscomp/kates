@@ -695,7 +695,7 @@ Output, in the classic look, with two illustrative runs:
   Page 1 of 1 · 2 total runs
 ```
 
-An ID longer than 12 characters is cut to 12 and `…`. With `-o json` it prints the page: `items`, `page`, `size`, `total`, `totalPages` and `count`. [Pagination](#pagination) says how to read the next page.
+An ID longer than 12 characters is cut to 12 and `…`. With `-o json` it prints the page: `items`, `page`, `size`, `total` and `count`. [Pagination](#pagination) says how to read the next page.
 
 #### test create
 
