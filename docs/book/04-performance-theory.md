@@ -24,7 +24,7 @@ Kafka throughput has two units, and which one saturates first depends on record 
 
 Both matter. A system handling 100,000 records of 100 bytes per second behaves differently from one handling 10,000 records of 10 KiB per second, even though both move about 10 MB/s: the first pays per-record overhead, the second pays per-byte cost.
 
-Kates reports two throughput numbers per run. Average throughput is the mean of the rates its started producer and consumer tasks each achieved, and peak throughput is the highest of those task rates. Neither is a peak over time, so a burst inside a run doesn't show in either; the latency [heatmap](appendix-a-glossary.md#gl-heatmap) is where a moment inside a run becomes visible. For the rate a LOAD run offered the cluster, quote the `produce` row of `kates test get <id>`, since the run's average mixes the produce and consume rows.
+Kates reports two throughput numbers per run. Average throughput is the records the run's producers sent divided by the time they ran, from the first one's start to the last one's end, so producers running together add up and phases taking turns don't: five producers at 40,000 records a second report 200,000. A consumer reads back what the producers sent, so its records and rate stay in its own row. Peak throughput is the highest rate any single task achieved. Neither is a peak over time, so a burst inside a run doesn't show in either; the latency [heatmap](appendix-a-glossary.md#gl-heatmap) is where a moment inside a run becomes visible.
 
 ### Latency
 

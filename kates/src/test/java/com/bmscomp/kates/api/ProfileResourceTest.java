@@ -103,8 +103,9 @@ class ProfileResourceTest {
         assertEquals(25.0, profile.getDouble("p95Ms"), 0.001);
         assertEquals(8.0, profile.getDouble("p50Ms"), 0.001);
         assertEquals(12.0, profile.getDouble("avgMs"), 0.001);
-        assertEquals(950.0, profile.getDouble("throughput"), 0.001);
-        assertEquals(20_000.0, profile.getDouble("records"), 0.001);
+        // The producer's: the consumer reads back what it sent.
+        assertEquals(1_000.0, profile.getDouble("throughput"), 0.001);
+        assertEquals(10_000.0, profile.getDouble("records"), 0.001);
 
         RestAssured.given()
                 .when()

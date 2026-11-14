@@ -28,15 +28,15 @@ public final class MetricUtils {
      * Aggregates a list of {@link TestResult}s into a single {@link ReportSummary}.
      * Returns an empty summary when the list is null or empty.
      *
-     * <p>The throughput means leave out a task that has not started (see
-     * {@link #notStarted}). A scenario's later phase waits for its turn, and
-     * averaging its 0 in understated a running scenario: while the second of
-     * two phases waited, the run read half the first phase's rate, and so did
-     * the snapshot a resilience run takes before its fault. Only the means
-     * leave it out. It adds nothing to the other figures, and the latency rows
-     * are still chosen from every task, so that a LOAD run whose producer has
-     * not started yet does not report its consumer's Trogdor poll times as
-     * latency.
+     * <p>Throughput is the records the producers sent over the time they ran,
+     * first start to last end ({@link #wallClockMs}), and {@code durationMs}
+     * is that time; {@code totalRecords} counts the producers' records only
+     * ({@link #sendingRows}). A task that has not started is left out of them
+     * (see {@link #notStarted}): a scenario's later phase waits for its turn,
+     * and counting it understated a running scenario, and the snapshot a
+     * resilience run takes before its fault. The latency rows are still chosen
+     * from every task, so that a LOAD run whose producer has not started yet
+     * does not report its consumer's Trogdor poll times as latency.
      *
      * <p>The latency figures come only from the rows that measured latency
      * (see {@link #latencyRows}), and they are never averaged. The percentiles
@@ -64,20 +64,32 @@ public final class MetricUtils {
             return new ReportSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         }
 
-        long totalRecords =
-                results.stream().mapToLong(TestResult::getRecordsSent).sum();
         List<TestResult> started = results.stream().filter(r -> !notStarted(r)).toList();
-        double avgThroughput = started.stream()
-                .mapToDouble(TestResult::getThroughputRecordsPerSec)
-                .average()
-                .orElse(0);
+        List<TestResult> sending = sendingRows(started);
+        long totalRecords =
+                sending.stream().mapToLong(TestResult::getRecordsSent).sum();
+        long spanMs = wallClockMs(sending);
+        double avgThroughput;
+        double avgThroughputMB;
+        if (spanMs > 0) {
+            avgThroughput = totalRecords * 1000.0 / spanMs;
+            avgThroughputMB =
+                    sending.stream().mapToDouble(MetricUtils::megabytesOf).sum() * 1000.0 / spanMs;
+        } else {
+            // shortcut: rows stored without a startTime (older runs) keep the mean of their rates, which they were
+            // reported with; every row a current Kates API stores has one.
+            avgThroughput = sending.stream()
+                    .mapToDouble(TestResult::getThroughputRecordsPerSec)
+                    .average()
+                    .orElse(0);
+            avgThroughputMB = sending.stream()
+                    .mapToDouble(TestResult::getThroughputMBPerSec)
+                    .average()
+                    .orElse(0);
+        }
         double peakThroughput = results.stream()
                 .mapToDouble(TestResult::getThroughputRecordsPerSec)
                 .max()
-                .orElse(0);
-        double avgThroughputMB = started.stream()
-                .mapToDouble(TestResult::getThroughputMBPerSec)
-                .average()
                 .orElse(0);
 
         List<TestResult> measured = latencyRows(results);
@@ -115,7 +127,53 @@ public final class MetricUtils {
                 maxLatency,
                 totalErrors,
                 errorRate,
-                0);
+                Math.max(0, spanMs));
+    }
+
+    /**
+     * The rows whose records the run sent: the producers. A consumer reads
+     * them back, so adding its records counted each one twice and averaging
+     * its rate in mixed a read rate into the send rate. Consumer rows alone,
+     * such as a LOAD run's "consume" phase, are what there is to describe.
+     */
+    private static List<TestResult> sendingRows(List<TestResult> rows) {
+        List<TestResult> producers = rows.stream().filter(r -> !isConsumer(r)).toList();
+        return producers.isEmpty() ? rows : producers;
+    }
+
+    /**
+     * How long the rows ran, first start to last end, in milliseconds; -1 when
+     * a row cannot say. A row's end is its startTime plus its records over its
+     * rate, since the rate is records over the time it ran. Rates of tasks
+     * running together add up and those of phases taking turns do not, so the
+     * run's rate is its records over this span: the mean of five producers at
+     * 40,000 records a second read 40,000, not 200,000.
+     */
+    static long wallClockMs(List<TestResult> rows) {
+        long first = Long.MAX_VALUE;
+        long last = Long.MIN_VALUE;
+        for (TestResult r : rows) {
+            if (r.getStartTime() == null || (r.getRecordsSent() > 0 && r.getThroughputRecordsPerSec() <= 0)) {
+                return -1;
+            }
+            long start;
+            try {
+                start = java.time.Instant.parse(r.getStartTime()).toEpochMilli();
+            } catch (java.time.format.DateTimeParseException e) {
+                return -1;
+            }
+            double rate = r.getThroughputRecordsPerSec();
+            long end = start + (rate > 0 ? Math.round(r.getRecordsSent() * 1000.0 / rate) : 0);
+            first = Math.min(first, start);
+            last = Math.max(last, end);
+        }
+        return rows.isEmpty() ? -1 : last - first;
+    }
+
+    /** The megabytes a row moved: its records times the bytes a record its MB/s implies. */
+    private static double megabytesOf(TestResult r) {
+        double rate = r.getThroughputRecordsPerSec();
+        return rate > 0 ? r.getRecordsSent() * r.getThroughputMBPerSec() / rate : 0;
     }
 
     /**
