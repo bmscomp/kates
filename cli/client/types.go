@@ -250,7 +250,6 @@ type PagedTests struct {
 	Page       int       `json:"page"`
 	Size       int       `json:"size"`
 	TotalItems int       `json:"total"`
-	TotalPages int       `json:"totalPages"`
 	Count      int       `json:"count"`
 }
 

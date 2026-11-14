@@ -85,7 +85,7 @@ func runKatesCLIConfig(t *testing.T, config func(apiURL string) string, env []st
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"items":[],"page":0,"size":100,"total":0,"totalPages":0,"count":0}`))
+		_, _ = w.Write([]byte(`{"items":[],"page":0,"size":100,"total":0,"count":0}`))
 	}))
 	t.Cleanup(api.Close)
 
@@ -155,7 +155,7 @@ func TestUnreadableConfigReachesNoServer(t *testing.T) {
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"items":[],"page":0,"size":100,"total":0,"totalPages":0,"count":0}`))
+		_, _ = w.Write([]byte(`{"items":[],"page":0,"size":100,"total":0,"count":0}`))
 	}))
 	t.Cleanup(other.Close)
 	if out, code, _ := runKatesCLIConfig(t, broken, nil, "--url", other.URL, "test", "list"); code != 0 || hits.Load() == 0 {
