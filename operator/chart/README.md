@@ -9,14 +9,14 @@ The operator drives a Kates API through its REST API: one that is already runnin
 ## Install
 
 ```bash
-helm install kates-operator oci://ghcr.io/bmscomp/charts/kates-operator --version 0.1.1 \
+helm install kates-operator oci://ghcr.io/bmscomp/charts/kates-operator --version 0.2.0 \
   -n kates-operator --create-namespace
 ```
 
 It needs Kubernetes 1.29 or newer and pulls `ghcr.io/bmscomp/kates-operator`, for amd64 and arm64. On a cluster that pulls from a mirror, set `global.imageRegistry` and `global.imagePullSecrets`. The image and the chart are signed with cosign:
 
 ```bash
-cosign verify ghcr.io/bmscomp/kates-operator:0.1.1 \
+cosign verify ghcr.io/bmscomp/kates-operator:0.2.0 \
   --certificate-identity-regexp 'https://github.com/bmscomp/kates/.github/workflows/publish-operator.yml@refs/tags/operator-v.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -40,7 +40,7 @@ helm install kates-operator operator/chart -n kates-operator --create-namespace 
 For the last mode a cluster admin applies the CRDs and the aggregated roles once, and the namespace admin installs with `--skip-crds`:
 
 ```bash
-helm pull oci://ghcr.io/bmscomp/charts/kates-operator --version 0.1.1 --untar
+helm pull oci://ghcr.io/bmscomp/charts/kates-operator --version 0.2.0 --untar
 kubectl apply --server-side -f kates-operator/crds/
 helm template kates-operator ./kates-operator -n team --show-only templates/aggregate-roles.yaml | kubectl apply -f -
 helm install kates-operator ./kates-operator -n team --skip-crds \
@@ -161,7 +161,7 @@ kubectl patch kates main --type merge -p '{"spec":{"mode":"Active"}}'
 
 Under `Drain` the operator sets the backend's `PUT /api/drain`: new runs, faults and resilience tests are answered 503, schedules stop firing, and live work goes on to its end. The `Drained` condition reports what is still live, and turns true once nothing is. Only then is a pod on an old version replaced, and the new pod is drained again as soon as it answers. The operator never sets the mode back to `Active`: you do, and the condition goes once the drain is lifted.
 
-To call the API the operator reads the key `apiKeySecretRef` names, and its chart lets it read only a Secret named `kates-api-key`, as the Kates chart names it. A key in any other Secret leaves `Drained` false with reason `KeyUnreadable`, and the pod is not replaced while the mode is `Drain`. The key needs the `admin` scope. A backend older than the drain switch gives reason `DrainUnsupported`: upgrade it under `Active`, which replaces the pod at once.
+To call the API the operator reads the key `apiKeySecretRef` names, and its chart lets it read only a Secret named `kates-api-key`, as the Kates chart names it. A key in any other Secret leaves `Drained` false with reason `KeyUnreadable`, and the pod is not replaced while the mode is `Drain`. The key needs the `admin` scope. A backend without the drain switch, Kates 1.40.0 or older, gives reason `DrainUnsupported`: upgrade it under `Active`, which replaces the pod at once.
 
 The operator never takes over an object it did not create. If a ServiceAccount, Service or StatefulSet of the resource's name already exists, nothing is applied and `Ready` is false with reason `NameTaken`: rename one of them.
 
