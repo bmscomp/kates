@@ -202,6 +202,25 @@ class ResilienceResourceTest {
         verify(orchestrator, never()).execute(any());
     }
 
+    /** The lease is held through these waits, and nothing ends one early. */
+    @Test
+    void aWaitPastTheChaosLimitsIsRefusedByItsName() {
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"LOAD\"},\"chaosSpec\":{\"experimentName\":\"test\"},"
+                        + "\"steadyStateSec\":-1,\"maxRecoveryWaitSec\":90000,"
+                        + "\"probes\":[{\"name\":\"slow\",\"mode\":\"Continuous\",\"timeoutSec\":7200}]}")
+                .when()
+                .post("/api/resilience")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", hasKey("steadyStateSec"))
+                .body("fieldErrors", hasKey("maxRecoveryWaitSec"))
+                .body("fieldErrors", hasKey("probes[0].timeoutSec"))
+                .body("message", startsWith("steadyStateSec: -1 is below 0; maxRecoveryWaitSec: 90000 is above"));
+        verify(orchestrator, never()).execute(any());
+    }
+
     /**
      * The limits are those of POST /api/tests, and so is the fieldErrors that
      * names a value outside them. As there, they are checked before the

@@ -112,7 +112,7 @@ public class DisruptionScheduleResource {
         entity.setId(UUID.randomUUID().toString().substring(0, 8));
         entity.setName(request.name);
         entity.setCronExpression(request.cronExpression);
-        entity.setEnabled(request.enabled);
+        entity.setEnabled(request.enabled == null || request.enabled);
         entity.setPlaybookName(request.playbookName);
 
         if (request.plan != null) {
@@ -156,7 +156,7 @@ public class DisruptionScheduleResource {
         }
         if (request.name != null) entity.setName(request.name);
         if (request.cronExpression != null) entity.setCronExpression(request.cronExpression);
-        entity.setEnabled(request.enabled);
+        if (request.enabled != null) entity.setEnabled(request.enabled);
         if (request.playbookName != null) entity.setPlaybookName(request.playbookName);
         if (request.plan != null) {
             try {

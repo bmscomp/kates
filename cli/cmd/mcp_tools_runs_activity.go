@@ -488,7 +488,7 @@ var mcpCaveatsRunsActivity = []mcpCaveat{
 			mcpJava + "disruption/DisruptionTemplateResource.java:63-65",
 			mcpJava + "disruption/DisruptionScheduler.java:97-109",
 			mcpJava + "disruption/DisruptionReportEntity.java:39-47",
-			mcpAnchoredRef(mcpJava+"disruption/DisruptionAnalysisResource.java:118-192",
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionAnalysisResource.java:118-194",
 				`@Path("/compound")`, `"results", outcome.results()`),
 			mcpAnchoredRef(mcpJava+"resilience/ResilienceResource.java:109-139",
 				"StreamingOutput executeWithKeepAlive(", "objectMapper.writeValue(os, payload);",
