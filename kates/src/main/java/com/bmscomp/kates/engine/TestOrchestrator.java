@@ -356,7 +356,7 @@ public class TestOrchestrator {
                 .withScenarioName(scenario.getName())
                 .withLabels(scenario.getLabels())
                 .withSla(scenario.getSla())
-                .withPlannedDurationMs(plannedDurationMs(scenario))
+                .withPlannedDurationMs(plannedDurationMs(scenario, baseSpec))
                 .withClientKey(clientKey)
                 .withStatus(TestResult.TaskStatus.RUNNING);
 
@@ -405,7 +405,7 @@ public class TestOrchestrator {
             for (int phaseIdx = 0; phaseIdx < scenario.getPhases().size(); phaseIdx++) {
                 ScenarioPhase phase = scenario.getPhases().get(phaseIdx);
                 String phaseName = phase.getName() != null ? phase.getName() : "phase-" + phaseIdx;
-                TestSpec phaseSpec = scenario.resolveSpecForPhase(phase);
+                TestSpec phaseSpec = scenario.resolveSpecForPhase(phase, baseSpec);
 
                 List<BenchmarkTask> tasks =
                         buildPhaseTask(phase, phaseSpec, type, run.getId(), phaseName, phaseStartMs);
@@ -1189,8 +1189,9 @@ public class TestOrchestrator {
                 return java.util.Optional.of(new InvalidTestSpecException("scenario.", nulls));
             }
             Map<String, String> errors = unstorable(scenario);
-            errors.putAll(scenarioInapplicableFields(scenario, scenarioBackend(request)));
-            long planned = plannedDurationMs(scenario);
+            TestSpec base = applyTypeDefaults(type, scenario.getBaseSpec());
+            errors.putAll(scenarioInapplicableFields(scenario, base, scenarioBackend(request)));
+            long planned = plannedDurationMs(scenario, base);
             if (planned > maxDurationMs) {
                 errors.put("phases", "the phases are set to last " + planned + " ms in all" + longerThanAllowed());
             }
@@ -1371,11 +1372,11 @@ public class TestOrchestrator {
      * the durations of the ones before it have passed, so this is when the
      * last one is due to end.
      */
-    static long plannedDurationMs(TestScenario scenario) {
+    static long plannedDurationMs(TestScenario scenario, TestSpec base) {
         long total = 0;
         for (ScenarioPhase phase : scenario.getPhases()) {
             total = saturatedSum(
-                    total, Math.max(0, scenario.resolveSpecForPhase(phase).getDurationMs()));
+                    total, Math.max(0, scenario.resolveSpecForPhase(phase, base).getDurationMs()));
         }
         return total;
     }
@@ -1498,7 +1499,7 @@ public class TestOrchestrator {
      * phase reads rampSteps; any other starts one producer, so there a
      * rampSteps other than its default of 1 is refused rather than ignored.
      */
-    Map<String, String> scenarioInapplicableFields(TestScenario scenario, String backendName) {
+    Map<String, String> scenarioInapplicableFields(TestScenario scenario, TestSpec base, String backendName) {
         Map<String, String> errors = new java.util.LinkedHashMap<>();
         List<ScenarioPhase> phases = scenario.getPhases();
         refuseConsumerAndCrc("baseSpec.", scenario.getBaseSpec(), errors);
@@ -1506,11 +1507,20 @@ public class TestOrchestrator {
             refuseConsumerAndCrc("phases[" + i + "].spec.", phases.get(i).getSpec(), errors);
         }
 
+        java.util.Set<String> names = new java.util.HashSet<>();
         for (int i = 0; i < phases.size(); i++) {
             ScenarioPhase phase = phases.get(i);
             TestSpec own = phase.getSpec();
-            TestSpec resolved = scenario.resolveSpecForPhase(phase);
+            TestSpec resolved = scenario.resolveSpecForPhase(phase, base);
             String name = phase.getName() != null ? phase.getName() : "phase-" + i;
+            // A task's id carries its phase's name, so a second phase of one
+            // name replaced the first's worker: both rows showed the second's
+            // numbers, and cancel could no longer stop the first.
+            if (!names.add(name)) {
+                errors.put(
+                        "phases[" + i + "].name",
+                        "phase " + name + " has the name of an earlier phase; give each phase its own name");
+            }
             ScenarioPhase.PhaseType type = phase.getPhaseType();
             if (type == null) {
                 errors.put(

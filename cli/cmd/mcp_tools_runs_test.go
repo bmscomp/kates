@@ -813,7 +813,7 @@ func mcpOutsideFences(h *mcpHarness, raw []byte) string {
 }
 
 // A scenario run's text reaches the store unvalidated: its phase names
-// become task ids (TestOrchestrator.java:1779), and an older Kates API
+// become task ids (TestOrchestrator.java:1789), and an older Kates API
 // stored its base spec's topic, acks and compression as sent
 // (TestOrchestrator.java:358-367,385-389). None of it may reach the model outside a
 // fence.

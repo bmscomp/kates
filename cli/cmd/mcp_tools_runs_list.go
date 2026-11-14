@@ -574,7 +574,7 @@ func mcpRunDecodeSpec(raw json.RawMessage, w *mcpRunSpecWire) (bool, error) {
 }
 
 // mcpRunSpecFrom reads the stored spec. A run without a topic used one named
-// after its type (TestOrchestrator.java:1635,1962-1963). The topic, acks and
+// after its type (TestOrchestrator.java:1645,1972-1973). The topic, acks and
 // compressionType are shown as identifiers only when they hold values Kafka
 // accepts (mcpKafkaTopicRE, mcpAcksRE, mcpCompressionRE, the values
 // TestSpec's bean validation accepts). A stored run can hold others: a
@@ -706,7 +706,7 @@ func mcpRunRequestedFrom(call *mcpCall, run *client.MCPRun) (*mcpRunRequestedSpe
 func mcpRunTaskFrom(call *mcpCall, t client.MCPRunTask) mcpRunTaskOut {
 	return mcpRunTaskOut{
 		// A scenario run's task ids are the run id and the phase name
-		// (TestOrchestrator.java:1779), which nothing validates.
+		// (TestOrchestrator.java:1789), which nothing validates.
 		TaskID:              call.FenceN(t.TaskID, 128),
 		Phase:               call.FenceN(t.PhaseName, 64),
 		Status:              mcpSanitizeLine(t.Status, 16),
@@ -1031,7 +1031,7 @@ var mcpCaveatsRunsList = []mcpCaveat{
 			mcpAnchoredRef(mcpJava+"report/ReportGenerator.java:220-249,283-294",
 				"report.setSummary(MetricUtils.computeSummary(results));",
 				"summaries.put(phase, MetricUtils.computeSummary(rows))"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:427-436,2112-2128",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:427-436,2122-2138",
 				"TestResult.TaskStatus.PENDING : TestResult.TaskStatus.RUNNING",
 				"private static TestRun withUnfinishedTasksFailed("),
 		},
@@ -1070,7 +1070,7 @@ var mcpCaveatsRunsList = []mcpCaveat{
 			"except for a run cancelled before its tasks existed; a cancel through the REST API also leaves a CANCEL " +
 			"audit row.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:2063-2141",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:2073-2151",
 				`"Cancelled by user"`, `EventKind.FAILED, "cancelled"`, "return run.withResults(updatedResults);"),
 			mcpAnchoredRef(mcpJava+"api/TestResource.java:566-611",
 				`@Path("/{id}/cancel")`, `auditService.record("CANCEL"`, `"Test cancelled; it is stored as FAILED"`),
@@ -1081,9 +1081,11 @@ var mcpCaveatsRunsList = []mcpCaveat{
 		ID:    mcpCaveatScenarioPhasesInTurn,
 		Short: "A scenario's phase specs are not stored, and an older Kates API starts every phase at once.",
 		Text: "A scenario run stores its base spec merged with the type's defaults, and as requestedSpec the base " +
-			"spec as the scenario sent it. Each phase resolves its own spec from the base spec as sent and its own " +
-			"fields, without the type's defaults, and those specs are not stored: the spec shown is not what every " +
-			"phase ran, and a rate it shows may be a type default that no phase used. The phases start only " +
+			"spec as the scenario sent it. A current Kates API resolves each phase's spec from that stored spec and " +
+			"the fields the phase sets, each overriding it even when equal to a default; an older one resolved it " +
+			"from the base spec as sent, without the type's defaults, and dropped a phase value equal to a built-in " +
+			"default, so there a rate the run's spec shows may be a type default no phase used. Phase specs are not " +
+			"stored either way: a phase's own fields override the spec shown. The phases start only " +
 			"producers: the backend refuses a scenario that sets consumerGroup, a fetch setting or enableCrc: true, " +
 			"and the producer options reach every phase. A WARMUP, STEADY or COOLDOWN phase runs at its rate " +
 			"(throughput, or targetThroughput without it), unthrottled without one, and a SPIKE phase unthrottled " +
@@ -1092,8 +1094,9 @@ var mcpCaveatsRunsList = []mcpCaveat{
 			"after another in the order sent, each once the durations of the phases before it have passed, even " +
 			"if they stopped early at their record count, and a RAMP phase's steps in turn within it, so its load " +
 			"rises a step at a time. A task whose turn has not come is PENDING, with the startTime it is due to " +
-			"start at. That API refuses with 400 a SPIKE phase that sets a rate of its own, and a RAMP phase " +
-			"without a rate, with more than 100 steps or with more steps than records a second. An older Kates API " +
+			"start at. That API refuses with 400 a SPIKE phase that sets a rate of its own, a RAMP phase that no " +
+			"rate reaches, with more than 100 steps or with more steps than records a second, and a phase with the " +
+			"name of an earlier one. An older Kates API " +
 			"starts every phase, and every step of a RAMP phase, at once, so they overlap and a RAMP phase's load " +
 			"does not rise; some older ones also run the phases a current one refuses, the k-th step of a RAMP " +
 			"phase without a rate at k records a second, so that phase sends almost nothing. /api/health does not " +
@@ -1102,16 +1105,17 @@ var mcpCaveatsRunsList = []mcpCaveat{
 		Refs: []string{
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:352-354,403-414,416-432",
 				"applyTypeDefaults(type, scenario.getBaseSpec())", ".withRequestedSpec(",
-				"long phaseStartMs = System.currentTimeMillis();", "scenario.resolveSpecForPhase(phase)",
+				"long phaseStartMs = System.currentTimeMillis();", "scenario.resolveSpecForPhase(phase, baseSpec)",
 				"phaseStartMs = saturatedSum(phaseStartMs", "backend.submit(task)", "TestResult.TaskStatus.PENDING"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1473-1501,1573-1612,1622-1634",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1474-1502,1515-1523,1583-1622,1632-1644",
 				"MAX_RAMP_STEPS = 100", "scenarioInapplicableFields(TestScenario scenario", "is a SPIKE phase",
-				"has none (", "check no record CRCs"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1759-1828", "List<BenchmarkTask> buildPhaseTask(",
+				"has none (", "check no record CRCs", "has the name of an earlier phase"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1769-1838", "List<BenchmarkTask> buildPhaseTask(",
 				"int baseTarget = Math.max(1, spec.getThroughput() / steps);", "saturatedSum(startAtMs, s * stepMs)",
 				`taskId + "-spike"`),
-			mcpAnchoredRef(mcpJava+"domain/TestScenario.java:108-183",
-				"TestSpec base = baseSpec != null ? baseSpec : new TestSpec();", "private TestSpec copySpec("),
+			mcpAnchoredRef(mcpJava+"domain/TestScenario.java:115-190",
+				"public TestSpec resolveSpecForPhase(ScenarioPhase phase, TestSpec base)",
+				"if (phaseSpec.hasAcks()) merged.setAcks(phaseSpec.getAcks());", "private TestSpec copySpec("),
 			mcpAnchoredRef(mcpJava+"domain/ScenarioPhase.java:21-26", "private int rampSteps = 1;"),
 			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:129-133,192-202,247-257,464-465",
 				"Thread.ofVirtual()", "awaitStart(task, state)", "task.getStartAtMs() - System.currentTimeMillis()",
