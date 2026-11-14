@@ -68,7 +68,13 @@ public class OutboxPoller {
      */
     private final Set<UUID> inFlight = ConcurrentHashMap.newKeySet();
 
-    @Scheduled(every = "{kates.outbox.poll-interval:2s}", identity = "outbox-poller")
+    // Skipped once shutdown starts: a tick then ran its query on the closed
+    // EntityManagerFactory, an ERROR in the log of every test JVM and of every
+    // graceful stop.
+    @Scheduled(
+            every = "{kates.outbox.poll-interval:2s}",
+            identity = "outbox-poller",
+            skipExecutionIf = Scheduled.ApplicationNotRunning.class)
     @Transactional
     public void processOutbox() {
         List<OutboxEventEntity> events = em.createQuery(
