@@ -164,6 +164,17 @@ public class FaultLimits {
         }
     }
 
+    /**
+     * Puts {@code field} into {@code found} when a wait around a fault (a steady
+     * state, an observation window, a delay between faults, a timeout) is below 0
+     * or longer than a fault may last. The disruption lease is held through each
+     * wait and nothing ends one early: an observationWindowSec of 300000, a typo
+     * for 300, held it for three and a half days.
+     */
+    public void checkWait(Map<String, String> found, String field, int seconds) {
+        range(found, field, seconds, 0, maxDurationSec, MAX_DURATION_SEC);
+    }
+
     /** The violations as a sentence each: the field, then why. */
     public static String describe(Map<String, String> violations) {
         return violations.entrySet().stream()

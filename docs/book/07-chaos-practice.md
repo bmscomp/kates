@@ -611,6 +611,8 @@ The other types may set a `chaosDurationSec` of `0`, because a deleted pod comes
 
 The duration ceiling matters most on `kubernetes`, where a CPU or IO stress runs in an ephemeral container that Kubernetes can't remove: its duration is all that stops it. A `ROLLING_RESTART`'s `chaosDurationSec` is its wait for the Cluster Operator to roll every pod, so on a cluster whose roll takes over an hour, raise `kates.chaos.limits.max-duration-sec`.
 
+The same ceiling bounds the waits around a fault, each from 0: a plan step's `steadyStateSec` and `observationWindowSec`, a compound run's `timeoutSec` and `delayBetweenSec`, and a resilience run's `steadyStateSec`, `maxRecoveryWaitSec` and each top-level probe's `timeoutSec`. Kates holds the disruption lease through every one of them and nothing ends one early, so an `observationWindowSec` of `300000`, a typo for `300`, would keep every other disruption out for three and a half days.
+
 ### What Rollback Undoes
 
 Rollback runs only while the plan's `autoRollback` is on, which is the default, and only in two cases:

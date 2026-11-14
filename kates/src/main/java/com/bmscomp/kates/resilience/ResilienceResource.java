@@ -217,7 +217,8 @@ public class ResilienceResource {
             responseCode = "400",
             description = "Invalid request, including a testRequest with no type, a testRequest spec value outside"
                     + " its limits, a testRequest spec field the test type or backend cannot apply, or a chaosSpec"
-                    + " parameter outside the chaos limits or a probe intervalSec under 1, where fieldErrors names"
+                    + " parameter outside the chaos limits, a probe intervalSec under 1, or a steadyStateSec,"
+                    + " maxRecoveryWaitSec or probe timeoutSec outside 0 to the chaos duration limit, where fieldErrors names"
                     + " each field; or a chaosSpec the safety guard refuses, such as one that would hit every broker")
     @APIResponse(
             responseCode = "409",
@@ -242,9 +243,9 @@ public class ResilienceResource {
         if (outsideLimits.isPresent()) {
             return outsideLimits.get();
         }
-        Optional<Response> probesTooFast = probesTooFast(request.getProbes());
-        if (probesTooFast.isPresent()) {
-            return probesTooFast.get();
+        Optional<Response> badTimings = badTimings(request);
+        if (badTimings.isPresent()) {
+            return badTimings.get();
         }
         Optional<Response> unsafeOrBusy = unsafeOrBusy(request.getChaosSpec());
         if (unsafeOrBusy.isPresent()) {
@@ -256,19 +257,26 @@ public class ResilienceResource {
     }
 
     /**
-     * A 400 naming each probe with an intervalSec under 1, or empty when there
-     * is none. The probe monitor sleeps that long between rounds, so at 0 it
-     * ran exec calls into the broker pods back to back for the whole fault.
+     * A 400 naming each wait outside its range, or empty when there is none: a
+     * probe's intervalSec under 1 (the probe monitor sleeps that long between
+     * rounds, so at 0 it ran exec calls into the broker pods back to back for
+     * the whole fault), and steadyStateSec, maxRecoveryWaitSec or a probe's
+     * timeoutSec past the chaos limits, since the lease is held through each.
      */
-    private static Optional<Response> probesTooFast(List<ProbeSpec> probes) {
-        if (probes == null) {
-            return Optional.empty();
-        }
+    private Optional<Response> badTimings(ResilienceTestRequest request) {
         Map<String, String> found = new LinkedHashMap<>();
+        faultLimits.checkWait(found, "steadyStateSec", request.getSteadyStateSec());
+        faultLimits.checkWait(found, "maxRecoveryWaitSec", request.getMaxRecoveryWaitSec());
+        List<ProbeSpec> probes = request.getProbes() != null ? request.getProbes() : List.of();
         for (int i = 0; i < probes.size(); i++) {
-            if (probes.get(i) != null && probes.get(i).intervalSec() < 1) {
+            if (probes.get(i) == null) {
+                continue;
+            }
+            if (probes.get(i).intervalSec() < 1) {
                 found.put("probes[" + i + "].intervalSec", "must be at least 1");
             }
+            faultLimits.checkWait(
+                    found, "probes[" + i + "].timeoutSec", probes.get(i).timeoutSec());
         }
         if (found.isEmpty()) {
             return Optional.empty();

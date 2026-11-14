@@ -123,7 +123,8 @@ public class DisruptionAnalysisResource {
     @APIResponse(responseCode = "200", description = "Each fault's outcome")
     @APIResponse(
             responseCode = "400",
-            description = "No fault, a fault without a faultSpec or with a parameter outside the chaos limits, or"
+            description = "No fault, a fault without a faultSpec or with a parameter outside the chaos limits, a"
+                    + " timeoutSec or delayBetweenSec outside 0 to the chaos duration limit, or"
                     + " faults the safety guard refuses, such as faults that would hit every broker; no fault is"
                     + " triggered")
     @APIResponse(
@@ -143,7 +144,8 @@ public class DisruptionAnalysisResource {
 
         // The limits first, so a fault without a spec is refused by its place:
         // the guard reads every spec.
-        compoundOrchestrator.checkLimits(faults);
+        compoundOrchestrator.checkLimits(
+                faults, Map.of("timeoutSec", request.timeoutSec, "delayBetweenSec", request.delayBetweenSec));
 
         // Each fault is counted as a plan step, aimed as posted. A compound
         // fault is never aimed at a topic's leader, so targetTopic is dropped:
