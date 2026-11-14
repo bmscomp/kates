@@ -248,7 +248,13 @@ curl -s -H "X-API-Key: $KATES_API_KEY" "$BASE/api/drain"
 **Response:** `200 OK`
 
 ```json
-{ "draining": true, "liveRuns": 1, "faultsInFlight": 0, "webhooksInFlight": 0, "drained": false }
+{
+  "draining": true,
+  "liveRuns": 1,
+  "faultsInFlight": 0,
+  "webhooksInFlight": 0,
+  "drained": false
+}
 ```
 
 `liveRuns` counts the test runs still going, and a cancelled or timed-out run until its `FAILED` row is written. `faultsInFlight` counts the disruption plans, compound runs and resilience tests between their request and their saved report. `webhooksInFlight` counts the webhook deliveries of ended runs that are still being sent or retried: an event is marked handled before it is delivered, so a delivery cut off by the pod's replacement is not sent again. `drained` is true once `draining` is true, all three counts are zero and no fault holds the disruption lease.
