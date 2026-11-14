@@ -299,6 +299,8 @@ for i in "${MEMBERS[@]}"; do
     openssl x509 -req -days 1 -in "${PKI}/${m}.csr" -CA "${PKI}/ca.crt" -CAkey "${PKI}/ca.key" -CAcreateserial \
         -extfile "${PKI}/${m}.ext" -out "${PKI}/${m}.crt" >/dev/null 2>&1 || fail "openssl could not sign ${m}"
 done
+# The container runs as another user: a 0700 mktemp dir would hide the files (throwaway, 1-day certs).
+chmod 0755 "${PKI}"
 chmod 0644 "${PKI}"/*
 for i in "${MEMBERS[@]}"; do
     m="$(member "$i")"
