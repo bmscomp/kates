@@ -50,6 +50,9 @@ public class SecurityService {
     SecurityKafkaHelpers helpers;
 
     @Inject
+    ClusterTopologyService topology;
+
+    @Inject
     public SecurityService(KafkaAdminService adminService, ClusterHealthService clusterHealthService) {
         this.adminService = adminService;
         this.clusterHealthService = clusterHealthService;
@@ -1390,8 +1393,10 @@ public class SecurityService {
         Map<String, Object> report = new LinkedHashMap<>();
 
         try {
-            var clusterInfo = clusterHealthService.describeCluster();
-            String kafkaVersion = String.valueOf(clusterInfo.getOrDefault("kafkaVersion", "unknown"));
+            // The cluster description holds no version, so every CVE read as
+            // PATCHED and the grade as PASS: the Kafka resource says it.
+            java.util.Optional<String> version = topology.kafkaVersion();
+            String kafkaVersion = version.orElse("unknown");
 
             List<Map<String, Object>> knownCves = new ArrayList<>();
             knownCves.add(cve(
@@ -1446,10 +1451,14 @@ public class SecurityService {
 
             List<Map<String, Object>> applicable = new ArrayList<>();
             List<Map<String, Object>> patched = new ArrayList<>();
+            List<Map<String, Object>> notCompared = new ArrayList<>();
 
             for (Map<String, Object> c : knownCves) {
                 String affectedUpTo = (String) c.get("affectedUpTo");
-                if (compareVersions(kafkaVersion, affectedUpTo) <= 0) {
+                if (version.isEmpty()) {
+                    c.put("status", "NOT_COMPARED");
+                    notCompared.add(c);
+                } else if (compareVersions(kafkaVersion, affectedUpTo) <= 0) {
                     c.put("status", "VULNERABLE");
                     applicable.add(c);
                 } else {
@@ -1461,13 +1470,22 @@ public class SecurityService {
             report.put("kafkaVersion", kafkaVersion);
             report.put("vulnerabilities", applicable);
             report.put("patched", patched);
+            report.put("notCompared", notCompared);
             report.put(
                     "summary",
                     Map.of(
                             "total", knownCves.size(),
                             "vulnerable", applicable.size(),
-                            "patched", patched.size()));
-            report.put("grade", applicable.isEmpty() ? "PASS" : "FAIL");
+                            "patched", patched.size(),
+                            "notCompared", notCompared.size()));
+            // Without a version no CVE is ruled out, so the check does not pass.
+            report.put("grade", applicable.isEmpty() && notCompared.isEmpty() ? "PASS" : "FAIL");
+            if (version.isEmpty()) {
+                report.put(
+                        "reason",
+                        "The Kafka version could not be read from the cluster's Strimzi Kafka resource (status"
+                                + ".kafkaVersion or spec.kafka.version), so no CVE was compared with it");
+            }
             report.put("timestamp", Instant.now().toString());
 
         } catch (Exception e) {

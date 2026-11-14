@@ -145,14 +145,17 @@ var mcpCaveatsCore = []mcpCaveat{
 	},
 	{
 		ID:    mcpCaveatCVEFixedList,
-		Short: "The CVE check never learns the Kafka version, so every CVE on its fixed list reads PATCHED.",
-		Text: "The CVE check compares against a fixed list of seven Apache Kafka CVEs, the newest from 2024. It never " +
-			"learns the Kafka version: it reads kafkaVersion from the cluster description, which does not carry one, " +
-			"so the version is \"unknown\", the comparison fails, and every CVE is reported PATCHED with grade PASS.",
+		Short: "The CVE check compares a fixed list; without a Kafka version an older Kates API calls every CVE PATCHED.",
+		Text: "The CVE check compares against a fixed list of seven Apache Kafka CVEs, the newest from 2024. A current " +
+			"Kates API reads the Kafka version from the cluster's Strimzi Kafka resource (status.kafkaVersion, else " +
+			"spec.kafka.version); when it cannot, it compares nothing, lists every CVE under notCompared and grades " +
+			"FAIL. An older one read the version from the cluster description, which does not carry one, so the " +
+			"version was \"unknown\", the comparison failed, and every CVE was reported PATCHED with grade PASS.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1387-1478", "public Map<String, Object> cveCheck()"),
-			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1576-1590", "private int compareVersions(String v1, String v2)"),
-			mcpJava + "service/ClusterHealthService.java:72-93",
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1390-1496", "public Map<String, Object> cveCheck()"),
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1594-1608", "private int compareVersions(String v1, String v2)"),
+			mcpAnchoredRef(mcpJava+"service/ClusterTopologyService.java:371-383",
+				"public java.util.Optional<String> kafkaVersion()", `status.get("kafkaVersion")`),
 		},
 	},
 	{
@@ -163,9 +166,9 @@ var mcpCaveatsCore = []mcpCaveat{
 			"audits that compliance, baseline, drift and gate run internally do not (an older backend appended those " +
 			"too, so there it mostly reflects API traffic).",
 		Refs: []string{
-			mcpJava + "service/SecurityService.java:42,58-69",
-			mcpAnchoredRef(mcpJava+"service/SecurityService.java:793,856,918,983", "= runAudit();"),
-			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1653-1693", "private void recordSnapshot("),
+			mcpJava + "service/SecurityService.java:42,61-72",
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:796,859,921,986", "= runAudit();"),
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1671-1711", "private void recordSnapshot("),
 		},
 	},
 	{

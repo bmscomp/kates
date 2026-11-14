@@ -312,7 +312,7 @@ var mcpCaveatsCluster = []mcpCaveat{
 			"with fewer pods than replicas, is therefore not evidence that controllers or brokers are missing. A read " +
 			"that Kubernetes refuses (HTTP 403) is named in topology.unread.",
 		Refs: []string{
-			mcpJava + "service/ClusterTopologyService.java:109-113,568-642,645-735",
+			mcpJava + "service/ClusterTopologyService.java:109-113,578-652,655-745",
 			mcpAnchoredRef("charts/kates/templates/configmap.yaml:11,13,15", "$kafkaNamespace := tpl",
 				"KATES_TOPOLOGY_KAFKA_NAMESPACE:", "KATES_TOPOLOGY_KAFKA_CLUSTER:"),
 		},

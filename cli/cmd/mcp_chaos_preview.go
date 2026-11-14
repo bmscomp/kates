@@ -563,7 +563,7 @@ func mcpRunPreview(ctx context.Context, call *mcpCall, in mcpPreviewIn, adHoc []
 		return r, &mcpToolError{Code: mcpErrBackend, Message: "The Kates API returned an empty dry-run result.", Retryable: true}
 	}
 	// "unknown" is what the topology reports when Kafka does not answer
-	// (ClusterTopologyService.java:441-453), not another cluster.
+	// (ClusterTopologyService.java:451-463), not another cluster.
 	if r.topoErr == nil && r.topo != nil && r.topo.Cluster != nil && r.topo.Cluster.ClusterID != "unknown" {
 		if err := call.CheckCluster(r.topo.Cluster.ClusterID); err != nil {
 			return r, err
@@ -833,7 +833,7 @@ func mcpAgentLimitFindings(v *mcpPlanView, kafkaNamespace string) []mcpAgentLimi
 // mcpKRaftControllerIndex tells KRaft controllers from brokers among pod
 // names, and Kafka node pods from other pods. Strimzi names a node pool's
 // pods <cluster>-<pool>-<node id>, and the topology lists each pool with all
-// its roles (ClusterTopologyService.java:568-641) and each pod with its pool
+// its roles (ClusterTopologyService.java:578-651) and each pod with its pool
 // (:599-687).
 type mcpKRaftControllerIndex struct {
 	known     bool

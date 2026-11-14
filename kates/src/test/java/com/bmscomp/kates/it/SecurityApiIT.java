@@ -273,17 +273,22 @@ class SecurityApiIT {
                 .body("certificates[0].checks.size()", greaterThanOrEqualTo(1));
     }
 
+    /**
+     * No Kubernetes here, so no Kafka resource to read the version from: the
+     * check compares nothing and fails, rather than calling every CVE patched.
+     */
     @Test
-    void cveCheckResolvesTheBrokerVersionItIsJudging() {
+    void cveCheckWithoutAKafkaVersionComparesNothingAndFails() {
         given().when()
                 .get("/api/security/cve")
                 .then()
                 .statusCode(200)
-                .body("kafkaVersion", notNullValue())
-                .body("grade", org.hamcrest.Matchers.oneOf("PASS", "FAIL"))
+                .body("kafkaVersion", equalTo("unknown"))
+                .body("grade", equalTo("FAIL"))
                 .body("summary.total", greaterThanOrEqualTo(1))
-                .body("summary.vulnerable", notNullValue())
-                .body("summary.patched", notNullValue());
+                .body("summary.patched", is(0))
+                .body("notCompared.size()", greaterThanOrEqualTo(1))
+                .body("reason", notNullValue());
     }
 
     @Test

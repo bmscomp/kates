@@ -130,7 +130,7 @@ var mcpCaveatsChaos = []mcpCaveat{
 				"private static final long CAUGHT_UP_WITHIN_MS = 2000;", "public Optional<Quorum> quorum()"),
 			mcpAnchoredRef(mcpJava+"chaos/PodTargets.java:108-128",
 				"public static boolean isBroker(Pod pod)", "public static boolean isController(Pod pod)"),
-			mcpJava + "service/ClusterTopologyService.java:568-641",
+			mcpJava + "service/ClusterTopologyService.java:578-651",
 			"charts/kafka-cluster/values.yaml:281-282",
 		},
 	},
