@@ -23,7 +23,7 @@ import com.bmscomp.kates.trogdor.spec.TrogdorSpec;
 
 /**
  * Backend that delegates benchmark execution to the Trogdor Coordinator.
- * Wraps the existing TrogdorClient and SpecFactory.
+ * Wraps the TrogdorClient and turns each BenchmarkTask into a Trogdor spec.
  */
 @ApplicationScoped
 @Named("trogdor")

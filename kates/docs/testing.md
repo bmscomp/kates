@@ -19,7 +19,7 @@ Unit tests exercise individual classes in isolation, with all external dependenc
 - `TestOrchestrator` — verifies that the correct `BenchmarkTask` objects are built for each test type, that per-type defaults are applied correctly, and that the backend selection logic resolves to the expected backend
 - `SlaGrader` — verifies the grading algorithm (A/B/C/D/F) against a variety of metric combinations: all-pass, partial failure, critical violation, edge cases
 - `DisruptionSafetyGuard` — verifies blast radius validation, RBAC permission checks, and rollback logic
-- `SpecFactory` — verifies that `TestSpec` objects are correctly translated to Trogdor-specific `ProduceBenchSpec`, `ConsumeBenchSpec`, and `RoundTripWorkloadSpec` POJOs
+- `TrogdorBackend` — verifies that `BenchmarkTask` objects are correctly translated to Trogdor-specific `ProduceBenchSpec`, `ConsumeBenchSpec`, and `RoundTripWorkloadSpec` POJOs
 - `TestTypeDefaults` — verifies that the three-tier configuration resolution works correctly and that per-type overrides take precedence over global defaults
 - `DisruptionPlaybookCatalog` — verifies that playbook YAML files are correctly parsed and converted to `DisruptionPlan` objects
 
@@ -93,7 +93,7 @@ This runs all unit, integration, and API tests. The test output shows:
 ./mvnw test -Dtest=TestOrchestratorTest
 ./mvnw test -Dtest=SlaGraderTest
 ./mvnw test -Dtest=DisruptionSafetyGuardTest
-./mvnw test -Dtest=SpecFactoryTest
+./mvnw test -Dtest=TrogdorBackendTest
 ./mvnw test -Dtest=DisruptionResourceTest
 ```
 
@@ -249,7 +249,7 @@ void testTopicCreation() {
 
 When adding a new feature to Kates, follow this checklist for test coverage:
 
-1. **Unit test the business logic** — if you are adding a new method to `SlaGrader`, `DisruptionSafetyGuard`, `SpecFactory`, or any other service, write unit tests that verify the method's behavior in isolation with mocked dependencies.
+1. **Unit test the business logic** — if you are adding a new method to `SlaGrader`, `DisruptionSafetyGuard`, or any other service, write unit tests that verify the method's behavior in isolation with mocked dependencies.
 
 2. **Integration test the flow** — if your feature involves multiple CDI beans interacting (e.g., a new API endpoint that calls the orchestrator, which calls a backend), write an integration test using `@QuarkusTest` and `@InjectMock`.
 

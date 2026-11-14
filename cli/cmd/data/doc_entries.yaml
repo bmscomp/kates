@@ -1175,9 +1175,9 @@
   synopsis: "kates disruption watch <id>"
   short: "Stream real-time progress events from a running disruption"
   description: |
-    The backend emits the events under the plan's name, not under
-    the disruption ID, so for that ID no events arrive yet. Follow
-    a run with 'kates disruption status <id>' until it does.
+    The stream starts with the events that come after it connects;
+    to see a step that has already finished, use
+    'kates disruption status <id>'.
   examples:
     - "kates disruption watch abc123"
   see_also:

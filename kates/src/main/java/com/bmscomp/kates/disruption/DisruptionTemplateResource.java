@@ -68,7 +68,7 @@ public class DisruptionTemplateResource {
         try {
             DisruptionPlan plan = templateCatalog.buildPlan(templateId, overrides != null ? overrides : Map.of());
             String id = java.util.UUID.randomUUID().toString().substring(0, 8);
-            DisruptionReport report = orchestrator.execute(plan);
+            DisruptionReport report = orchestrator.execute(id, plan);
             DisruptionPersistence.persistReport(id, report, repository, objectMapper);
             return Response.ok(Map.of("id", id, "template", templateId, "report", report))
                     .build();

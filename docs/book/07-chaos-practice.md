@@ -15,7 +15,7 @@ A disruption plan answers the cluster question. It runs one or more steps, each 
 
 A resilience run answers the client question. It starts a Kates test, such as a [LOAD](appendix-a-glossary.md#gl-test-type) or an INTEGRITY run, waits `steadyStateSec`, and injects one fault while the test runs. It snapshots the test's throughput, latency and error rate just before the fault, summarizes the whole run again after the recovery wait, and prints the change. When the question is whether `krafter` can lose an acknowledged payment, an INTEGRITY run through the fault is the one that answers it.
 
-Each run of a plan or a playbook is a disruption, with its own ID and report. Either kind of run carries out a chaos experiment: faults injected on purpose to test a [steady-state hypothesis](appendix-a-glossary.md#gl-steady-state-hypothesis) [@basiri2016chaos]. A [Game Day](appendix-a-glossary.md#gl-game-day) is the session your team runs around these commands, which [Chaos Engineering Theory](06-chaos-theory.md#the-game-day-methodology) explains; `make gameday` scripts one, and injects its fault with `kubectl`, outside the [Kates API](appendix-a-glossary.md#gl-kates-api).
+Each run of a plan or a playbook is a disruption, with its own ID and report. Either kind of run carries out a chaos experiment: faults injected on purpose to test a [steady-state hypothesis](appendix-a-glossary.md#gl-steady-state-hypothesis) [@basiri2016chaos]. A [Game Day](appendix-a-glossary.md#gl-game-day) is the session your team runs around these commands, which [Chaos Engineering Theory](06-chaos-theory.md#the-game-day-methodology) explains.
 
 The table sets a plan and a resilience run side by side. Read the guard, rollback and report rows before you choose, because that's where the two differ most.
 
@@ -664,7 +664,6 @@ The guard counts brokers, reads pod readiness and, for a drain, where pods run, 
 - Steps that pick one pod at random from the same selector count as one broker between them, although each can hit a different broker.
 - A `NODE_DRAIN` step counts the brokers on its node as the pods run when you submit the plan. A pod that moves to another node before the step runs takes the drain with it.
 - A resilience run (`kates resilience run`) gets the namespace check and the broker count before its test starts, with no `maxAffectedBrokers`, and the one-at-a-time rule then and again just before its fault. It gets no check of the Kafka pods before the fault and no rollback.
-- `make gameday` doesn't go through it either: it deletes a broker pod with `kubectl`.
 - The one-plan rule lives in the Kates API process, so it holds only while one Kates API pod runs. The `kates` chart refuses a second replica and rolls with `Recreate`, so it never runs two.
 - Orphan recovery deletes Kates NetworkPolicies in every namespace, but restores scale-downs in the Kafka namespace only. A StatefulSet that a Kates API left scaled down in another namespace when it died stays so until you scale it back to the count in its `kates.io/original-replicas` annotation.
 - The dry run's RBAC check (see [Previewing a Playbook](#previewing-a-playbook)) asks about the Kates API's own service account, and a missing permission is a warning, not a refusal.
@@ -746,9 +745,7 @@ kates disruption watch <id>
 - Rollback events, when a step rolls back after its recovery timeout
 - Final SLA grade and completion status
 
-::: {.callout-warning title="Known limitation: kates disruption watch receives no events"}
-The Kates API emits these events under the plan's name, not under the disruption ID that `kates disruption run` returns, so `kates disruption watch <id>` connects and then receives nothing. Follow a run with `kates disruption status <id>` instead, which shows its status and each finished step.
-:::
+The stream sends only the events that come after it connects. `kates disruption status <id>` shows a run's status and each finished step.
 
 ## Resilience Runs: A Fault Inside a Test
 

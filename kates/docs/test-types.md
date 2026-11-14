@@ -1,6 +1,6 @@
 # Test Types
 
-Kates supports seven performance test types, each designed to stress different aspects of a Kafka cluster. Every test type encodes a specific testing philosophy—a hypothesis about what you are trying to learn—and translates that philosophy into concrete Kafka workloads through the `SpecFactory`. Understanding when and why to use each test type is as important as knowing how to configure it.
+Kates supports seven performance test types, each designed to stress different aspects of a Kafka cluster. Every test type encodes a specific testing philosophy—a hypothesis about what you are trying to learn—and translates that philosophy into concrete Kafka workloads through the `BenchmarkTask` objects the orchestrator builds for it. Understanding when and why to use each test type is as important as knowing how to configure it.
 
 ## LOAD — Steady-State Throughput
 

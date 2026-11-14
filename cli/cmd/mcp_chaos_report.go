@@ -261,7 +261,7 @@ func mcpReadDisruption(ctx context.Context, call *mcpCall, id, baseline string) 
 
 // mcpDisruptionReportSummaryFrom is the report's summary with what its worst
 // recovery times leave out: the orchestrator takes each worst over the steps
-// that measured one (DisruptionOrchestrator.java:139-140,167-176), so a step
+// that measured one (DisruptionOrchestrator.java:141-142,169-178), so a step
 // that never recovered adds nothing to it. The counts come from every step,
 // including those the result leaves out.
 func mcpDisruptionReportSummaryFrom(r *client.DisruptionReportDetail) *mcpDisruptionReportSummary {
@@ -368,7 +368,7 @@ func mcpDisruptionReportImpactFrom(call *mcpCall, report *client.DisruptionRepor
 // throughput from the summary alone, and replication and consumer lag from
 // the steps' trackers (DisruptionImpactScorer.java:30-51); the summary's
 // latency and throughput figures come from the steps' p99LatencyMs and
-// throughputRecPerSec deltas (DisruptionOrchestrator.java:182-187). Each such
+// throughputRecPerSec deltas (DisruptionOrchestrator.java:184-189). Each such
 // dimension scores 0, except replication from a tracker that took no sample
 // (mcpCaveatISRNotSampled).
 func mcpImpactNotScored(r *client.DisruptionReportDetail) []string {
@@ -452,7 +452,7 @@ func mcpFitDisruptionReport(call *mcpCall, out *mcpDisruptionReportOut) {
 // strimziRecoveryTime: the orchestrator starts polling the Kafka resource only
 // after the step's observation window and recovery wait, and returns the
 // elapsed time on a timeout too (StrimziStateTracker.java:45-75,
-// DisruptionOrchestrator.java:391-394), so the figure is not a recovery time.
+// DisruptionOrchestrator.java:393-396), so the figure is not a recovery time.
 func mcpDisruptionReportStepFrom(call *mcpCall, s client.DisruptionStepDetail) mcpDisruptionReportStep {
 	step := mcpDisruptionReportStep{
 		Name:                   call.FenceN(s.StepName, 200),

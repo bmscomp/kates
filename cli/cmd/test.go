@@ -64,8 +64,8 @@ var testListCmd = &cobra.Command{
 		}
 		output.Table([]string{"ID", "Type", "Status", "Backend", "Created"}, rows)
 
-		totalPages := paged.TotalPages
-		if totalPages == 0 && paged.TotalItems > 0 && paged.Size > 0 {
+		totalPages := 0
+		if paged.TotalItems > 0 && paged.Size > 0 {
 			totalPages = (paged.TotalItems + paged.Size - 1) / paged.Size
 		}
 		output.Hint(fmt.Sprintf("Page %d of %d · %d total runs", paged.Page+1, totalPages, paged.TotalItems))

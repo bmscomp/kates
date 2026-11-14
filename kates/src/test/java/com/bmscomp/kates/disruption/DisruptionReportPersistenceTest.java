@@ -87,7 +87,7 @@ class DisruptionReportPersistenceTest {
     void aLaunchedPlanReplacesItsRunningPlaceholderWithItsOutcome() throws Exception {
         String planName = unique("launched");
         CountDownLatch finish = new CountDownLatch(1);
-        when(orchestrator.execute(any())).thenAnswer(inv -> {
+        when(orchestrator.execute(any(), any())).thenAnswer(inv -> {
             assertTrue(finish.await(WAIT.toSeconds(), TimeUnit.SECONDS), "the test never let the plan finish");
             return completed(planName);
         });
@@ -134,7 +134,7 @@ class DisruptionReportPersistenceTest {
     @Test
     void aPlanThatThrowsIsStoredAsFailed() {
         String planName = unique("throws");
-        when(orchestrator.execute(any())).thenThrow(new IllegalStateException("provider exploded"));
+        when(orchestrator.execute(any(), any())).thenThrow(new IllegalStateException("provider exploded"));
 
         String id = launcher.launch(plan(planName)).id();
 
@@ -204,7 +204,7 @@ class DisruptionReportPersistenceTest {
     @Test
     void aTemplateRunStoresItsReportOnce() {
         String planName = unique("template");
-        when(orchestrator.execute(any())).thenReturn(completed(planName));
+        when(orchestrator.execute(any(), any())).thenReturn(completed(planName));
 
         String id = given().contentType(ContentType.JSON)
                 .body(Map.of())
@@ -227,7 +227,7 @@ class DisruptionReportPersistenceTest {
     @Test
     void aScheduledRunStoresItsReportOnce() {
         String planName = unique("scheduled");
-        when(orchestrator.execute(any())).thenReturn(completed(planName));
+        when(orchestrator.execute(any(), any())).thenReturn(completed(planName));
         String scheduleName = unique("every-minute");
         String scheduleId = given().contentType(ContentType.JSON)
                 .body(Map.of("name", scheduleName, "cronExpression", "* * * * *", "playbookName", "az-failure"))

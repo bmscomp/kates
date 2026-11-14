@@ -26,7 +26,7 @@ import (
 // Every tool goes through addReadTool and reads only with GET. get_run and
 // assess_run read the run with GET /api/tests/{id}, which makes the backend
 // poll a run that is still active and save what it finds
-// (TestResource.java:527-533, TestOrchestrator.refreshStatus); both
+// (TestResource.java:521-527, TestOrchestrator.refreshStatus); both
 // descriptions say so. Third-party text (task errors, scenario and phase
 // names, labels, plan names, audit details, backend messages) is fenced;
 // ids, types and statuses are cleaned so an agent can pass them back.
@@ -101,7 +101,7 @@ const (
 	mcpRunsMaxLimit     = 25
 	mcpRunsMaxOffset    = 250_000
 	// With both filters the backend applies only the type (TestResource.java:
-	// 249-261), so the status is filtered here over the newest runs of the
+	// 243-255), so the status is filtered here over the newest runs of the
 	// type, read in the backend's largest pages (size is capped at 200).
 	mcpRunsScanPageSize = 200
 	mcpRunsMaxScan      = 1000
@@ -1073,7 +1073,7 @@ var mcpCaveatsRunsList = []mcpCaveat{
 		Refs: []string{
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:2144-2226",
 				`"Cancelled by user"`, `EventKind.FAILED, "cancelled"`, "return run.withResults(updatedResults);"),
-			mcpAnchoredRef(mcpJava+"api/TestResource.java:571-616",
+			mcpAnchoredRef(mcpJava+"api/TestResource.java:565-610",
 				`@Path("/{id}/cancel")`, `auditService.record("CANCEL"`, `"Test cancelled; it is stored as FAILED"`),
 			mcpJava + "domain/TestResult.java:25-31",
 		},

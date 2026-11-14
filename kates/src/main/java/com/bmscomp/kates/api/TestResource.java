@@ -39,7 +39,6 @@ import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.audit.AuditTrail;
 import com.bmscomp.kates.audit.Audited;
-import com.bmscomp.kates.chaos.ChaosProvider;
 import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.PruneResponse;
 import com.bmscomp.kates.domain.TestResult;
@@ -95,7 +94,6 @@ public class TestResource {
 
     private final TestOrchestrator orchestrator;
     private final TestRunRepository repository;
-    private final ChaosProvider chaosProvider;
 
     @Inject
     BaselineService baselineService;
@@ -110,13 +108,9 @@ public class TestResource {
     AuditTrail auditTrail;
 
     @Inject
-    public TestResource(
-            TestOrchestrator orchestrator,
-            TestRunRepository repository,
-            @jakarta.inject.Named("kubernetes") ChaosProvider chaosProvider) {
+    public TestResource(TestOrchestrator orchestrator, TestRunRepository repository) {
         this.orchestrator = orchestrator;
         this.repository = repository;
-        this.chaosProvider = chaosProvider;
     }
 
     @Audited(action = "CREATE", type = "test")

@@ -695,7 +695,7 @@ Output, in the classic look, with two illustrative runs:
   Page 1 of 1 · 2 total runs
 ```
 
-An ID longer than 12 characters is cut to 12 and `…`. With `-o json` it prints the page: `items`, `page`, `size`, `total`, `totalPages` and `count`. [Pagination](#pagination) says how to read the next page.
+An ID longer than 12 characters is cut to 12 and `…`. With `-o json` it prints the page: `items`, `page`, `size`, `total` and `count`. [Pagination](#pagination) says how to read the next page.
 
 #### test create
 
@@ -1250,11 +1250,7 @@ Show Kafka intelligence data: ISR tracking, consumer lag, leader targeting.
 kates disruption watch <id>
 ```
 
-Opens the disruption's server-sent event stream, with the context's API key, and prints each progress event until the run completes or fails, for at most 30 minutes.
-
-::: {.callout-warning title="Known limitation: no events arrive for a disruption ID"}
-The Kates API emits a run's events under its plan's name, not under the ID that `kates disruption run` returns, so `watch <id>` connects and then waits without printing any progress. Until the Kates API emits them under the disruption ID, follow a run by polling `kates disruption status <id>`, with `-o json` in a script.
-:::
+Opens the disruption's server-sent event stream, with the context's API key, and prints each progress event until the run completes or fails, for at most 30 minutes. The stream starts with the events that come after it connects: for a step that has already finished, use `kates disruption status <id>`.
 
 #### disruption playbook list
 

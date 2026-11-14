@@ -707,7 +707,7 @@ Each test lists what to inject, the workload, the expected result per architectu
 1. S1: one random broker (`strimzi.io/cluster=krafter,strimzi.io/broker-role=true`, `targetAll: false`, `targetBrokerId: -1`, `maxAffectedBrokers: 1`).
 2. S2: one random controller (`strimzi.io/cluster=krafter,strimzi.io/controller-role=true`, same settings).
 3. S3, S4, S5: every Kafka pod of one room, as three separate plans: `site=a` for AZ1 (A4 and A5 pods carry `zone=az1a` or `zone=az1b`), `zone=az2`, `zone=az3`.
-4. A site-B transient: every Kafka pod with `site=b`, `maxAffectedBrokers` = the site-B pod count. In A6 that is every pod of KB, which the safety guard rejects as a plan and as a resilience run: run it outside Kates, with `kubectl delete pod -l` as `make gameday` does, while a REST INTEGRITY run writes (no `rpoMs`), and check its selector with `kubectl get pods -l` first.
+4. A site-B transient: every Kafka pod with `site=b`, `maxAffectedBrokers` = the site-B pod count. In A6 that is every pod of KB, which the safety guard rejects as a plan and as a resilience run: run it outside Kates, with `kubectl delete pod -l`, while a REST INTEGRITY run writes (no `rpoMs`), and check its selector with `kubectl get pods -l` first.
 
 The pods come back within seconds: this is not an outage test.
 

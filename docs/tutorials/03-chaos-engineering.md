@@ -410,7 +410,7 @@ kates disruption run --config full-suite.json
 kates disruption status <id>
 ```
 
-`kates disruption watch <id>` is meant to stream the run's progress, but the backend emits its events under the plan's name rather than the disruption ID, so for now it receives nothing; `kates disruption status <id>` shows where the run stands.
+`kates disruption watch <id>` streams the run's progress as it happens, from the moment it connects; `kates disruption status <id>` shows where the run stands, finished steps included.
 
 ## What's Next?
 

@@ -178,7 +178,6 @@ var mcpCaveatsCore = []mcpCaveat{
 			"and compares none.",
 		Refs: []string{
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1843-1844", "case TUNE_REPLICATION,", "-tune-0"),
-			mcpJava + "trogdor/SpecFactory.java:38-39",
 		},
 	},
 	{

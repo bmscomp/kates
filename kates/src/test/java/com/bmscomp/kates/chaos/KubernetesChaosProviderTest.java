@@ -105,7 +105,7 @@ public class KubernetesChaosProviderTest {
                 .targetLabel("app=kafka")
                 .disruptionType(DisruptionType.CPU_STRESS)
                 .cpuCores(2)
-                .chaosDurationSec(10)
+                .chaosDurationSec(1)
                 .build();
 
         ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
@@ -119,7 +119,7 @@ public class KubernetesChaosProviderTest {
         Pod sent = client.getKubernetesSerialization().unmarshal(write.getUtf8Body(), Pod.class);
         assertEquals(1, sent.getSpec().getEphemeralContainers().size());
         EphemeralContainer stress = sent.getSpec().getEphemeralContainers().get(0);
-        assertEquals("chaos-cpu-stress", stress.getName());
+        assertTrue(stress.getName().startsWith("chaos-cpu-stress-"), stress.getName());
         assertEquals("docker.io/polinux/stress:1.0.4", stress.getImage());
         // The pod names no user: stress runs as nobody.
         assertRestricted(stress, 65534L, 65534L);
@@ -169,7 +169,7 @@ public class KubernetesChaosProviderTest {
                 .targetLabel("app=kafka2")
                 .disruptionType(DisruptionType.IO_STRESS)
                 .ioWorkers(4)
-                .chaosDurationSec(10)
+                .chaosDurationSec(1)
                 .build();
 
         ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
@@ -183,10 +183,79 @@ public class KubernetesChaosProviderTest {
         Pod sent = client.getKubernetesSerialization().unmarshal(write.getUtf8Body(), Pod.class);
         assertEquals(1, sent.getSpec().getEphemeralContainers().size());
         EphemeralContainer stress = sent.getSpec().getEphemeralContainers().get(0);
-        assertEquals("chaos-io-stress", stress.getName());
+        assertTrue(stress.getName().startsWith("chaos-io-stress-"), stress.getName());
         assertEquals("registry.example.com/mirror/stress:1.0.4", stress.getImage());
         // The pod's own user and group, which its namespace already admits.
         assertRestricted(stress, 1001L, 1001L);
+    }
+
+    private Pod stressTarget(String name, String app) {
+        Pod pod = new PodBuilder()
+                .withNewMetadata()
+                .withName(name)
+                .withNamespace("default")
+                .addToLabels("app", app)
+                .endMetadata()
+                .withNewSpec()
+                .addNewContainer()
+                .withName("kafka")
+                .withImage("kafka")
+                .endContainer()
+                .endSpec()
+                .build();
+        client.pods().inNamespace("default").resource(pod).create();
+        return pod;
+    }
+
+    private static FaultSpec cpuStress(String app, int chaosDurationSec) {
+        return FaultSpec.builder("test-cpu-stress-" + app)
+                .targetNamespace("default")
+                .targetLabel("app=" + app)
+                .disruptionType(DisruptionType.CPU_STRESS)
+                .cpuCores(1)
+                .chaosDurationSec(chaosDurationSec)
+                .build();
+    }
+
+    @Test
+    void stressIsDoneOnlyOnceItsDurationIsOver() throws Exception {
+        Pod pod = stressTarget("broker-4", "kafka5");
+        server.expect()
+                .put()
+                .withPath("/api/v1/namespaces/default/pods/broker-4/ephemeralcontainers")
+                .andReturn(200, pod)
+                .once();
+
+        long started = System.nanoTime();
+        ChaosOutcome outcome = provider.triggerFault(cpuStress("kafka5", 2)).get(10, TimeUnit.SECONDS);
+        long tookMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+
+        // Done at once, the plan ended and its lease went while the stress still ran.
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertTrue(tookMs >= 2000, "the stress was reported done after " + tookMs + " ms of 2000");
+    }
+
+    @Test
+    void twoStressesOnOnePodNameTheirContainersApart() throws Exception {
+        Pod pod = stressTarget("broker-5", "kafka6");
+        server.expect()
+                .put()
+                .withPath("/api/v1/namespaces/default/pods/broker-5/ephemeralcontainers")
+                .andReturn(200, pod)
+                .times(2);
+
+        List<String> names = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            assertTrue(provider.triggerFault(cpuStress("kafka6", 1))
+                    .get(10, TimeUnit.SECONDS)
+                    .isPass());
+            Pod sent = client.getKubernetesSerialization()
+                    .unmarshal(server.getLastRequest().getUtf8Body(), Pod.class);
+            names.add(sent.getSpec().getEphemeralContainers().get(0).getName());
+        }
+
+        // A pod refuses an ephemeral container named as one it already has, and none is ever removed.
+        assertNotEquals(names.get(0), names.get(1), names.toString());
     }
 
     @Test
@@ -220,7 +289,7 @@ public class KubernetesChaosProviderTest {
                 .targetLabel("app=kafka3")
                 .disruptionType(DisruptionType.CPU_STRESS)
                 .cpuCores(1)
-                .chaosDurationSec(10)
+                .chaosDurationSec(1)
                 .build();
 
         assertTrue(provider.triggerFault(spec).get(5, TimeUnit.SECONDS).isPass());
@@ -262,7 +331,7 @@ public class KubernetesChaosProviderTest {
                 .targetLabel("app=kafka4")
                 .disruptionType(DisruptionType.CPU_STRESS)
                 .cpuCores(1)
-                .chaosDurationSec(10)
+                .chaosDurationSec(1)
                 .build();
 
         assertTrue(provider.triggerFault(spec).get(5, TimeUnit.SECONDS).isPass());
