@@ -125,7 +125,7 @@ The `litmus-core` subchart images (operator/runner/exporter) are set under the `
 | `experiments.definitions[].env` | Default env baked into the ChaosExperiment | — |
 | `experiments.definitions[].permissions` | `spec.definition.permissions` (runner RBAC) | — |
 
-Default definitions: `pod-delete`, `pod-cpu-hog`, `pod-memory-hog`, `pod-network-partition`, `pod-io-stress`, `pod-dns-error`, `node-drain`.
+Default definitions: `pod-delete`, `pod-cpu-hog`, `pod-memory-hog`, `pod-network-partition`, `pod-io-stress`, `pod-dns-error`, `disk-fill`, `pod-network-latency`, `node-drain`.
 
 ### Engines
 

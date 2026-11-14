@@ -158,7 +158,7 @@ experiments:
       permissions: []        # extra RBAC the runner needs (spec.definition.permissions)
 ```
 
-Default set: `pod-delete`, `pod-cpu-hog`, `pod-memory-hog`, `pod-network-partition`, `pod-io-stress`, `pod-dns-error` (Namespaced) and `node-drain` (Cluster).
+Default set: `pod-delete`, `pod-cpu-hog`, `pod-memory-hog`, `pod-network-partition`, `pod-io-stress`, `pod-dns-error`, `disk-fill`, `pod-network-latency` (Namespaced) and `node-drain` (Cluster).
 
 Verify: `kubectl get chaosexperiments -n kafka`
 

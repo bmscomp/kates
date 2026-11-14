@@ -4,9 +4,9 @@
 # Adds 200ms artificial latency to all egress packets from the alpha broker
 # using tc netem. Simulates a degraded cross-AZ link or WAN replication delay.
 #
-# Litmus runs it as pod-network-latency, which the kates-chaos chart doesn't
-# install: add that ChaosExperiment to the kafka namespace first, or the fault
-# fails. The kubernetes chaos provider has no NETWORK_LATENCY.
+# Litmus runs it as pod-network-latency, which the kates-chaos chart installs
+# from 2.6.0; without it in the kafka namespace the fault fails at once. The
+# kubernetes chaos provider has no NETWORK_LATENCY.
 #
 # Hypothesis:
 #   Replication lag increases proportionally to injected latency.

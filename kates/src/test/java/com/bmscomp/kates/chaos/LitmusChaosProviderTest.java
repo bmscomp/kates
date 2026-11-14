@@ -30,6 +30,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import com.bmscomp.kates.chaos.litmus.ChaosEngine;
+import com.bmscomp.kates.chaos.litmus.ChaosExperiment;
 import com.bmscomp.kates.chaos.litmus.ChaosResult;
 import com.bmscomp.kates.chaos.litmus.ChaosResultStatus;
 
@@ -114,6 +115,60 @@ class LitmusChaosProviderTest {
                             .build())
                     .create();
         }
+        // What the kates-chaos chart installs in its target namespaces, as far as these tests use.
+        for (String experiment : List.of("pod-delete", "node-drain")) {
+            install(experiment);
+        }
+    }
+
+    private void install(String experiment) {
+        ChaosExperiment installed = new ChaosExperiment();
+        installed.getMetadata().setName(experiment);
+        installed.getMetadata().setNamespace("kafka");
+        client.resources(ChaosExperiment.class)
+                .inNamespace("kafka")
+                .resource(installed)
+                .create();
+    }
+
+    /** Used to create the ChaosEngine anyway and wait 240 s for a ChaosResult Litmus never writes. */
+    @ParameterizedTest
+    @CsvSource({"DISK_FILL, disk-fill", "NETWORK_LATENCY, pod-network-latency"})
+    void aFaultWhoseExperimentIsNotInstalledFailsAtOnce(DisruptionType type, String experiment) throws Exception {
+        FaultSpec spec = FaultSpec.builder("missing")
+                .targetBrokerId(2)
+                .disruptionType(type)
+                .chaosDurationSec(120)
+                .build();
+        List<Long> reported = new CopyOnWriteArrayList<>();
+
+        ChaosOutcome outcome = provider.triggerFault(spec, reported::add).get(5, TimeUnit.SECONDS);
+
+        assertFalse(outcome.isPass());
+        assertTrue(
+                outcome.failureReason().contains("ChaosExperiment " + experiment)
+                        && outcome.failureReason().contains("namespace kafka"),
+                outcome.failureReason());
+        assertEquals(List.of(), reported, "reported as injected");
+        assertEquals(
+                List.of(),
+                client.resources(ChaosEngine.class).inNamespace("kafka").list().getItems());
+    }
+
+    @Test
+    void aFaultWhoseExperimentIsInstalledCreatesItsChaosEngine() throws Exception {
+        install("disk-fill");
+        provider.resultPollIntervalMs = 20;
+        FaultSpec spec = FaultSpec.builder("fill")
+                .targetBrokerId(2)
+                .disruptionType(DisruptionType.DISK_FILL)
+                .build();
+
+        CompletableFuture<ChaosOutcome> fault = provider.triggerFault(spec);
+        pass(awaitEngine().getMetadata().getName() + "-disk-fill");
+
+        ChaosOutcome outcome = fault.get(5, TimeUnit.SECONDS);
+        assertTrue(outcome.isPass(), outcome.failureReason());
     }
 
     private static String env(ChaosEngine engine, String name) {

@@ -93,7 +93,7 @@ A LitmusChaos experiment or a Kates disruption fails to start, has no effect or 
 | Litmus experiments fail to start | Chaos operator pod not running or RBAC insufficient | [Deployment Guide](12-deployment.md#litmus-experiments-fail) |
 | Disruption doesn't take effect | Target pod selector doesn't match, or NetworkPolicy blocks | [Chaos Engineering in Practice](07-chaos-practice.md) |
 | Every step's `Verdict` in `kates disruption status` is `Skipped` | The Kates API fell back to the `noop` chaos provider, which injects nothing | [Chaos Engineering in Practice](07-chaos-practice.md) |
-| A `DISK_FILL` or `NETWORK_LATENCY` step fails | The `kates-chaos` chart installs no `disk-fill` or `pod-network-latency` experiment for the default `litmus-crd` chaos provider | [Chaos Engineering in Practice](07-chaos-practice.md) |
+| A step fails at once with `ChaosExperiment … is not installed in namespace …` | The target namespace lacks that Litmus experiment: it isn't one of `kates-chaos`'s target namespaces, or the release's own `experiments.definitions` leaves it out (before kates-chaos 2.6.0, `disk-fill` and `pod-network-latency` weren't installed) | [Chaos Engineering in Practice](07-chaos-practice.md) |
 | Cluster doesn't recover after chaos | ISR too small, `min.insync.replicas` violated | [Chaos Engineering Theory](06-chaos-theory.md) |
 | **Kates — Chaos** board: `$namespace` picker empty, *Chaos engines running* reads *No data* | No `ChaosEngine` has been created yet, or kube-state-metrics lacks the custom-resource configuration for it (`charts/monitoring` before 1.6.0, or another stack) | [Observability & Monitoring](09-observability.md#kates-specific-dashboards) |
 

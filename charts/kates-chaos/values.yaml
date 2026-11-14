@@ -206,6 +206,11 @@ experiments:
       scope: Namespaced
     - name: pod-dns-error
       scope: Namespaced
+    # Kates runs DISK_FILL and NETWORK_LATENCY with these two.
+    - name: disk-fill
+      scope: Namespaced
+    - name: pod-network-latency
+      scope: Namespaced
     - name: node-drain
       scope: Cluster
 
