@@ -118,4 +118,17 @@ class DisruptionConcurrencyGuardTest {
         assertTrue(guard.enter());
         guard.exit();
     }
+
+    @Test
+    @DisplayName("a member that does not lead its quorum enters no fault, and counts none")
+    void aFollowerEntersNoFault() {
+        guard.quorum = org.mockito.Mockito.mock(com.bmscomp.kates.quorum.Quorum.class);
+
+        assertFalse(guard.enter());
+        assertEquals(0, guard.inFlight());
+
+        org.mockito.Mockito.when(guard.quorum.acceptsWrites()).thenReturn(true);
+        assertTrue(guard.enter());
+        guard.exit();
+    }
 }

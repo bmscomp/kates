@@ -61,6 +61,9 @@ public final class InMemoryEngine {
     public final BenchmarkMetrics benchmarkMetrics = mock(BenchmarkMetrics.class);
     public final KatesMetrics katesMetrics = mock(KatesMetrics.class);
 
+    /** Takes every write and has no member id, as with no quorum; a test may stub it otherwise. */
+    public final com.bmscomp.kates.quorum.Quorum quorum = mock(com.bmscomp.kates.quorum.Quorum.class);
+
     /** Every lifecycle event the engine fires, in order. */
     public final List<TestLifecycleEvent> events = new CopyOnWriteArrayList<>();
 
@@ -69,6 +72,7 @@ public final class InMemoryEngine {
     /** An engine with the default backend and any others a test needs. */
     @SuppressWarnings("unchecked")
     public InMemoryEngine(BenchmarkBackend... others) {
+        when(quorum.acceptsWrites()).thenReturn(true);
         doAnswer(invocation -> {
                     TestRun run = invocation.getArgument(0);
                     rows.put(run.getId(), run);
@@ -112,6 +116,7 @@ public final class InMemoryEngine {
                 new SlaEvaluator(),
                 SPEC_LIMITS,
                 lifecycleEvents,
+                quorum,
                 BACKEND,
                 "localhost:9092",
                 MAX_CONCURRENT,

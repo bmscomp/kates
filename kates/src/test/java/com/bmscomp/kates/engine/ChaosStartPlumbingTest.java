@@ -80,6 +80,7 @@ class ChaosStartPlumbingTest {
                 new SlaEvaluator(),
                 SPEC_LIMITS,
                 mock(Event.class),
+                new com.bmscomp.kates.quorum.Quorum(),
                 "native",
                 "localhost:9092",
                 3,

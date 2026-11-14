@@ -11,6 +11,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
+import jakarta.enterprise.event.Observes;
 import jakarta.enterprise.inject.Any;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -29,6 +30,8 @@ import com.bmscomp.kates.domain.TestScenario;
 import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.export.LatencyHeatmapData;
+import com.bmscomp.kates.quorum.LeadershipAcquired;
+import com.bmscomp.kates.quorum.Quorum;
 import com.bmscomp.kates.service.TestRunRepository;
 import com.bmscomp.kates.service.TopicService;
 
@@ -60,6 +63,7 @@ public class TestOrchestrator {
     private final SpecLimits specLimits;
 
     private final Event<TestLifecycleEvent> lifecycleEvents;
+    private final Quorum quorum;
     private final String defaultBackend;
     private final String bootstrapServers;
     private final int maxConcurrentTests;
@@ -113,6 +117,7 @@ public class TestOrchestrator {
             SlaEvaluator slaEvaluator,
             SpecLimits specLimits,
             Event<TestLifecycleEvent> lifecycleEvents,
+            Quorum quorum,
             @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native") String defaultBackend,
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers,
             @ConfigProperty(name = "kates.engine.max-concurrent-tests", defaultValue = "3") int maxConcurrentTests,
@@ -126,6 +131,7 @@ public class TestOrchestrator {
         this.slaEvaluator = slaEvaluator;
         this.specLimits = specLimits;
         this.lifecycleEvents = lifecycleEvents;
+        this.quorum = quorum;
         this.defaultBackend = defaultBackend;
         this.bootstrapServers = bootstrapServers;
         this.maxConcurrentTests = maxConcurrentTests;
@@ -133,15 +139,39 @@ public class TestOrchestrator {
         this.concurrencyGuard = new Semaphore(maxConcurrentTests);
     }
 
+    /**
+     * Fails what a previous life of this process left live. Alone, that is every live run. In a
+     * quorum, only this member's own: another member's may be running, and a new leader recovers
+     * those ({@link #recoverPreviousLeaders}).
+     */
     @PostConstruct
     void recoverOrphans() {
-        List<TestRun> orphans = ORPHAN_STATUSES.stream()
-                .flatMap(status -> repository.findByStatus(status).stream())
-                .toList();
+        String self = quorum.memberId();
+        List<TestRun> orphans = self == null
+                ? ORPHAN_STATUSES.stream()
+                        .flatMap(status -> repository.findByStatus(status).stream())
+                        .toList()
+                : repository.findByStatusAndMember(ORPHAN_STATUSES, self, true);
+        recover(orphans, "after server restart", "orphan recovery");
+    }
+
+    /**
+     * Fails, before this member takes its first write as leader, the live runs any other member
+     * created: only a leader starts runs, so they are a previous leader's, and it is gone or has
+     * lost the lead. A failure here keeps the member from taking writes, and is tried again.
+     */
+    void recoverPreviousLeaders(@Observes LeadershipAcquired takeover) {
+        recover(
+                repository.findByStatusAndMember(ORPHAN_STATUSES, quorum.memberId(), false),
+                "when the member running it stopped leading",
+                "takeover, term " + takeover.term());
+    }
+
+    private void recover(List<TestRun> orphans, String when, String by) {
         if (orphans.isEmpty()) {
             return;
         }
-        LOG.infof("Recovering %d orphaned tests from previous lifecycle", orphans.size());
+        LOG.infof("Recovering %d orphaned tests (%s)", orphans.size(), by);
         for (TestRun orphan : orphans) {
             // findByStatus reads runs without their task results. Read the run
             // whole, so that each task that had not finished is failed with the
@@ -150,9 +180,9 @@ public class TestOrchestrator {
             if (run == null || !ORPHAN_STATUSES.contains(run.getStatus())) {
                 continue;
             }
-            run = withRecoveredTasksFailed(run);
+            run = withRecoveredTasksFailed(run, when);
             repository.save(run);
-            LOG.infof("  Marked test %s as FAILED (orphan recovery)", run.getId());
+            LOG.infof("  Marked test %s as FAILED (%s)", run.getId(), by);
         }
     }
 
@@ -204,6 +234,10 @@ public class TestOrchestrator {
         if (draining && !admitted) {
             concurrencyGuard.release();
             return com.bmscomp.kates.util.Result.failure(new DrainingException());
+        }
+        if (!quorum.acceptsWrites()) {
+            concurrencyGuard.release();
+            return com.bmscomp.kates.util.Result.failure(new NotLeaderException(quorum.leaderId()));
         }
 
         com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
@@ -406,6 +440,10 @@ public class TestOrchestrator {
         if (draining && !admitted) {
             concurrencyGuard.release();
             return com.bmscomp.kates.util.Result.failure(new DrainingException());
+        }
+        if (!quorum.acceptsWrites()) {
+            concurrencyGuard.release();
+            return com.bmscomp.kates.util.Result.failure(new NotLeaderException(quorum.leaderId()));
         }
 
         com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
@@ -787,12 +825,12 @@ public class TestOrchestrator {
         }
     }
 
-    private static TestRun withRecoveredTasksFailed(TestRun run) {
+    private static TestRun withRecoveredTasksFailed(TestRun run, String when) {
         String error =
                 switch (run.getStatus()) {
-                    case PENDING -> "Recovered: test was orphaned before submission completed after server restart";
-                    case STOPPING -> "Recovered: test was orphaned while stopping after server restart";
-                    default -> "Recovered: test was orphaned after server restart";
+                    case PENDING -> "Recovered: test was orphaned before submission completed " + when;
+                    case STOPPING -> "Recovered: test was orphaned while stopping " + when;
+                    default -> "Recovered: test was orphaned " + when;
                 };
         TestRun failed = withUnfinishedTasksFailed(run.withStatus(TestResult.TaskStatus.FAILED), error);
         if (!failed.getResults().isEmpty()) {

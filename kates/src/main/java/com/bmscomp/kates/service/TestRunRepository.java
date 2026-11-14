@@ -19,6 +19,10 @@ public class TestRunRepository {
     @Inject
     EntityManager em;
 
+    // Injected over this default; built by hand, the repository is alone.
+    @Inject
+    com.bmscomp.kates.quorum.Quorum quorum = new com.bmscomp.kates.quorum.Quorum();
+
     /**
      * Shared, thread-safe mapper. A new ObjectMapper was being constructed on
      * every save — each one builds and warms its own serializer cache, so the
@@ -65,7 +69,9 @@ public class TestRunRepository {
         com.bmscomp.kates.domain.TestResult.TaskStatus previousStatus = existing != null ? existing.getStatus() : null;
 
         if (existing == null) {
-            em.persist(EntityMapper.toEntity(run));
+            TestRunEntity created = EntityMapper.toEntity(run);
+            created.setMemberId(quorum.memberId());
+            em.persist(created);
         } else {
             // Mutate the MANAGED entity so Hibernate dirty-checks it. merge() of
             // a freshly built graph re-created every child with a null id, which
@@ -316,6 +322,26 @@ public class TestRunRepository {
                 .setParameter("before", before)
                 .setMaxResults(limit)
                 .getResultList();
+    }
+
+    /**
+     * The runs in these statuses that {@code memberId} created ({@code own}), or that any other
+     * member, or no member, created; read as {@link #findByStatus} reads them.
+     */
+    public List<TestRun> findByStatusAndMember(
+            List<com.bmscomp.kates.domain.TestResult.TaskStatus> statuses, String memberId, boolean own) {
+        String member = own ? "r.memberId = :member" : "(r.memberId IS NULL OR r.memberId <> :member)";
+        return em
+                .createQuery(
+                        "SELECT r FROM TestRunEntity r WHERE r.status IN :statuses AND " + member
+                                + " ORDER BY r.createdAt DESC",
+                        TestRunEntity.class)
+                .setParameter("statuses", statuses)
+                .setParameter("member", memberId)
+                .getResultList()
+                .stream()
+                .map(EntityMapper::toDomainSummary)
+                .collect(Collectors.toList());
     }
 
     /**

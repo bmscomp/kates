@@ -51,6 +51,9 @@ public class DisruptionOrphanReconciler {
     @Inject
     ObjectMapper objectMapper;
 
+    @Inject
+    com.bmscomp.kates.quorum.Quorum quorum;
+
     @ConfigProperty(name = "kates.chaos.orphan-recovery.enabled", defaultValue = "true")
     boolean enabled;
 
@@ -66,6 +69,10 @@ public class DisruptionOrphanReconciler {
         Instant startedAt = Instant.now();
         if (!enabled) {
             LOG.debug("Disruption orphan recovery disabled");
+            return;
+        }
+        // In a quorum the leader may be running a plan right now: the next leader cleans up instead.
+        if (quorum.memberId() != null) {
             return;
         }
         // Off the startup thread, deliberately.
@@ -84,6 +91,17 @@ public class DisruptionOrphanReconciler {
         // Recovery is cleanup of faults made before this process started.
         // Nothing about it needs to happen before the first request is served.
         Thread.ofVirtual().name("disruption-orphan-recovery").start(() -> reconcile(startedAt));
+    }
+
+    /**
+     * A new leader cleans up what the previous one left: every Kates fault made before this member
+     * found it leads is a previous leader's. Off the caller's thread, as at startup: the Kubernetes
+     * API may be slow to answer, and runs are already recovered.
+     */
+    void onTakeover(@Observes com.bmscomp.kates.quorum.LeadershipAcquired takeover) {
+        if (enabled) {
+            Thread.ofVirtual().name("disruption-orphan-recovery").start(() -> reconcile(takeover.at()));
+        }
     }
 
     private void reconcile(Instant startedAt) {

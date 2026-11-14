@@ -75,6 +75,12 @@ class QuorumMemberTest {
         for (QuorumMember member : started) {
             await(() -> first.memberId().equals(member.leaderId()) ? member : null);
         }
+        assertTrue(first.confirmLeadership(), "the leader confirms it leads");
+        for (QuorumMember member : started) {
+            if (member != first) {
+                assertFalse(member.confirmLeadership(), "a follower does not");
+            }
+        }
 
         first.close();
         List<QuorumMember> rest = new ArrayList<>(started);
@@ -144,7 +150,12 @@ class QuorumMemberTest {
             }
         }
 
-        // Until it steps down a cut-off leader still says it leads: what J3's gate must allow for.
+        // Its lease runs out before it steps down: from then on it no longer confirms.
+        long cut = System.nanoTime();
+        await(() -> leader.confirmLeadership() ? null : leader);
+        assertTrue(
+                Duration.ofNanos(System.nanoTime() - cut).compareTo(Duration.ofSeconds(3)) < 0,
+                "a cut-off leader stops confirming within its lease and the read timeout");
         await(() -> leader.isLeader() ? null : leader);
         TimeUnit.SECONDS.sleep(3);
         assertFalse(leader.isLeader(), "alone, it does not lead again");
@@ -175,7 +186,7 @@ class QuorumMemberTest {
         throw new AssertionError("not within " + ELECTION);
     }
 
-    private static List<String> peers(int count) throws IOException {
+    static List<String> peers(int count) throws IOException {
         List<String> peers = new ArrayList<>();
         for (int i = 0; i < count; i++) {
             try (ServerSocket socket = new ServerSocket(0)) {

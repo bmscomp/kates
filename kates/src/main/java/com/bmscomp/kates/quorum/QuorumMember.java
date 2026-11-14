@@ -9,16 +9,21 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.ratis.client.RaftClient;
+import org.apache.ratis.client.RaftClientConfigKeys;
 import org.apache.ratis.conf.Parameters;
 import org.apache.ratis.conf.RaftProperties;
 import org.apache.ratis.grpc.GrpcConfigKeys;
 import org.apache.ratis.grpc.GrpcTlsConfig;
+import org.apache.ratis.protocol.Message;
 import org.apache.ratis.protocol.RaftGroup;
 import org.apache.ratis.protocol.RaftGroupId;
 import org.apache.ratis.protocol.RaftPeer;
 import org.apache.ratis.protocol.RaftPeerId;
+import org.apache.ratis.retry.RetryPolicies;
 import org.apache.ratis.security.TlsConf;
 import org.apache.ratis.server.DivisionInfo;
 import org.apache.ratis.server.RaftServer;
@@ -39,6 +44,8 @@ public final class QuorumMember implements AutoCloseable {
     // Ratis' own 150-300 ms suits a quiet host; a CPU-throttled pod would hold spurious elections.
     private static final TimeDuration ELECTION_MIN = TimeDuration.valueOf(1, TimeUnit.SECONDS);
     private static final TimeDuration ELECTION_MAX = TimeDuration.valueOf(2, TimeUnit.SECONDS);
+    // Under the election timeout: past it, another member may lead, so the answer is no.
+    private static final TimeDuration CONFIRM_TIMEOUT = TimeDuration.valueOf(800, TimeUnit.MILLISECONDS);
 
     /** What a member needs: every member's id and address, its own id, a directory, its TLS files. */
     public record Settings(String memberId, List<RaftPeer> peers, Path dir, Path cert, Path key, Path ca) {
@@ -122,8 +129,13 @@ public final class QuorumMember implements AutoCloseable {
     private final RaftServer server;
     private final String memberId;
 
-    private QuorumMember(RaftServer server, String memberId) {
+    private final RaftClient client;
+    private final RaftPeerId selfId;
+
+    private QuorumMember(RaftServer server, RaftClient client, RaftPeerId selfId, String memberId) {
         this.server = server;
+        this.client = client;
+        this.selfId = selfId;
         this.memberId = memberId;
     }
 
@@ -136,6 +148,10 @@ public final class QuorumMember implements AutoCloseable {
         RaftServerConfigKeys.setStorageDir(properties, List.of(settings.dir().toFile()));
         RaftServerConfigKeys.Rpc.setTimeoutMin(properties, ELECTION_MIN);
         RaftServerConfigKeys.Rpc.setTimeoutMax(properties, ELECTION_MAX);
+        // A read on the leader proves it still leads: within its lease, or after a majority answers.
+        RaftServerConfigKeys.Read.setOption(properties, RaftServerConfigKeys.Read.Option.LINEARIZABLE);
+        RaftServerConfigKeys.Read.setLeaderLeaseEnabled(properties, true);
+        RaftServerConfigKeys.Read.setTimeout(properties, CONFIRM_TIMEOUT);
         Parameters parameters = new Parameters();
         // The JDK's TLS, not the netty-tcnative Ratis' jar carries, whose library a native image cannot load.
         GrpcConfigKeys.TLS.setConf(
@@ -149,16 +165,25 @@ public final class QuorumMember implements AutoCloseable {
                         .setMutualTls(true)
                         .setSslProvider(SslProvider.JDK)
                         .build());
+        RaftGroup group = RaftGroup.valueOf(GROUP, settings.peers());
         RaftServer server = RaftServer.newBuilder()
                 .setServerId(self.getId())
-                .setGroup(RaftGroup.valueOf(GROUP, settings.peers()))
+                .setGroup(group)
                 .setProperties(properties)
                 .setParameters(parameters)
-                .setStateMachine(new BaseStateMachine())
+                .setStateMachine(new Confirmations())
                 .setOption(RaftStorage.StartupOption.RECOVER)
                 .build();
         server.start();
-        return new QuorumMember(server, settings.memberId());
+        RaftProperties clientProperties = new RaftProperties();
+        RaftClientConfigKeys.Rpc.setRequestTimeout(clientProperties, CONFIRM_TIMEOUT);
+        RaftClient client = RaftClient.newBuilder()
+                .setRaftGroup(group)
+                .setProperties(clientProperties)
+                .setParameters(parameters)
+                .setRetryPolicy(RetryPolicies.noRetry())
+                .build();
+        return new QuorumMember(server, client, self.getId(), settings.memberId());
     }
 
     public String memberId() {
@@ -168,6 +193,22 @@ public final class QuorumMember implements AutoCloseable {
     /** True once this member leads and has committed an entry of its term, so it knows it leads. */
     public boolean isLeader() {
         return info().isLeaderReady();
+    }
+
+    /**
+     * True only if this member leads now, which {@link #isLeader()} cannot say: a leader cut off
+     * from its majority goes on saying it leads until it steps down. This asks the quorum, in a
+     * linearizable read served by the leader's lease, or by a majority within the timeout.
+     */
+    public boolean confirmLeadership() {
+        if (!isLeader()) {
+            return false;
+        }
+        try {
+            return client.io().sendReadOnly(Message.EMPTY, selfId).isSuccess();
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     /** The leader this member knows of, or null during an election. */
@@ -190,6 +231,18 @@ public final class QuorumMember implements AutoCloseable {
 
     @Override
     public void close() throws IOException {
-        server.close();
+        try {
+            client.close();
+        } finally {
+            server.close();
+        }
+    }
+
+    /** Replicates nothing yet; answers the reads that confirm leadership. */
+    private static final class Confirmations extends BaseStateMachine {
+        @Override
+        public CompletableFuture<Message> query(Message request) {
+            return CompletableFuture.completedFuture(Message.EMPTY);
+        }
     }
 }

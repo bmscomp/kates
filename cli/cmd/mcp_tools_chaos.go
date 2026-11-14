@@ -309,11 +309,13 @@ var mcpCaveatsChaos = []mcpCaveat{
 		Text: "A report that says RUNNING belongs to a plan still in progress, or to one whose backend process " +
 			"stopped mid-plan and has not started again: such a plan never finishes. When the backend starts, it " +
 			"marks each report created before then that still says RUNNING as INTERRUPTED, in the report and in " +
-			"the list of disruptions alike, unless kates.chaos.orphan-recovery.enabled is false. That assumes one " +
-			"backend replica: a replica that starts while another runs a plan marks that plan's report too, until " +
-			"the plan ends and stores its outcome.",
+			"the list of disruptions alike, unless kates.chaos.orphan-recovery.enabled is false. A backend in a " +
+			"quorum (kates.quorum.peers) marks nothing when it starts: the next member to lead marks each report " +
+			"created before it took the lead. Without a quorum this assumes one backend replica: a replica that " +
+			"starts while another runs a plan marks that plan's report too, until the plan ends and stores its " +
+			"outcome.",
 		Refs: []string{
-			mcpJava + "disruption/DisruptionOrphanReconciler.java:54-55,63-70,86-93,171-222",
+			mcpJava + "disruption/DisruptionOrphanReconciler.java:57-58,66-77,93-111,189-240",
 			mcpJava + "disruption/DisruptionReportRepository.java:35-60,93-102",
 			mcpJava + "disruption/DisruptionPersistence.java:26-37",
 			mcpJava + "disruption/DisruptionLauncher.java:114-121,129-144",

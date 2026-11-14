@@ -143,9 +143,14 @@ public class DisruptionConcurrencyGuard {
     private final AtomicInteger inFlight = new AtomicInteger();
     private volatile boolean draining;
 
+    // Injected over this default; built by hand, as tests build it, the guard is alone.
+    @Inject
+    com.bmscomp.kates.quorum.Quorum quorum = new com.bmscomp.kates.quorum.Quorum();
+
     /**
      * Counts a piece of fault work in, from its request to its saved report,
-     * or returns false while Kates is draining. Whoever gets true must call
+     * or returns false while Kates is draining, or while this member does not lead its quorum.
+     * Whoever gets true must call
      * {@link #exit()} when the work is over.
      *
      * <p>Counted before the flag is read, so once a drain is set and
@@ -155,7 +160,7 @@ public class DisruptionConcurrencyGuard {
      */
     public boolean enter() {
         inFlight.incrementAndGet();
-        if (draining) {
+        if (draining || !quorum.acceptsWrites()) {
             inFlight.decrementAndGet();
             return false;
         }

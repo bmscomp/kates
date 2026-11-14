@@ -50,10 +50,14 @@ public class DisruptionScheduler {
     @jakarta.inject.Inject
     com.bmscomp.kates.service.SchedulerLeaseService leases;
 
+    @jakarta.inject.Inject
+    com.bmscomp.kates.quorum.Quorum quorum;
+
     @Scheduled(every = "60s", identity = "kates-disruption-schedule-evaluator")
     void evaluateSchedules() {
-        // A draining instance fires nothing, and leaves the lease to one that may.
-        if (concurrencyGuard.isDraining()) {
+        // A draining instance fires nothing, and leaves the lease to one that may; so does a member
+        // that does not lead its quorum.
+        if (concurrencyGuard.isDraining() || !quorum.acceptsWrites()) {
             return;
         }
         // Only the lease holder may trigger disruptions — with replicas > 1

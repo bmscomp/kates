@@ -1,0 +1,114 @@
+package com.bmscomp.kates.quorum;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import jakarta.enterprise.event.Event;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+/** Quorum as Kates uses it: which member takes writes, and the recovery it runs first. */
+class QuorumTest {
+
+    @TempDir
+    Path tmp;
+
+    private final List<Quorum> members = new ArrayList<>();
+    /** Each takeover any member fired, and which member fired it. */
+    private final List<String> takeovers = new CopyOnWriteArrayList<>();
+
+    @AfterEach
+    void stop() {
+        members.forEach(member -> member.stop(null));
+    }
+
+    @Test
+    void onlyTheLeaderTakesWritesAndItRecoversOncePerTerm() throws Exception {
+        start(3, new AtomicBoolean(false));
+
+        Quorum leader = soleWriter(members);
+        assertEquals(1, takeovers.size(), "one takeover: " + takeovers);
+        assertTrue(takeovers.get(0).startsWith(leader.memberId() + "@"), takeovers.toString());
+        assertTrue(leader.acceptsWrites());
+        assertEquals(1, takeovers.size(), "not again in the same term");
+
+        leader.stop(null);
+        members.remove(leader);
+        Quorum next = soleWriter(members);
+        assertEquals(2, takeovers.size(), "the next leader recovers too: " + takeovers);
+        assertTrue(takeovers.get(1).startsWith(next.memberId() + "@"), takeovers.toString());
+    }
+
+    @Test
+    void aLeaderWhoseRecoveryFailsTakesNoWriteUntilItSucceeds() throws Exception {
+        AtomicBoolean failing = new AtomicBoolean(true);
+        start(3, failing);
+        TimeUnit.SECONDS.sleep(4);
+        assertTrue(members.stream().noneMatch(Quorum::acceptsWrites), "no member takes writes");
+
+        failing.set(false);
+        Quorum leader = soleWriter(members);
+        assertTrue(takeovers.get(takeovers.size() - 1).startsWith(leader.memberId() + "@"));
+    }
+
+    private void start(int count, AtomicBoolean failing) throws Exception {
+        TestPki pki = new TestPki(tmp.resolve("pki"));
+        List<String> peers = QuorumMemberTest.peers(count);
+        for (int i = 0; i < count; i++) {
+            Path[] files = pki.member("m" + i);
+            Quorum quorum = new Quorum();
+            quorum.peers = Optional.of(peers);
+            quorum.memberId = Optional.of("m" + i);
+            quorum.dir = Optional.of(tmp.resolve("data-m" + i).toString());
+            quorum.cert = Optional.of(files[0].toString());
+            quorum.key = Optional.of(files[1].toString());
+            quorum.ca = Optional.of(files[2].toString());
+            quorum.takeover = recorder(quorum, failing);
+            quorum.start(null);
+            members.add(quorum);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Event<LeadershipAcquired> recorder(Quorum quorum, AtomicBoolean failing) {
+        Event<LeadershipAcquired> event = mock(Event.class);
+        doAnswer(invocation -> {
+                    if (failing.get()) {
+                        throw new IllegalStateException("PostgreSQL is down");
+                    }
+                    takeovers.add(quorum.memberId() + "@"
+                            + invocation.<LeadershipAcquired>getArgument(0).term());
+                    return null;
+                })
+                .when(event)
+                .fire(any());
+        return event;
+    }
+
+    /** The one member that takes writes, once there is exactly one; the others say no. */
+    private static Quorum soleWriter(List<Quorum> members) throws InterruptedException {
+        for (int i = 0; i < 200; i++) {
+            List<Quorum> writers =
+                    members.stream().filter(Quorum::acceptsWrites).toList();
+            if (writers.size() == 1) {
+                return writers.get(0);
+            }
+            assertFalse(writers.size() > 1, "two members took writes");
+            TimeUnit.MILLISECONDS.sleep(100);
+        }
+        throw new AssertionError("no single member took writes");
+    }
+}
