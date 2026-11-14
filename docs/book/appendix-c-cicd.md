@@ -286,7 +286,7 @@ strategy:
 
 ## Integration Tests (`integration.yml`)
 
-**Purpose:** Spins up an ephemeral Kind cluster and validates what needs a real Kubernetes API: cluster topology, the `kates detect` compatibility gate and server-side dry-runs of the Kafka manifests. Chart linting and config parsing are `ci.yml`'s job and are not repeated here.
+**Purpose:** Spins up an ephemeral Kind cluster and validates what needs a real Kubernetes API: cluster topology, the `kates detect` compatibility gate, server-side dry-runs of the Kafka manifests, the compliance check against a running Kafka, and the CLI against a Kates API built from the same commit. Chart linting and config parsing are `ci.yml`'s job and are not repeated here.
 
 **Triggers:**
 - Push to `main` branch (paths in the table above)
@@ -314,10 +314,12 @@ The pins are **not** declared in the workflow. The `load-versions` composite act
 4. **Manifest dry-runs** — applies the storage classes, creates the namespaces, and server-side dry-runs the Kafka topic and NetworkPolicy manifests
 5. **Monitoring config check** — verifies the Jaeger Helm values files are present
 
+Then the job deploys the Strimzi operator and a one-broker Kafka from `charts/kafka-cluster/values-ci.yaml`, and runs the compliance check's live tests against it. Last, it builds the Kates image as `publish-docker.yml` does, installs the `kates` chart with it, and runs `scripts/e2e-cli-backend.sh`: `kates health`, a LOAD run with `test create --wait`, `report show -o json`, `gate`, a disruption dry run the safety guard must refuse with exit `1`, and `compliance check`, each checked for its exit code and the fields a pipeline reads. No other job runs the CLI and the Kates API together.
+
 ### Key Details
 
-- The Kafka manifests are validated with `kubectl apply --dry-run=server`. The Strimzi operator is **not** installed, so this checks each manifest against the API server and deploys no running Kafka cluster
-- The job has a **30-minute timeout** and posts a per-check results table to the GitHub Actions step summary, read from each step's real outcome
+- The Kafka topic and NetworkPolicy manifests are dry-run with `kubectl apply --dry-run=server` before Strimzi is installed; the running Kafka comes later, from the charts
+- The job has a **60-minute timeout** and posts a per-check results table to the GitHub Actions step summary, read from each step's real outcome
 - There is no explicit teardown. `helm/kind-action` registers a post step that deletes the cluster it created, on success and on failure alike; a `kind delete` step in the workflow would only race it
 
 ---
