@@ -160,9 +160,11 @@ class TestOrchestratorDrainTest {
                 .getId();
 
         InMemoryEngine.await(
-                () -> engine.backend.stopped.containsAll(InMemoryEngine.taskIds(id)),
-                "the tasks of " + id + " were left producing with no permit");
-        assertEquals(0, orchestrator.liveRuns());
+                // Both: a task is recorded stopped inside the settle, before it stops counting.
+                () -> engine.backend.stopped.containsAll(InMemoryEngine.taskIds(id)) && orchestrator.liveRuns() == 0,
+                "the tasks of " + id + " were left producing with no permit, or still count");
+        // The runs assertEverySlotFree starts must stay running to fill the cap.
+        recordLiveRunsAtEachWrite();
         engine.assertEverySlotFree();
     }
 }
