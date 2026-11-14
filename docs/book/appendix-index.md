@@ -454,7 +454,7 @@ Every term the book teaches, with the sections that teach it: the ones that use 
 :   [Architecture & Design](02-architecture.md): [Disruption Engine](02-architecture.md#disruption-engine), [Where Results Live](02-architecture.md#where-results-live); [Chaos Engineering in Practice](07-chaos-practice.md): [Two Ways to Run a Fault](07-chaos-practice.md#two-ways-to-run-a-fault), [Safety Guardrails](07-chaos-practice.md#safety-guardrails); [Data Integrity Verification](08-data-integrity.md): [Integrity Under Chaos](08-data-integrity.md#integrity-under-chaos); [Recipes & Patterns](14-recipes.md): [Recipe 3: Pre-Production Chaos Certification](14-recipes.md#recipe-3-pre-production-chaos-certification); [CLI Reference](10-cli-reference.md): [Commands](10-cli-reference.md#commands); [REST API Reference](11-api-reference.md): [Endpoints](11-api-reference.md#endpoints)
 
 [Resilience Test]{#idx-resilience-test}
-:   [Security & Compliance](17-security.md): [Securing Kates](17-security.md#securing-kates); [REST API Reference](11-api-reference.md): [Authentication](11-api-reference.md#authentication)
+:   [REST API Reference](11-api-reference.md): [Endpoints](11-api-reference.md#endpoints)
 
 [RF]{#idx-rf}
 :   [The Cluster Under Test](03-cluster.md): [Using the CLI to Inspect the Cluster](03-cluster.md#using-the-cli-to-inspect-the-cluster); [Chaos Engineering Theory](06-chaos-theory.md): [Key Metrics During Chaos](06-chaos-theory.md#key-metrics-during-chaos)
