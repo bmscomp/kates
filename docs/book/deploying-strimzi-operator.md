@@ -571,7 +571,7 @@ From there the procedure is Step 0 through Step 3 above. Every operator upgrade 
 - The overlay the operator runs with: in production, `helm pull oci://ghcr.io/bmscomp/charts/strimzi-operator --untar`, then upgrade `./strimzi-operator` with `-f strimzi-operator/values-prod.yaml`; `kates deploy` installs with `values-kind.yaml` or `values-generic.yaml`.
 - The scope of an operator installed with `kates deploy --operator-scope namespace`: `--set strimzi-kafka-operator.watchAnyNamespace=false --set 'strimzi-kafka-operator.watchNamespaces={<namespace>,<namespace>}'`. Without them the operator comes back watching every namespace.
 
-The [Upgrade Strategy](18-upgrade-playbook.md#upgrade-strategy) still holds: upgrade the operator before Kafka, and run `make gameday` afterwards.
+The [Upgrade Strategy](18-upgrade-playbook.md#upgrade-strategy) still holds: upgrade the operator before Kafka, and run the [Post-Upgrade Checks](18-upgrade-playbook.md#post-upgrade-checks) afterwards.
 
 ## Rollback
 

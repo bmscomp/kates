@@ -185,5 +185,5 @@ LABEL org.opencontainers.image.title="kates (native)" \
       org.opencontainers.image.documentation="https://github.com/bmscomp/kates/blob/main/docs/registry/kates.md" \
       org.opencontainers.image.vendor="bmscomp" \
       org.opencontainers.image.licenses="Apache-2.0" \
-      org.opencontainers.image.base.name="registry.access.redhat.com/ubi9/ubi-minimal:9.5"
+      org.opencontainers.image.base.name="registry.access.redhat.com/ubi9/ubi-minimal:9.7"
 

@@ -66,7 +66,7 @@ func newKeyServer(t *testing.T) *keyServer {
 		ks.auths = append(ks.auths, r.Header.Get("Authorization"))
 		ks.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"items":[],"page":0,"size":20,"total":0,"totalPages":0,"count":0}`))
+		_, _ = w.Write([]byte(`{"items":[],"page":0,"size":20,"total":0,"count":0}`))
 	}))
 	t.Cleanup(ks.Close)
 	return ks

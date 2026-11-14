@@ -224,7 +224,7 @@ The KRaft controller's act of ceasing to count a broker as live once its session
 
 ### Game Day {#gl-game-day}
 
-A planned session in which a team runs chaos experiments against a written hypothesis, with a rollback plan and a debrief [@robbins2012resilience]. `make gameday` runs `scripts/gameday.sh`, an automated seven-phase version: pre-flight, baseline, chaos injection, observation, recovery validation, post-flight and report. See [Chaos Engineering Theory](06-chaos-theory.md#the-game-day-methodology).
+A planned session in which a team runs chaos experiments against a written hypothesis, with a rollback plan and a debrief [@robbins2012resilience]. See [Chaos Engineering Theory](06-chaos-theory.md#the-game-day-methodology).
 
 ### Gate {#gl-gate}
 

@@ -56,12 +56,11 @@ com.bmscomp.kates
 │   ├── BenchmarkStatus    Unified task status + metrics snapshot
 │   ├── BenchmarkException Common exception type for backend failures
 │   ├── NativeKafkaBackend In-process execution using Kafka clients + virtual threads
-│   ├── TrogdorBackend     Adapter wrapping TrogdorClient + SpecFactory
+│   ├── TrogdorBackend     Adapter wrapping TrogdorClient, BenchmarkTask → TrogdorSpec
 │   └── TestOrchestrator   Routes execution to backends, applies per-type defaults
 │
 ├── trogdor/              Trogdor Coordinator integration
 │   ├── TrogdorClient      REST client interface (@RegisterRestClient)
-│   ├── SpecFactory        TestType → TrogdorSpec builder
 │   └── spec/
 │       ├── TrogdorSpec        Base class (class, startMs, durationMs)
 │       ├── ProduceBenchSpec   Producer benchmark specification
@@ -347,11 +346,11 @@ The `HybridChaosProvider` is a meta-provider that routes faults to the best avai
 
 ### Backend-Agnostic Task Model
 
-`BenchmarkTask` and `BenchmarkStatus` provide a unified contract that abstracts away backend-specific details. The orchestrator builds tasks once using a builder pattern, and the chosen backend translates them to its native format. The `TrogdorBackend`, for example, uses `SpecFactory` to convert `BenchmarkTask` objects into Trogdor-specific JSON specifications (`ProduceBenchSpec`, `ConsumeBenchSpec`, `RoundTripWorkloadSpec`).
+`BenchmarkTask` and `BenchmarkStatus` provide a unified contract that abstracts away backend-specific details. The orchestrator builds tasks once using a builder pattern, and the chosen backend translates them to its native format. The `TrogdorBackend`, for example, converts `BenchmarkTask` objects into Trogdor-specific JSON specifications (`ProduceBenchSpec`, `ConsumeBenchSpec`, `RoundTripWorkloadSpec`).
 
 ### Trogdor Specs as POJOs
 
-Rather than depending on the Trogdor library JAR (which would bring in the entire Kafka server dependency tree), Kates models Trogdor's JSON specification format using plain Java objects with Jackson annotations. This approach avoids dependency conflicts, tight coupling, and JAR size bloat. The `SpecFactory` class translates Kates' domain model into these POJOs, which are then serialized to JSON and submitted to the Trogdor Coordinator via its REST API.
+Rather than depending on the Trogdor library JAR (which would bring in the entire Kafka server dependency tree), Kates models Trogdor's JSON specification format using plain Java objects with Jackson annotations. This approach avoids dependency conflicts, tight coupling, and JAR size bloat. `TrogdorBackend` translates each `BenchmarkTask` into these POJOs, which are then serialized to JSON and submitted to the Trogdor Coordinator via its REST API.
 
 ### Safety-First Disruption Design
 

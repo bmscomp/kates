@@ -22,7 +22,7 @@ flowchart TB
     Y -.->|"roll back"| A
 ```
 
-After any upgrade, run `make gameday`, the automated pipeline of a [Game Day](appendix-a-glossary.md#gl-game-day), against the upgraded stack.
+After any upgrade, run a [Game Day](appendix-a-glossary.md#gl-game-day) against the upgraded stack: a playbook through `kates disruption playbook run <name>`, previewed with `--dry-run` first, as [Chaos Engineering in Practice](07-chaos-practice.md) describes.
 
 ### What Each Rollback Undoes
 
@@ -103,7 +103,7 @@ Keep `<pre-id>`, the LOAD run's ID: the post-upgrade comparison needs it.
 
 ### Post-Upgrade Checks
 
-An upgrade is done when all of these hold, in this order: the pre-upgrade rows for the brokers, `krafter` and the replicas, then the re-test, then `make gameday`. The re-test runs the same files, and the scenario file's gates decide it, not a percentage you choose afterwards:
+An upgrade is done when all of these hold, in this order: the pre-upgrade rows for the brokers, `krafter` and the replicas, then the re-test, then a playbook run. The re-test runs the same files, and the scenario file's gates decide it, not a percentage you choose afterwards:
 
 ```bash
 kates test apply -f payments-scenarios.yaml --wait

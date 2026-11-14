@@ -17,8 +17,10 @@
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
         <quarkus.platform.version>3.40.1.1</quarkus.platform.version>
         <surefire-plugin.version>3.6.1</surefire-plugin.version>
+        <!-- 2026-11-14: the BOM does not manage at.yawk.lz4 and kafka-clients 4.2.1 brings 1.10.1;
+             fixes up to GHSA-mcr4-qmvw-px4g (CVE-2026-106451) need 1.11.4 or later. -->
         <lz4.version>1.14.0</lz4.version>
-        <snappy.version>1.1.10.10</snappy.version>
+        <!-- 2026-11-14: the BOM brings 1.5.7-16; no advisory, kept so the resolved version does not go down. -->
         <zstd.version>1.5.7-25</zstd.version>
         <spotless.version>3.11.0</spotless.version>
         <palantir-format.version>2.89.0</palantir-format.version>
@@ -143,7 +145,6 @@
         <dependency>
             <groupId>org.xerial.snappy</groupId>
             <artifactId>snappy-java</artifactId>
-            <version>${snappy.version}</version>
         </dependency>
         <dependency>
             <groupId>com.github.luben</groupId>

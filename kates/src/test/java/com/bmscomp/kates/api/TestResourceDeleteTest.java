@@ -42,7 +42,7 @@ class TestResourceDeleteTest {
 
     @BeforeEach
     void setUp() {
-        resource = new TestResource(engine.orchestrator, engine.repository, null);
+        resource = new TestResource(engine.orchestrator, engine.repository);
         resource.auditService = audit;
         resource.retention = new RunRetention(engine.orchestrator, engine.repository, audit);
     }

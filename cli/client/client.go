@@ -427,10 +427,6 @@ func (c *Client) RerunTest(ctx context.Context, request *RerunTestRequest) (*Tes
 	return postJSON[*TestRun](c, ctx, "/api/tests", request)
 }
 
-func (c *Client) CreateCompareRebalanceTest(ctx context.Context, request *CreateTestRequest) (*TestRun, error) {
-	return postJSON[*TestRun](c, ctx, "/api/tests/compare-rebalance", request)
-}
-
 func (c *Client) DeleteTest(ctx context.Context, id string) error {
 	path, err := pathf("/api/tests/%s", id)
 	if err != nil {

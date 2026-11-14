@@ -327,7 +327,6 @@ func TestListTests(t *testing.T) {
 			Page:       0,
 			Size:       10,
 			TotalItems: 1,
-			TotalPages: 1,
 		})
 	})
 	resp, err := c.ListTests(context.Background(), "LOAD", "", 0, 10)
