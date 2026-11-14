@@ -96,7 +96,6 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
             com.bmscomp.kates.disruption.SlaGrader.SlaVerdict.class,
             com.bmscomp.kates.disruption.SlaGrader.SlaViolation.class,
             com.bmscomp.kates.disruption.DisruptionImpactScorer.ImpactScore.class,
-            com.bmscomp.kates.disruption.AutoRollbackGuard.RollbackDecision.class,
             com.bmscomp.kates.disruption.PrometheusMetricsCapture.MetricsSnapshot.class,
             com.bmscomp.kates.disruption.ChaosTemplateCatalog.TemplateInfo.class,
             com.bmscomp.kates.disruption.DisruptionEventBus.DisruptionEvent.class,
