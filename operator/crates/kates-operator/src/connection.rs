@@ -89,6 +89,18 @@ impl Connections {
         })
     }
 
+    /// A client for a URL the operator builds itself, such as a `Kates` Service's.
+    ///
+    /// # Errors
+    /// `Invalid` when no client can be built from `url`.
+    pub fn client_for(&self, url: &str) -> Result<Client, Failure> {
+        self.client(&Fields {
+            url: url.to_owned(),
+            key: String::new(),
+            ca_bundle: None,
+        })
+    }
+
     fn client(&self, fields: &Fields) -> Result<Client, Failure> {
         let mut hasher = DefaultHasher::new();
         fields.ca_bundle.hash(&mut hasher);

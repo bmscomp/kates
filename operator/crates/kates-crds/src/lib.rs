@@ -13,7 +13,9 @@ pub use compat::breaking;
 pub use kafkacompliance::{
     ComplianceCounts, FailedRule, KafkaCompliance, KafkaComplianceSpec, KafkaComplianceStatus,
 };
-pub use kates::{Database, Kafka, Kates, KatesSpec, KatesStatus, Sasl, SecretKey, SecretName};
+pub use kates::{
+    Database, Kafka, Kates, KatesSpec, KatesStatus, Mode, Sasl, SecretKey, SecretName,
+};
 pub use katestest::{KatesTest, KatesTestSpec, KatesTestStatus, Phase, RunSummary, TestType};
 
 /// Every CRD this build carries, for `crdgen` and `crds apply`.
