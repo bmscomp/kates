@@ -48,6 +48,7 @@ jobs:
               - 'charts/kates/**'
               - 'charts/strimzi-operator/**'
               - 'scripts/deploy-kafka-generic.sh'
+              - 'scripts/e2e-cli-backend.sh'
               - '.github/workflows/integration.yml'
 
   integration:
@@ -55,8 +56,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.cluster == 'true'
     runs-on: ubuntu-latest
-    # The Kafka deploy below takes up to 10 minutes on its own.
-    timeout-minutes: 45
+    # The Kafka deploy below takes up to 10 minutes on its own, the Kates image
+    # build about as long.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -203,6 +205,21 @@ jobs:
           KATES_COMPLIANCE_LIVE: "true"
         run: ./mvnw test -q -B -ntp -Dtest='ComplianceLiveTest,ComplianceNamespacedLiveTest'
 
+      # The CLI against a Kates API built from this tree, on the Kafka above. No
+      # other job runs the two together, so a field the CLI reads under a name
+      # the API no longer sends passed every check. The image is built as
+      # publish-docker.yml builds it.
+      - name: Build the Kates image
+        id: image
+        run: |
+          set -euo pipefail
+          scripts/retry.sh 3 docker build -f kates/Dockerfile -t kates:ci .
+          kind load docker-image kates:ci --name ci-test
+
+      - name: CLI against the Kates API
+        id: cli
+        run: scripts/e2e-cli-backend.sh kates:ci build/kates
+
       # Reads each step's real outcome. The previous table printed ✅ on every
       # row under `if: always()`, so a failed run still summarised as green.
       - name: Summary
@@ -215,6 +232,8 @@ jobs:
           MONITORING: ${{ steps.monitoring.outcome }}
           KAFKA: ${{ steps.kafka.outcome }}
           COMPLIANCE: ${{ steps.compliance.outcome }}
+          IMAGE: ${{ steps.image.outcome }}
+          CLI: ${{ steps.cli.outcome }}
         run: |
           mark() { case "$1" in success) echo "✅" ;; skipped) echo "⏭️" ;; *) echo "❌" ;; esac; }
           {
@@ -229,6 +248,8 @@ jobs:
             echo "| Jaeger manifests | $(mark "$MONITORING") |"
             echo "| Strimzi + Kafka deploy | $(mark "$KAFKA") |"
             echo "| Compliance (kind-ci.yaml) | $(mark "$COMPLIANCE") |"
+            echo "| Kates image build | $(mark "$IMAGE") |"
+            echo "| CLI against the Kates API | $(mark "$CLI") |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # No explicit teardown: helm/kind-action registers a post step that deletes
