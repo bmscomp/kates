@@ -54,7 +54,7 @@ class TestResourceCreateTest {
 
     @BeforeEach
     void setUp() {
-        resource = new TestResource(engine.orchestrator, engine.repository, null);
+        resource = new TestResource(engine.orchestrator, engine.repository);
         resource.auditService = audit;
     }
 
@@ -103,7 +103,7 @@ class TestResourceCreateTest {
         TestOrchestrator misconfigured = mock(TestOrchestrator.class);
         when(misconfigured.executeTest(any(), any()))
                 .thenReturn(Result.failure(new UnknownBackendException("nativ", List.of("native", "trogdor"))));
-        resource = new TestResource(misconfigured, engine.repository, null);
+        resource = new TestResource(misconfigured, engine.repository);
         resource.auditService = audit;
 
         assertFaultOfTheKatesApi(resource.createTest(InMemoryEngine.request(), NO_KEY));
