@@ -1,9 +1,9 @@
 apiVersion: v2
 name: kates-operator
-description: Kates runs and compliance checks as Kubernetes resources, driving an existing Kates API
+description: Kates backends, runs and compliance checks as Kubernetes resources
 type: application
-version: 0.1.1
-appVersion: "0.1.1"
+version: 0.2.0
+appVersion: "0.2.0"
 kubeVersion: ">=1.29.0-0"
 home: https://github.com/bmscomp/kates
 sources:
