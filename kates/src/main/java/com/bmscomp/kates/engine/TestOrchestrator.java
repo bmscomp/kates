@@ -1963,6 +1963,8 @@ public class TestOrchestrator {
                 .runId(runId)
                 .topic(topic)
                 .partitions(spec.getPartitions())
+                // Its MB/s is records times this; left out, every consumer read as 1 KiB records.
+                .recordSize(spec.getRecordSize())
                 .maxMessages(spec.getNumRecords())
                 .durationMs(spec.getDurationMs())
                 // A named group that has committed offsets on the topic resumes
