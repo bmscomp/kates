@@ -463,7 +463,7 @@ var mcpCaveatsRunsActivity = []mcpCaveat{
 			mcpAnchoredRef(mcpJava+"security/GrpcApiKeyInterceptor.java:67-70,100,156-159",
 				"static final Map<String, String> AUDITED", "audit(action, method, Status.Code.PERMISSION_DENIED",
 				"private void audit("),
-			mcpAnchoredRef(mcpJava+"schedule/TestScheduler.java:108-114", "Actor.SCHEDULER"),
+			mcpAnchoredRef(mcpJava+"schedule/TestScheduler.java:114-120", "Actor.SCHEDULER"),
 			mcpAnchoredRef(mcpJava+"disruption/DisruptionScheduler.java:120-126", "Actor.SCHEDULER"),
 			mcpAnchoredRef(mcpJava+"disruption/DisruptionResource.java:93", "auditTrail.done();"),
 			"kates/src/main/resources/db/migration/V26__audit_actor.sql:1-8",

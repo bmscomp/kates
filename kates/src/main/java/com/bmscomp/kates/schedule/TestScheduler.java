@@ -40,6 +40,9 @@ public class TestScheduler {
     TestOrchestrator orchestrator;
 
     @Inject
+    com.bmscomp.kates.disruption.DisruptionConcurrencyGuard drain;
+
+    @Inject
     com.bmscomp.kates.service.SchedulerLeaseService leases;
 
     @Inject
@@ -51,7 +54,10 @@ public class TestScheduler {
     @Scheduled(every = "60s", identity = "kates-schedule-evaluator")
     void evaluateSchedules() {
         // A draining instance fires nothing, and leaves the lease to one that may.
-        if (orchestrator.isDraining()) {
+        // The guard's flag, set with the orchestrator's by PUT /api/drain: asking
+        // the orchestrator would create it on the first tick, and its startup
+        // recovery with it.
+        if (drain.isDraining()) {
             return;
         }
         // With replicas > 1 every instance fires this — only the lease holder
