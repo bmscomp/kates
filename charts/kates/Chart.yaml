@@ -29,7 +29,7 @@ annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: changed
-      description: "appVersion 1.40.0 and the image tag move to 1.40.0: chaos runs that never outlive or escape their run (#632, #637-#640), numbers that are what was measured (#642-#645), a Kubernetes client that verifies the API server (#641) and Trogdor tasks that reach the configured Kafka (#635). Throughput summaries and scenario phases change behaviour; see the release notes."
+      description: "appVersion 1.40.0 and the image tag move to 1.40.0: chaos runs that never outlive or escape their run (#632, #637-#640), numbers that are what was measured (#642-#645), a Kubernetes client that verifies the API server (#641) Trogdor tasks that reach the configured Kafka (#635) and pollers that stop at shutdown instead of logging errors (#646). Throughput summaries and scenario phases change behaviour; see the release notes."
     - kind: changed
       description: "appVersion 1.39.1 and the image tag move to 1.39.1. The backend is unchanged since 1.38.0 — nothing under kates/src moved — so the image is a rebuild of the same code."
     - kind: changed
