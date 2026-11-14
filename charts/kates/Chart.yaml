@@ -2,14 +2,14 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: appVersion and the image tag move to 1.39.1, the tag the v1.39.1
+# Patch: appVersion and the image tag move to 1.40.0, the tag the v1.40.0
 # release publishes.
-version: 0.19.3
+version: 0.19.4
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
 # image.tag in values.yaml pinned to that release.
-appVersion: "1.39.1"
+appVersion: "1.40.0"
 keywords:
   - kafka
   - testing
@@ -28,6 +28,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "appVersion 1.40.0 and the image tag move to 1.40.0: chaos runs that never outlive or escape their run (#632, #637-#640), numbers that are what was measured (#642-#645), a Kubernetes client that verifies the API server (#641) Trogdor tasks that reach the configured Kafka (#635) and pollers that stop at shutdown instead of logging errors (#646). Throughput summaries and scenario phases change behaviour; see the release notes."
     - kind: changed
       description: "appVersion 1.39.1 and the image tag move to 1.39.1. The backend is unchanged since 1.38.0 — nothing under kates/src moved — so the image is a rebuild of the same code."
     - kind: changed

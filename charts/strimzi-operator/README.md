@@ -86,7 +86,7 @@ Left out, because only a cluster grant gives them: rack awareness (the operator 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `strimziVersion` | `1.2.0` | Builds the CRD bundle URL. Must equal `Chart.yaml` `appVersion` + dependency version. |
-| `testImages.kubectl` | `ghcr.io/bmscomp/kates-tester:1.39.1` | Image for the CRD hook Job and Helm tests |
+| `testImages.kubectl` | `ghcr.io/bmscomp/kates-tester:1.40.0` | Image for the CRD hook Job and Helm tests |
 | `crdUpgrade.enabled` | `true` | Apply CRDs via the pre-install/pre-upgrade hook |
 | `crdUpgrade.url` | `""` | Override the bundle URL (empty = derive from `strimziVersion`). Use an internal mirror when airgapped. |
 | `crdUpgrade.backoffLimit` | `3` | Job retries before the install/upgrade aborts |
