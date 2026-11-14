@@ -80,6 +80,9 @@ public class GrpcTestService extends MutinyTestServiceGrpc.TestServiceImplBase {
         if (e instanceof ConcurrencyLimitException) {
             return Status.RESOURCE_EXHAUSTED.withDescription(e.getMessage()).asRuntimeException();
         }
+        if (e instanceof com.bmscomp.kates.engine.DrainingException) {
+            return Status.UNAVAILABLE.withDescription(e.getMessage()).asRuntimeException();
+        }
         return Status.INTERNAL.withDescription(e.getMessage()).withCause(e).asRuntimeException();
     }
 

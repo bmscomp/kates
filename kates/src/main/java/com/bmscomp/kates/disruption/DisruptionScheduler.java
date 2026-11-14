@@ -36,6 +36,9 @@ public class DisruptionScheduler {
     DisruptionPlaybookCatalog playbookCatalog;
 
     @Inject
+    DisruptionConcurrencyGuard concurrencyGuard;
+
+    @Inject
     com.bmscomp.kates.service.AuditService auditService;
 
     @Inject
@@ -49,6 +52,10 @@ public class DisruptionScheduler {
 
     @Scheduled(every = "60s", identity = "kates-disruption-schedule-evaluator")
     void evaluateSchedules() {
+        // A draining instance fires nothing, and leaves the lease to one that may.
+        if (concurrencyGuard.isDraining()) {
+            return;
+        }
         // Only the lease holder may trigger disruptions — with replicas > 1
         // each schedule would otherwise inject faults once per replica.
         if (!leases.tryAcquire("disruption-scheduler", java.time.Duration.ofSeconds(55))) {
@@ -77,6 +84,10 @@ public class DisruptionScheduler {
     }
 
     private void executeSchedule(DisruptionScheduleEntity schedule) {
+        // A draining instance injects nothing, and saves no report of a firing it skipped.
+        if (!concurrencyGuard.enter()) {
+            return;
+        }
         try {
             DisruptionPlan plan;
 
@@ -118,6 +129,8 @@ public class DisruptionScheduler {
             LOG.info("Disruption schedule '" + schedule.getName() + "' completed: " + runId);
         } catch (Exception e) {
             LOG.error("Failed to execute disruption schedule '" + schedule.getName() + "'", e);
+        } finally {
+            concurrencyGuard.exit();
         }
     }
 

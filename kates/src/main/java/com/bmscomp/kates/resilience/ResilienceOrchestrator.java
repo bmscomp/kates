@@ -91,7 +91,9 @@ public class ResilienceOrchestrator {
 
             // 1. Start the benchmark test
             LOG.info("Resilience test: starting benchmark");
-            var result = testOrchestrator.executeTest(request.getTestRequest());
+            // Admitted: counted as fault work since its request, so a drain set
+            // since then lets it run rather than failing it.
+            var result = testOrchestrator.executeAdmitted(request.getTestRequest());
             if (result.isFailure()) {
                 String why = result.asFailure().orElseThrow().getMessage();
                 report.setStatus("ERROR");

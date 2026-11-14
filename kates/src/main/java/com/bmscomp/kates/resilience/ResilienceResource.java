@@ -106,36 +106,57 @@ public class ResilienceResource {
                 .build());
     }
 
-    private StreamingOutput executeWithKeepAlive(ResilienceTestRequest request, String scenarioId) {
-        return os -> {
-            java.util.concurrent.CompletableFuture<ResilienceReport> future =
-                    java.util.concurrent.CompletableFuture.supplyAsync(
-                            () -> orchestrator.execute(request), executor.get());
+    /**
+     * Starts the test and answers with its stream, or 503 during a drain.
+     * The test is counted as fault work until the orchestrator is done with
+     * it, and not until its answer is written: a client that goes away ends
+     * the stream, while the run goes on and still injects and undoes its
+     * fault.
+     */
+    private Response start(ResilienceTestRequest request, String scenarioId) {
+        if (!concurrencyGuard.enter()) {
+            return com.bmscomp.kates.api.DrainResource.refused(DisruptionConcurrencyGuard.DRAINING);
+        }
+        java.util.concurrent.CompletableFuture<ResilienceReport> future;
+        try {
+            future = java.util.concurrent.CompletableFuture.supplyAsync(
+                    () -> orchestrator.execute(request), executor.get());
+        } catch (RuntimeException e) {
+            concurrencyGuard.exit();
+            throw e;
+        }
+        future.whenComplete((report, failure) -> concurrencyGuard.exit());
+        StreamingOutput stream = os -> stream(future, scenarioId, os);
+        return Response.ok(stream).build();
+    }
 
-            while (!future.isDone()) {
-                try {
-                    os.write(" ".getBytes());
-                    os.flush();
-                    // Up to 10 s until the next space, so the report goes out as soon as the run ends.
-                    future.get(10, java.util.concurrent.TimeUnit.SECONDS);
-                } catch (java.util.concurrent.TimeoutException | java.util.concurrent.ExecutionException e) {
-                    // Still running, or failed: the get() below logs a failure.
-                } catch (Exception e) {
-                    future.cancel(true);
-                    return;
-                }
-            }
-
+    private void stream(
+            java.util.concurrent.CompletableFuture<ResilienceReport> future,
+            String scenarioId,
+            java.io.OutputStream os) {
+        while (!future.isDone()) {
             try {
-                ResilienceReport report = future.get();
-                Object payload = scenarioId != null ? Map.of("scenario", scenarioId, "report", report) : report;
-                // writeValue flushes and closes the stream, which ends the
-                // answer; a flush after it would throw "Stream is closed".
-                objectMapper.writeValue(os, payload);
+                os.write(" ".getBytes());
+                os.flush();
+                // Up to 10 s until the next space, so the report goes out as soon as the run ends.
+                future.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (java.util.concurrent.TimeoutException | java.util.concurrent.ExecutionException e) {
+                // Still running, or failed: the get() below logs a failure.
             } catch (Exception e) {
-                LOG.error("Failed to execute resilience test", e);
+                // The client is gone. The run is not stopped by it.
+                return;
             }
-        };
+        }
+
+        try {
+            ResilienceReport report = future.get();
+            Object payload = scenarioId != null ? Map.of("scenario", scenarioId, "report", report) : report;
+            // writeValue flushes and closes the stream, which ends the
+            // answer; a flush after it would throw "Stream is closed".
+            objectMapper.writeValue(os, payload);
+        } catch (Exception e) {
+            LOG.error("Failed to execute resilience test", e);
+        }
     }
 
     /**
@@ -181,6 +202,9 @@ public class ResilienceResource {
      * starts. The run takes the lease itself, just before the fault goes in.
      */
     private Optional<Response> unsafeOrBusy(FaultSpec chaosSpec) {
+        if (concurrencyGuard.isDraining()) {
+            return Optional.of(com.bmscomp.kates.api.DrainResource.refused(DisruptionConcurrencyGuard.DRAINING));
+        }
         String target = concurrencyGuard.currentTarget();
         if (concurrencyGuard.isBusy(target)) {
             return Optional.of(Response.status(409)
@@ -223,6 +247,10 @@ public class ResilienceResource {
     @APIResponse(
             responseCode = "409",
             description = "Another disruption is running against this cluster; no test is started")
+    @APIResponse(
+            responseCode = "503",
+            description = "The Kates API is draining, see PUT /api/drain; no test is started. Retry-After says when to"
+                    + " try again")
     public Response executeResilienceTest(ResilienceTestRequest request) {
         if (request.getTestRequest() == null) {
             return Response.status(400)
@@ -252,8 +280,7 @@ public class ResilienceResource {
             return unsafeOrBusy.get();
         }
 
-        StreamingOutput stream = executeWithKeepAlive(request, null);
-        return Response.ok(stream).build();
+        return start(request, null);
     }
 
     /**
@@ -320,6 +347,10 @@ public class ResilienceResource {
     @APIResponse(
             responseCode = "409",
             description = "Another disruption is running against this cluster; no test is started")
+    @APIResponse(
+            responseCode = "503",
+            description = "The Kates API is draining, see PUT /api/drain; no test is started. Retry-After says when to"
+                    + " try again")
     public Response runScenario(
             @Parameter(description = "Scenario ID") @PathParam("id") String id, Map<String, Object> overrides) {
 
@@ -381,7 +412,6 @@ public class ResilienceResource {
             return unsafeOrBusy.get();
         }
 
-        StreamingOutput stream = executeWithKeepAlive(request, id);
-        return Response.ok(stream).build();
+        return start(request, id);
     }
 }

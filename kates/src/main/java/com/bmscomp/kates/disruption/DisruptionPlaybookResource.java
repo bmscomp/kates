@@ -80,6 +80,7 @@ public class DisruptionPlaybookResource {
     @APIResponse(responseCode = "202", description = "Playbook accepted for execution")
     @APIResponse(responseCode = "404", description = "Playbook not found")
     @APIResponse(responseCode = "409", description = "Another disruption is already running against this cluster")
+    @APIResponse(responseCode = "503", description = "The API is draining and starts nothing — retry later")
     @APIResponse(responseCode = "422", description = "Playbook rejected by safety guard")
     public Response runPlaybook(@Parameter(description = "Playbook name") @PathParam("name") String name) {
         return playbookCatalog

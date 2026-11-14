@@ -41,6 +41,9 @@ public class DisruptionTemplateResource {
     @Inject
     ObjectMapper objectMapper;
 
+    @Inject
+    DisruptionConcurrencyGuard concurrencyGuard;
+
     @GET
     @Operation(
             summary = "List chaos experiment templates",
@@ -56,8 +59,12 @@ public class DisruptionTemplateResource {
     @Operation(summary = "Run a template", description = "Executes a chaos template with optional override parameters")
     @APIResponse(responseCode = "200", description = "Disruption report from template execution")
     @APIResponse(responseCode = "404", description = "Template not found")
+    @APIResponse(responseCode = "503", description = "The API is draining and starts nothing — retry later")
     public Response runTemplate(
             @Parameter(description = "Template ID") @PathParam("id") String templateId, Map<String, Object> overrides) {
+        if (!concurrencyGuard.enter()) {
+            return com.bmscomp.kates.api.DrainResource.refused(DisruptionConcurrencyGuard.DRAINING);
+        }
         try {
             DisruptionPlan plan = templateCatalog.buildPlan(templateId, overrides != null ? overrides : Map.of());
             String id = java.util.UUID.randomUUID().toString().substring(0, 8);
@@ -69,6 +76,8 @@ public class DisruptionTemplateResource {
             return Response.status(404)
                     .entity(ApiError.of(404, "Not Found", e.getMessage()))
                     .build();
+        } finally {
+            concurrencyGuard.exit();
         }
     }
 }

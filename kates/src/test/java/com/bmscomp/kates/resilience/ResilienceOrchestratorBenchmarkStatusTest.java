@@ -85,7 +85,7 @@ class ResilienceOrchestratorBenchmarkStatusTest {
 
     /** executeTest answers with {@code answered}, and each later read of the run is the next of {@code reads}. */
     private void benchmark(TestRun answered, TestRun... reads) {
-        when(orchestrator.testOrchestrator.executeTest(any())).thenReturn(Result.success(answered));
+        when(orchestrator.testOrchestrator.executeAdmitted(any())).thenReturn(Result.success(answered));
         if (reads.length > 0) {
             when(orchestrator.testOrchestrator.refreshStatus(id))
                     .thenReturn(reads[0], Arrays.copyOfRange(reads, 1, reads.length));

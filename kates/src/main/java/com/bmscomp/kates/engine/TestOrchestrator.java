@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicInteger;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -70,6 +71,13 @@ public class TestOrchestrator {
     private final long maxDurationMs;
 
     private final Semaphore concurrencyGuard;
+    /** Set by PUT /api/drain. Read after a permit is taken, see {@link #liveRuns()}. */
+    private volatile boolean draining;
+    /** Runs being ended, see {@link #ending}; counted in {@link #liveRuns()}. */
+    private final AtomicInteger ending = new AtomicInteger();
+    /** How deep this thread is in {@link #ending}, so that a nested call counts its run once. */
+    private final ThreadLocal<int[]> endingDepth = ThreadLocal.withInitial(() -> new int[1]);
+
     private final Map<String, List<BenchmarkHandle>> activeHandles = new ConcurrentHashMap<>();
 
     /**
@@ -158,8 +166,24 @@ public class TestOrchestrator {
      * index fails the second as any failed save, permit released.
      */
     public com.bmscomp.kates.util.Result<TestRun, Exception> executeTest(CreateTestRequest request, String clientKey) {
+        return executeTest(request, clientKey, false);
+    }
+
+    /**
+     * Starts the run of work a drain has already admitted and counts until it
+     * ends: a resilience test, counted in faultsInFlight from its request,
+     * whose benchmark starts after the drain was set. Refusing it then failed
+     * work that was accepted before the drain; starting it costs the drain
+     * nothing, since the drain is not drained until that work is done.
+     */
+    public com.bmscomp.kates.util.Result<TestRun, Exception> executeAdmitted(CreateTestRequest request) {
+        return executeTest(request, null, true);
+    }
+
+    private com.bmscomp.kates.util.Result<TestRun, Exception> executeTest(
+            CreateTestRequest request, String clientKey, boolean admitted) {
         if (request.isScenario()) {
-            return executeScenario(request, clientKey);
+            return executeScenario(request, clientKey, admitted);
         }
 
         // Before the permit: a request that cannot run as written is the
@@ -176,6 +200,10 @@ public class TestOrchestrator {
 
         if (!concurrencyGuard.tryAcquire()) {
             return com.bmscomp.kates.util.Result.failure(new ConcurrencyLimitException(maxConcurrentTests));
+        }
+        if (draining && !admitted) {
+            concurrencyGuard.release();
+            return com.bmscomp.kates.util.Result.failure(new DrainingException());
         }
 
         com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
@@ -216,7 +244,10 @@ public class TestOrchestrator {
                 // the run ends terminal at submission time.
             } catch (Throwable t) {
                 LOG.error("Test submission failed for run: " + run.getId(), t);
-                releasePermit(run.getId());
+                // Settled, not only released: a failed final write still
+                // registers the workers it started, which went on producing
+                // with no permit, uncounted by a drain.
+                settle(run.getId());
             }
         });
 
@@ -336,6 +367,11 @@ public class TestOrchestrator {
      */
     @io.opentelemetry.instrumentation.annotations.WithSpan("TestOrchestrator.executeScenario")
     com.bmscomp.kates.util.Result<TestRun, Exception> executeScenario(CreateTestRequest request, String clientKey) {
+        return executeScenario(request, clientKey, false);
+    }
+
+    private com.bmscomp.kates.util.Result<TestRun, Exception> executeScenario(
+            CreateTestRequest request, String clientKey, boolean admitted) {
         TestScenario scenario = request.getScenario();
         TestType type = scenario.getType() != null ? scenario.getType() : request.getType();
         String backendName = scenarioBackend(request);
@@ -366,6 +402,10 @@ public class TestOrchestrator {
         // they take a permit on the same terms.
         if (!concurrencyGuard.tryAcquire()) {
             return com.bmscomp.kates.util.Result.failure(new ConcurrencyLimitException(maxConcurrentTests));
+        }
+        if (draining && !admitted) {
+            concurrencyGuard.release();
+            return com.bmscomp.kates.util.Result.failure(new DrainingException());
         }
 
         com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
@@ -903,11 +943,37 @@ public class TestOrchestrator {
         // be reclaimed even when there is nothing left to stop, and before a
         // backend that fails to stop can get in the way.
         benchmarkMetrics.endRun(runId);
-        releasePermit(runId);
-        if (handles == null) {
-            return;
+        // Counted before the permit goes back, so a drain never reads zero
+        // live runs while this run's tasks are still being stopped.
+        ending(() -> {
+            releasePermit(runId);
+            if (handles != null) {
+                stopTasks(runId, handles);
+            }
+            return null;
+        });
+    }
+
+    /**
+     * Runs {@code work}, which ends a run, with the run counted in
+     * {@link #liveRuns()} throughout. A cancel and the timeout reaper settle a
+     * run and then store it FAILED: wrapped whole, the run stays live until
+     * its row says it ended, so a pod replaced once a drain reads zero leaves
+     * no run stored RUNNING. Nested calls on one thread count once.
+     */
+    public <T> T ending(java.util.function.Supplier<T> work) {
+        int[] depth = endingDepth.get();
+        if (depth[0]++ == 0) {
+            ending.incrementAndGet();
         }
-        stopTasks(runId, handles);
+        try {
+            return work.get();
+        } finally {
+            if (--depth[0] == 0) {
+                ending.decrementAndGet();
+                endingDepth.remove();
+            }
+        }
     }
 
     /**
@@ -958,6 +1024,11 @@ public class TestOrchestrator {
      * @return false when no run has that id
      */
     public boolean deleteTest(String runId) {
+        // Live for a drain until the row is gone, as a cancel until its row is FAILED.
+        return ending(() -> deleteCounted(runId));
+    }
+
+    private boolean deleteCounted(String runId) {
         settle(runId);
         java.util.Optional<TestRun> deleted = repository.delete(runId);
         if (deleted.isEmpty()) {
@@ -2100,6 +2171,10 @@ public class TestOrchestrator {
      *     RUNNING, or ended while being cancelled
      */
     public java.util.Optional<TestRun> cancelTest(String runId) {
+        return ending(() -> cancelCounted(runId));
+    }
+
+    private java.util.Optional<TestRun> cancelCounted(String runId) {
         TestResult.TaskStatus status = null;
         // Two passes cover the one move that keeps a run cancellable, PENDING
         // to RUNNING; a run that moved again has ended.
@@ -2149,5 +2224,25 @@ public class TestOrchestrator {
             updatedResults.add(result);
         }
         return run.withResults(updatedResults);
+    }
+
+    /** Whether new runs are refused so that the live ones can finish. */
+    public boolean isDraining() {
+        return draining;
+    }
+
+    public void setDraining(boolean draining) {
+        this.draining = draining;
+    }
+
+    /**
+     * The runs that hold a permit, counted from the permit itself. A request
+     * takes its permit before it reads {@link #draining}, so once a drain is
+     * set and this reads zero, no request that saw the old value can still
+     * start a run. A run being ended counts until its tasks are stopped and,
+     * for a cancel or a reap, its FAILED row is written (see {@link #ending}).
+     */
+    public int liveRuns() {
+        return maxConcurrentTests - concurrencyGuard.availablePermits() + ending.get();
     }
 }

@@ -1349,6 +1349,54 @@ class TestOrchestratorTest {
         }
 
         @Test
+        void aDrainRefusesARunAndAScenarioAndGivesThePermitBack() {
+            TestOrchestrator engine = withBackend("native");
+            engine.setDraining(true);
+            CreateTestRequest plain = new CreateTestRequest();
+            plain.setType(TestType.LOAD);
+            plain.setSpec(new TestSpec());
+            CreateTestRequest phased = scenario(new TestSpec(), phase("steady", ScenarioPhase.PhaseType.STEADY));
+
+            // More refusals than there are permits: none of them may keep one.
+            for (int i = 0; i < 5; i++) {
+                assertInstanceOf(
+                        DrainingException.class,
+                        engine.executeTest(plain).asFailure().orElseThrow());
+                assertInstanceOf(
+                        DrainingException.class,
+                        engine.executeTest(phased).asFailure().orElseThrow());
+            }
+            assertEquals(0, engine.liveRuns());
+            assertTrue(submitted.isEmpty());
+
+            engine.setDraining(false);
+            assertTrue(engine.executeTest(phased).isSuccess());
+        }
+
+        /**
+         * A resilience test is counted as fault work from its request, and
+         * starts its benchmark later. A drain set in between refused that
+         * benchmark, failing work accepted before the drain.
+         */
+        @Test
+        void workADrainAdmittedStartsItsRunDuringTheDrain() {
+            TestOrchestrator engine = withBackend("native");
+            engine.setDraining(true);
+            CreateTestRequest plain = new CreateTestRequest();
+            plain.setType(TestType.LOAD);
+            plain.setSpec(new TestSpec());
+
+            assertTrue(engine.executeAdmitted(plain).isSuccess());
+            assertTrue(engine.executeAdmitted(scenario(new TestSpec(), phase("steady", ScenarioPhase.PhaseType.STEADY)))
+                    .isSuccess());
+            assertFalse(submitted.isEmpty(), "the scenario's tasks were submitted");
+            assertInstanceOf(
+                    DrainingException.class,
+                    engine.executeTest(plain).asFailure().orElseThrow(),
+                    "a request the drain did not admit is still refused");
+        }
+
+        @Test
         void aScenarioWithNoTypeIsRefusedBeforeTakingAPermit() {
             // POST /api/resilience and a schedule run no bean validation, so a
             // scenario could come with no type, its own or the request's. It

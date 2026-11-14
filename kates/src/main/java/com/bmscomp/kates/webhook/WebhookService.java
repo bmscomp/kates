@@ -25,6 +25,18 @@ public class WebhookService {
 
     private volatile HttpClient httpClient;
 
+    /**
+     * Events being handled and deliveries not yet ended, counted for GET
+     * /api/drain. An event is marked processed before it is delivered, so a
+     * pod replaced during a delivery's retries loses it: the next pod skips it
+     * and it never reaches the DLQ.
+     */
+    private final java.util.concurrent.atomic.AtomicInteger inFlight = new java.util.concurrent.atomic.AtomicInteger();
+
+    public int deliveriesInFlight() {
+        return inFlight.get();
+    }
+
     private HttpClient http() {
         HttpClient client = httpClient;
         if (client == null) {
@@ -121,6 +133,17 @@ public class WebhookService {
 
     @org.eclipse.microprofile.reactive.messaging.Incoming("test-events-in")
     public void onTestEvent(com.bmscomp.kates.domain.events.TestEvent event) {
+        // Counted before the event is marked processed, and until each
+        // delivery it starts has counted itself in.
+        inFlight.incrementAndGet();
+        try {
+            handle(event);
+        } finally {
+            inFlight.decrementAndGet();
+        }
+    }
+
+    private void handle(com.bmscomp.kates.domain.events.TestEvent event) {
         String idempotencyKey = event.getTestId() + ":" + event.getStatus().name();
         if (olderThanLedger(event)) {
             LOG.infof(
@@ -208,6 +231,22 @@ public class WebhookService {
     }
 
     private void fireAsync(WebhookRegistration reg, WebhookPayload payload) {
+        inFlight.incrementAndGet();
+        try {
+            Thread.startVirtualThread(() -> {
+                try {
+                    deliver(reg, payload);
+                } finally {
+                    inFlight.decrementAndGet();
+                }
+            });
+        } catch (RuntimeException e) {
+            inFlight.decrementAndGet();
+            throw e;
+        }
+    }
+
+    private void deliver(WebhookRegistration reg, WebhookPayload payload) {
         // Re-validate at delivery time: DNS may have changed since registration
         // (rebinding), and registrations predating the SSRF guard get checked too.
         try {
@@ -217,7 +256,7 @@ public class WebhookService {
             self.saveToDlq(reg, payload, "Blocked by URL policy: " + e.getMessage());
             return;
         }
-        Thread.startVirtualThread(() -> {
+        {
             int maxAttempts = 3;
             String lastError = "Unknown error";
             for (int attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -260,7 +299,7 @@ public class WebhookService {
                     "Webhook %s delivery failed after %d attempts for event %s. Sending to DLQ.",
                     reg.name(), maxAttempts, payload.event());
             self.saveToDlq(reg, payload, lastError);
-        });
+        }
     }
 
     public record WebhookRegistration(String name, String url, String events) {}

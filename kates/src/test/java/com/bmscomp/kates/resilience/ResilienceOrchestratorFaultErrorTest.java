@@ -53,7 +53,7 @@ class ResilienceOrchestratorFaultErrorTest {
     void wire() {
         TestRun running = new TestRun(TestType.LOAD, new TestSpec()).withStatus(TaskStatus.RUNNING);
         orchestrator.testOrchestrator = mock(TestOrchestrator.class);
-        when(orchestrator.testOrchestrator.executeTest(any())).thenReturn(Result.success(running));
+        when(orchestrator.testOrchestrator.executeAdmitted(any())).thenReturn(Result.success(running));
         when(orchestrator.testOrchestrator.refreshStatus(running.getId())).thenReturn(running);
 
         // The fault fails once the probe monitor has started.

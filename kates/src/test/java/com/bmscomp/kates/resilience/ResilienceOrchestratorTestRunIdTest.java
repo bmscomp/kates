@@ -75,7 +75,7 @@ class ResilienceOrchestratorTestRunIdTest {
     /** executeTest answers with the run in {@code status}, and so does each later read of it. */
     private void benchmark(TaskStatus status) {
         TestRun run = created.withStatus(status);
-        when(orchestrator.testOrchestrator.executeTest(any())).thenReturn(Result.success(run));
+        when(orchestrator.testOrchestrator.executeAdmitted(any())).thenReturn(Result.success(run));
         when(orchestrator.testOrchestrator.refreshStatus(id)).thenReturn(run);
     }
 
@@ -144,7 +144,7 @@ class ResilienceOrchestratorTestRunIdTest {
 
     @Test
     void aBenchmarkThatDidNotStartHasNoRunToName() {
-        when(orchestrator.testOrchestrator.executeTest(any()))
+        when(orchestrator.testOrchestrator.executeAdmitted(any()))
                 .thenReturn(Result.failure(new IllegalStateException("Concurrency limit reached")));
 
         ResilienceReport report = execute();

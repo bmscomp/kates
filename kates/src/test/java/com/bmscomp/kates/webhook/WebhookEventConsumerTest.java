@@ -1,5 +1,6 @@
 package com.bmscomp.kates.webhook;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -99,6 +100,50 @@ class WebhookEventConsumerTest {
         queue.offer(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
         exchange.sendResponseHeaders(200, -1);
         exchange.close();
+    }
+
+    /**
+     * A delivery counts for GET /api/drain until it ends. The event is marked
+     * processed before it is sent, so a pod replaced mid-delivery would lose
+     * it: the next pod skips the event.
+     */
+    @Test
+    void aDeliveryCountsUntilItEnds() throws Exception {
+        java.util.concurrent.CountDownLatch arrived = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        server.createContext("/slow", exchange -> {
+            arrived.countDown();
+            try {
+                release.await(30, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            record(exchange, new LinkedBlockingQueue<>());
+        });
+        String slow = "slow-hook-" + UUID.randomUUID();
+        webhookService.register(new WebhookService.WebhookRegistration(
+                slow, "http://127.0.0.1:" + server.getAddress().getPort() + "/slow", "DONE"));
+        try {
+            InMemorySource<TestEvent> events = connector.source("test-events-in");
+            events.send(new TestEvent(
+                    "slow-run-" + UUID.randomUUID(),
+                    "LOAD",
+                    TestResult.TaskStatus.DONE,
+                    "",
+                    System.currentTimeMillis()));
+
+            assertTrue(arrived.await(DELIVERY_TIMEOUT.toSeconds(), TimeUnit.SECONDS), "the slow delivery arrived");
+            assertTrue(webhookService.deliveriesInFlight() >= 1, "counted while its receiver has not answered");
+            release.countDown();
+            long deadline = System.nanoTime() + DELIVERY_TIMEOUT.toNanos();
+            while (webhookService.deliveriesInFlight() != 0 && System.nanoTime() < deadline) {
+                Thread.sleep(20);
+            }
+            assertEquals(0, webhookService.deliveriesInFlight(), "and no longer once it ended");
+        } finally {
+            release.countDown();
+            webhookService.unregister(slow);
+        }
     }
 
     @Test

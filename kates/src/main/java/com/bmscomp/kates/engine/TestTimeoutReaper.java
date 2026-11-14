@@ -113,31 +113,40 @@ public class TestTimeoutReaper {
             // landed. Its submission's own write then finds it FAILED, and
             // stops the tasks it started.
             boolean pending = status == TestResult.TaskStatus.PENDING;
-            if (!pending) {
-                // Stop the live producer/consumer virtual threads BEFORE
-                // persisting FAILED. Marking the DB row failed without this
-                // left the backend workers running — a "timed out" run kept
-                // producing to Kafka and skewing concurrent runs' latency.
-                // Safe to do before the CAS below: a RUNNING or STOPPING run
-                // can only end, and if it has ended already, its workers are
-                // finished too and this is a no-op.
-                orchestrator.settle(run.getId());
-            }
-
-            // Compare-and-set on the status. A run can complete between
-            // the query above and this write, and an unconditional save
-            // would overwrite that real completion with a bogus timeout.
-            if (!repository.saveIfStatus(failed, status)) {
-                LOG.infof("Run %s changed state while being reaped — leaving it alone", run.getId());
-            } else if (pending) {
-                orchestrator.settle(run.getId());
-            }
+            // Live for a drain from here until the FAILED row is written, see
+            // TestOrchestrator.ending; a row inside its deadline is not counted.
+            orchestrator.ending(() -> {
+                reap(run, failed, status, pending);
+                return null;
+            });
         } catch (Exception e) {
             // Covers an unparseable createdAt AND an optimistic-lock
             // conflict — the latter means a real completion landed while we
             // were deciding this run had timed out, so leaving it alone is
             // exactly right. Either way the next sweep re-evaluates.
             LOG.debugf("Skipping run %s this sweep: %s", summary.getId(), e.getMessage());
+        }
+    }
+
+    private void reap(TestRun run, TestRun failed, TestResult.TaskStatus status, boolean pending) {
+        if (!pending) {
+            // Stop the live producer/consumer virtual threads BEFORE
+            // persisting FAILED. Marking the DB row failed without this
+            // left the backend workers running — a "timed out" run kept
+            // producing to Kafka and skewing concurrent runs' latency.
+            // Safe to do before the CAS below: a RUNNING or STOPPING run
+            // can only end, and if it has ended already, its workers are
+            // finished too and this is a no-op.
+            orchestrator.settle(run.getId());
+        }
+
+        // Compare-and-set on the status. A run can complete between
+        // the query above and this write, and an unconditional save
+        // would overwrite that real completion with a bogus timeout.
+        if (!repository.saveIfStatus(failed, status)) {
+            LOG.infof("Run %s changed state while being reaped — leaving it alone", run.getId());
+        } else if (pending) {
+            orchestrator.settle(run.getId());
         }
     }
 

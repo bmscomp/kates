@@ -49,7 +49,9 @@ public class DisruptionLauncher {
         /** Refused by the safety guard before anything was touched. */
         REJECTED,
         /** Another plan is already running against this cluster. */
-        CONFLICT
+        CONFLICT,
+        /** Kates is draining and starts no fault. */
+        DRAINING
     }
 
     /**
@@ -65,6 +67,23 @@ public class DisruptionLauncher {
     }
 
     public LaunchResult launch(DisruptionPlan plan) {
+        if (!concurrencyGuard.enter()) {
+            return new LaunchResult(Status.DRAINING, null, List.of(DisruptionConcurrencyGuard.DRAINING));
+        }
+        // An accepted plan stays counted until runPlan has saved its report.
+        boolean running = false;
+        try {
+            LaunchResult result = start(plan);
+            running = result.accepted();
+            return result;
+        } finally {
+            if (!running) {
+                concurrencyGuard.exit();
+            }
+        }
+    }
+
+    private LaunchResult start(DisruptionPlan plan) {
         String target = concurrencyGuard.currentTarget();
         if (concurrencyGuard.isBusy(target)) {
             return new LaunchResult(
@@ -119,6 +138,8 @@ public class DisruptionLauncher {
             failed.setStatus("FAILED");
             failed.setValidationWarnings(List.of("Execution error: " + e.getMessage()));
             DisruptionPersistence.persistReport(id, failed, repository, objectMapper);
+        } finally {
+            concurrencyGuard.exit();
         }
     }
 }

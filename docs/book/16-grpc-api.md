@@ -620,7 +620,7 @@ The store and the REST API name run statuses one way, and `TestStatus` another:
 
 ## Error Handling
 
-Kates raises seven status codes of its own; the table gives each one's REST equivalent and when it is raised:
+Kates raises eight status codes of its own; the table gives each one's REST equivalent and when it is raised:
 
 | gRPC Status | HTTP | When |
 |------------------|:----:|----------------------------------------|
@@ -630,6 +630,7 @@ Kates raises seven status codes of its own; the table gives each one's REST equi
 | `NOT_FOUND` | 404 | The resource doesn't exist |
 | `FAILED_PRECONDITION` | 409 | `CancelTest` on a run that is neither pending nor running |
 | `RESOURCE_EXHAUSTED` | 429 | `CreateTest` while `kates.engine.max-concurrent-tests` runs are already running |
+| `UNAVAILABLE` | 503 | `CreateTest` while the Kates API is draining |
 | `INTERNAL` | 500 | `CreateTest` could not start the run, for a reason other than its fields or a full engine |
 
 These are the descriptions each one carries, `INTERNAL` aside, which passes on the underlying exception message verbatim:
@@ -646,11 +647,13 @@ NOT_FOUND            Test not found: 0badc0de
 FAILED_PRECONDITION  Test is not running (status: DONE)
 RESOURCE_EXHAUSTED   Concurrency limit reached: 3 tests already running. Retry later
                      or increase kates.engine.max-concurrent-tests.
+UNAVAILABLE          Kates is draining: no new run is started until the drain is
+                     lifted
 ```
 
 After `RESOURCE_EXHAUSTED`, send the same request again later: no run started, and the next attempt can succeed once a running test ends. REST's `429` also sends `Retry-After: 60`; the gRPC status carries no delay, so wait about a minute between attempts.
 
-Any other exception inside an RPC — Kafka unreachable during `GetClusterInfo`, no Kubernetes API for `GetClusterTopology` — reaches the client as `UNKNOWN`, with the Java exception class and message as the description. Transport-level codes such as `UNAVAILABLE` come from the gRPC runtime itself, for example when the server can't be reached, not from Kates.
+Any other exception inside an RPC — Kafka unreachable during `GetClusterInfo`, no Kubernetes API for `GetClusterTopology` — reaches the client as `UNKNOWN`, with the Java exception class and message as the description. `UNAVAILABLE` also comes from the gRPC runtime itself, for example when the server can't be reached. From Kates it means a drain: its description starts with `Kates is draining`.
 
 `grpcurl` prints every refused call in this shape:
 
