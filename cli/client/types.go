@@ -172,7 +172,7 @@ type TestRun struct {
 	RequestedSpec json.RawMessage  `json:"requestedSpec,omitempty"`
 	Results       []PhaseResult    `json:"results,omitempty"`
 	CdcPhases     map[string]int64 `json:"cdcPhases,omitempty"`
-	CdcPhase      string           `json:"currentPhase,omitempty"`
+	CdcPhase      string           `json:"cdcPhase,omitempty"`
 }
 
 type PhaseResult struct {
