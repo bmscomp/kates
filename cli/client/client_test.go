@@ -446,6 +446,23 @@ func TestCreateTest_SendsAZeroWhereItIsASetting(t *testing.T) {
 
 // A run's spec reads back the same way: lingerMs 0 is 0, not a field the run
 // did not report, and an absent field is nil rather than a 0 nobody set.
+// The API names a CDC run's current phase cdcPhase (TestRun.getCdcPhase);
+// the CDC live view showed "starting" for the whole run while this read
+// currentPhase.
+func TestGetTest_ReadsTheCdcPhase(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"run-1","testType":"INTEGRATION_CDC","status":"RUNNING","cdcPhase":"SNAPSHOT"}`))
+	})
+	run, err := c.GetTest(context.Background(), "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.CdcPhase != "SNAPSHOT" {
+		t.Errorf("CdcPhase = %q, want SNAPSHOT", run.CdcPhase)
+	}
+}
+
 func TestGetTest_ReadsAZeroSettingAsSet(t *testing.T) {
 	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
