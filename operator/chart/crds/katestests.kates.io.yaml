@@ -20,6 +20,8 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    deprecated: true
+    deprecationWarning: "kates.io/v1alpha1 KatesTest is deprecated and goes in kates-operator 0.3.0: run kates test apply from a CronJob instead"
     name: v1alpha1
     schema:
       openAPIV3Schema:

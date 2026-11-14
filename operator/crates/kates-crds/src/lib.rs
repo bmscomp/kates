@@ -51,6 +51,21 @@ mod tests {
     }
 
     #[test]
+    fn the_run_kinds_are_deprecated_and_kates_is_not() {
+        for crd in crds() {
+            let version = &crd.spec.versions[0];
+            let deprecated = crd.spec.names.kind != "Kates";
+            assert_eq!(
+                version.deprecated.unwrap_or(false),
+                deprecated,
+                "{}",
+                crd.spec.names.kind
+            );
+            assert_eq!(version.deprecation_warning.is_some(), deprecated);
+        }
+    }
+
+    #[test]
     fn every_crd_carries_a_marker() {
         for crd in crds() {
             assert!(marker(&crd).is_some(), "{:?}", crd.metadata.name);

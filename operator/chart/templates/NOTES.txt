@@ -8,3 +8,7 @@ Each of those namespaces needs a Secret named kates-connection (keys url, apiKey
 Then:
 
   kubectl get katestests,kafkacompliances -A
+
+KatesTest and KafkaCompliance are deprecated and go in kates-operator 0.3.0.
+Run kates test apply or kates compliance check from a CronJob instead: see
+"Replacing the run kinds" in the chart README.

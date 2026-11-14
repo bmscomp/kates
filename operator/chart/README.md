@@ -4,6 +4,8 @@ Kates runs and compliance checks as Kubernetes resources. `KatesTest` is one run
 
 The operator drives a Kates API through its REST API: one that is already running, or one it installs from a [`Kates`](#kates) resource. It needs Kates 1.38.0 or newer: older versions can't honour an idempotency key, so every `KatesTest` waits at `Synced=False`, reason `ApiTooOld`, and starts no run.
 
+`KatesTest` and `KafkaCompliance` are deprecated in 0.2.0 and go in 0.3.0. The API server prints a warning on every request for either kind, and the operator logs one at start while any of their resources is left. Move each to a `CronJob` that runs the `kates` CLI, as [Replacing the run kinds](#replacing-the-run-kinds) shows. Both still work in 0.2.0. The `Kates` kind stays.
+
 ## Install
 
 ```bash
@@ -93,76 +95,7 @@ Deleting a `KatesTest` whose run is live cancels the run first. The run's record
 
 ### On a schedule
 
-There is no schedule kind. A `CronJob` creates one `KatesTest` per firing, and waits for it so `Forbid` holds across firings:
-
-```yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: nightly-load
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: nightly-load
-rules:
-  - apiGroups: [kates.io]
-    resources: [katestests]
-    verbs: [create, get, list, watch]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: nightly-load
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: nightly-load
-subjects:
-  - kind: ServiceAccount
-    name: nightly-load
----
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: nightly-load
-spec:
-  schedule: "0 2 * * *"
-  timeZone: Etc/UTC
-  concurrencyPolicy: Forbid
-  startingDeadlineSeconds: 600
-  jobTemplate:
-    spec:
-      backoffLimit: 0
-      template:
-        spec:
-          serviceAccountName: nightly-load
-          restartPolicy: Never
-          containers:
-            - name: run
-              image: ghcr.io/bmscomp/kates-tester:1.38.0
-              command: [/bin/sh, -ec]
-              args:
-                - |
-                  run=$(kubectl create -o name -f - <<EOF
-                  apiVersion: kates.io/v1alpha1
-                  kind: KatesTest
-                  metadata:
-                    generateName: nightly-load-
-                  spec:
-                    type: LOAD
-                    spec: {numRecords: 1000000}
-                    sla: {maxP99LatencyMs: 100}
-                    ttlSecondsAfterFinished: 86400
-                  EOF
-                  )
-                  kubectl wait --for=jsonpath='{.status.finishedAt}' "$run" --timeout=30m
-                  kubectl wait --for=condition=Ready "$run" --timeout=0
-```
-
-The Job fails when the run does, so the `CronJob`'s history shows the missed gates. The API's own `/api/schedules` is still there, but it needs an `admin` key and leaves no resource per firing.
-
-`kates-tester` is unsigned. Where the Kates chart's `kyvernoPolicy.cosign` is on with Enforce, its pod is refused in that release's namespace: run the `CronJob` in another namespace and bind its ServiceAccount in the target, or use your own image with a shell and kubectl.
+There is no schedule kind. Run `kates test apply` from a `CronJob`, as [Replacing the run kinds](#replacing-the-run-kinds) shows.
 
 ### GitOps
 
@@ -224,6 +157,73 @@ What it doesn't do yet:
 - No PostgreSQL Secret for the `INTEGRATION_CDC` test, and no `rbac.extraRules`: the Kates chart's `rbac.cdcSecretNamespaces` and `rbac.extraRules` have no counterpart yet.
 - It doesn't create PostgreSQL. A changed Secret is not noticed: delete the pod to pick it up.
 - Kafka over TLS with a truststore file isn't expressible yet. `spec.env` takes any other setting of the container, except the names `database`, `kafka` and `apiKeySecretRef` set.
+
+## Replacing the run kinds
+
+A `CronJob` runs the `kates` CLI against the API: `kates test apply --wait` for a `KatesTest`, `kates compliance check` for a `KafkaCompliance`. The Job fails when the run misses a gate or the check fails, so the `CronJob`'s history shows each miss. The scenario file takes the keys of `kates test apply`, not the wire names of `spec.spec`: see `kates test apply --help`.
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nightly-load
+data:
+  load.yaml: |
+    name: nightly-load
+    type: LOAD
+    spec:
+      records: 1000000
+    validate:
+      maxP99LatencyMs: 100
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-load
+spec:
+  schedule: "0 2 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          containers:
+            - name: run
+              image: ghcr.io/bmscomp/kates-tester:1.40.0
+              env:
+                - name: KATES_VERSION
+                  value: "1.40.0"
+                - name: KATES_URL
+                  valueFrom: {secretKeyRef: {name: kates-connection, key: url}}
+                - name: KATES_API_KEY
+                  valueFrom: {secretKeyRef: {name: kates-connection, key: apiKey}}
+              command: [/bin/sh, -ec]
+              args:
+                - |
+                  cd /tmp
+                  file=kates-linux-$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/').tar.gz
+                  release=https://github.com/bmscomp/kates/releases/download/v$KATES_VERSION
+                  curl -fsSL -O "$release/$file" -O "$release/checksums.txt"
+                  grep " $file\$" checksums.txt | sha256sum -c -
+                  tar xzf "$file" kates
+                  ./kates test apply -f /scenario/load.yaml --wait --plain
+              volumeMounts:
+                - {name: scenario, mountPath: /scenario}
+          volumes:
+            - name: scenario
+              configMap: {name: nightly-load}
+```
+
+For a `KafkaCompliance`, put its `spec.reference` in the ConfigMap as a `KafkaReference` file, and run `./kates compliance check -f /scenario/reference.yaml` instead. The check runs on the schedule only, not when the Strimzi `Kafka` changes. A test needs a key with `read` and `test:run`, a check `read` alone, so the `kates-connection` key the operator uses serves both.
+
+The pod downloads the CLI from GitHub and checks it against the release's `checksums.txt`. Where pods have no route to GitHub, serve the tarball and `checksums.txt` from a mirror and point `release` at it. `kates-tester` is unsigned. Where the Kates chart's `kyvernoPolicy.cosign` is on with Enforce, its pod is refused in that release's namespace: run the `CronJob` in another namespace, or use your own signed image with the CLI in it.
+
+Once a namespace has its `CronJob`s, delete its `KatesTest`s and `KafkaCompliance`s. Deleting a live `KatesTest` cancels its run, so wait for it to finish first.
 
 ## Operating it
 
