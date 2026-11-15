@@ -14,7 +14,7 @@ pub use kafkacompliance::{
     ComplianceCounts, FailedRule, KafkaCompliance, KafkaComplianceSpec, KafkaComplianceStatus,
 };
 pub use kates::{
-    Database, Kafka, Kates, KatesSpec, KatesStatus, Mode, Sasl, SecretKey, SecretName,
+    Database, Kafka, Kates, KatesSpec, KatesStatus, Mode, Quorum, Sasl, SecretKey, SecretName,
 };
 pub use katestest::{KatesTest, KatesTestSpec, KatesTestStatus, Phase, RunSummary, TestType};
 

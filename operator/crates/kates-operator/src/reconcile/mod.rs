@@ -2,6 +2,7 @@
 
 pub mod compliance;
 pub mod kates;
+pub mod quorum;
 pub mod test;
 
 use std::collections::BTreeMap;
@@ -24,6 +25,8 @@ pub enum Error {
     Cancel(#[source] kates_client::Error),
     #[error(transparent)]
     Finalizer(#[from] Box<kube::runtime::finalizer::Error<Error>>),
+    #[error("a quorum certificate could not be made: {0}")]
+    Certificate(#[from] rcgen::Error),
 }
 
 impl Error {
@@ -33,6 +36,7 @@ impl Error {
         match self {
             Self::NoNamespace => "NoNamespace",
             Self::Kube(_) => "Kube",
+            Self::Certificate(_) => "Certificate",
             Self::Cancel(error) => error.name(),
             Self::Finalizer(error) => match &**error {
                 kube::runtime::finalizer::Error::ApplyFailed(inner)

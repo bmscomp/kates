@@ -108,7 +108,7 @@ mod tests {
         let text = r#"{"components":{"schemas":{
             "io.kates.v1alpha1.KatesTest":{"description":"One Kates run. crd-version: 1"},
             "io.kates.v1alpha1.KafkaCompliance":{"description":"A check. crd-version: 1"},
-            "io.kates.v1alpha1.Kates":{"description":"One Kates backend. crd-version: 1"},
+            "io.kates.v1alpha1.Kates":{"description":"One Kates backend. crd-version: 2"},
             "io.k8s.other":{"description":"x"}}}}"#;
         let served = parse_served(text);
         assert_eq!(served.len(), 3);

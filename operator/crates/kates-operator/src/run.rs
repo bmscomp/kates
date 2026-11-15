@@ -545,7 +545,7 @@ mod tests {
     const SERVED: &str = r#"{"components":{"schemas":{
         "io.kates.v1alpha1.KatesTest":{"description":"crd-version: 1"},
         "io.kates.v1alpha1.KafkaCompliance":{"description":"crd-version: 1"},
-        "io.kates.v1alpha1.Kates":{"description":"crd-version: 1"}}}}"#;
+        "io.kates.v1alpha1.Kates":{"description":"crd-version: 2"}}}}"#;
 
     const VERSION: &str = r#"{"major":"1","minor":"34","gitVersion":"v1.34.11","gitCommit":"c",
         "gitTreeState":"clean","buildDate":"2026-01-01T00:00:00Z","goVersion":"go1.25",

@@ -7,13 +7,14 @@
 //! The pod is replaced by the operator, not by the `StatefulSet` (`OnDelete`): under `mode: Drain`
 //! it asks the backend to start nothing new and waits for `/api/drain` to say nothing is live.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use jiff::Timestamp;
 use k8s_openapi::api::apps::v1::StatefulSet;
 use k8s_openapi::api::core::v1::{Pod, Secret, Service, ServiceAccount};
+use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use k8s_openapi::api::rbac::v1::ClusterRoleBinding;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
 use kates_client::Drain;
@@ -25,7 +26,7 @@ use kube::{Resource as _, ResourceExt as _};
 use secrecy::SecretString;
 use serde_json::{Value, json};
 
-use super::{Error, paused};
+use super::{Error, paused, quorum};
 use crate::context::{Context, Note};
 use crate::status;
 use crate::telemetry::current_trace_id;
@@ -41,6 +42,8 @@ const KEY_SECRET: &str = "kates-api-key";
 // /api/drain is not watched: while live work finishes, the operator looks again this often.
 const DRAIN_POLL: Duration = Duration::from_secs(5);
 const REVISION: &str = "controller-revision-hash";
+// The leader is not watched: the label follows it this often.
+const LEADER_POLL: Duration = Duration::from_secs(5);
 
 /// # Errors
 /// A failed Kubernetes write.
@@ -129,24 +132,13 @@ async fn apply(kates: &Kates, ctx: &Context) -> Result<Action, Error> {
     let client = &ctx.client;
     let accounts = Api::<ServiceAccount>::namespaced(client.clone(), &namespace);
     let services = Api::<Service>::namespaced(client.clone(), &namespace);
-    let sets = Api::<StatefulSet>::namespaced(client.clone(), &namespace);
     let objects = objects(kates, ctx.backend_role_in(&namespace).is_some());
-    let peers = objects.peers["metadata"]["name"]
-        .as_str()
-        .unwrap_or_default();
 
     let before = kates.status.clone().unwrap_or_default();
     let mut after = before.clone();
     let (mut drain, mut replaced) = (None, None);
-    // Applying over an object of the same name would hand it to whoever may create a Kates:
-    // an existing ServiceAccount to run their image as, or a Service to point elsewhere.
-    let taken = [
-        taken(&accounts, &name, &uid).await?,
-        taken(&services, &name, &uid).await?,
-        taken(&services, peers, &uid).await?,
-        taken(&sets, &name, &uid).await?,
-    ];
-    let taken = taken.into_iter().flatten().next();
+    let taken = foreign(ctx, &namespace, &uid, &objects).await?;
+
     if let Some(what) = &taken {
         let message = format!("{what} exists and is not this resource's: rename one of them");
         let generation = kates.metadata.generation;
@@ -184,10 +176,7 @@ async fn apply(kates: &Kates, ctx: &Context) -> Result<Action, Error> {
                 .patch(name, &params, &Patch::Apply(service))
                 .await?;
         }
-        let set = sets
-            .patch(&name, &params, &Patch::Apply(&objects.set))
-            .await?;
-        (drain, replaced) = roll(kates, ctx, &set, &before, &mut after).await?;
+        (drain, replaced) = deploy(kates, ctx, &objects, &params, &before, &mut after).await?;
     }
 
     if after != before {
@@ -206,7 +195,10 @@ async fn apply(kates: &Kates, ctx: &Context) -> Result<Action, Error> {
         let ready = status::find(&status.conditions, "Ready");
         ready.map(|condition| condition.reason.clone())
     };
-    if reason(&after).as_deref() == Some("NameTaken") {
+    if matches!(
+        reason(&after).as_deref(),
+        Some("NameTaken" | "QuorumSecretTaken")
+    ) {
         // The other object is not watched, so its removal is only seen by looking again.
         return Ok(Action::requeue(NAME_RETRY));
     }
@@ -218,8 +210,104 @@ async fn apply(kates: &Kates, ctx: &Context) -> Result<Action, Error> {
         }
         Some(Err(unknown)) if unknown.retry => Action::requeue(WRITE_RETRY),
         Some(Err(_)) => Action::requeue(NAME_RETRY),
+        _ if kates.spec.replicas > 1 => Action::requeue(LEADER_POLL),
         _ => Action::await_change(),
     })
+}
+
+/// The first object of this resource's names that exists without being this resource's.
+/// Applying over it would hand it to whoever may create a Kates: an existing `ServiceAccount` to
+/// run their image as, or a Service to point elsewhere.
+async fn foreign(
+    ctx: &Context,
+    namespace: &str,
+    uid: &str,
+    objects: &Objects,
+) -> Result<Option<String>, kube::Error> {
+    let client = &ctx.client;
+    let named = |object: &Value| {
+        object["metadata"]["name"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let name = named(&objects.set);
+    let services = Api::<Service>::namespaced(client.clone(), namespace);
+    let mut found = [
+        taken(
+            &Api::<ServiceAccount>::namespaced(client.clone(), namespace),
+            &name,
+            uid,
+        )
+        .await?,
+        taken(&services, &name, uid).await?,
+        taken(&services, &named(&objects.peers), uid).await?,
+        taken(
+            &Api::<StatefulSet>::namespaced(client.clone(), namespace),
+            &name,
+            uid,
+        )
+        .await?,
+    ]
+    .into_iter()
+    .flatten()
+    .next();
+    if found.is_none() && objects.budget.is_some() {
+        let budgets = Api::<PodDisruptionBudget>::namespaced(client.clone(), namespace);
+        found = taken(&budgets, &name, uid).await?;
+    }
+    Ok(found)
+}
+
+/// Applies the certificates of a quorum, its budget and the `StatefulSet`, then rolls. A quorum
+/// whose Secrets are another resource's gets none of them, and says why.
+async fn deploy(
+    kates: &Kates,
+    ctx: &Context,
+    objects: &Objects,
+    params: &PatchParams,
+    before: &KatesStatus,
+    after: &mut KatesStatus,
+) -> Result<(Option<Result<Drain, Unknown>>, Option<String>), Error> {
+    let namespace = kates.namespace().ok_or(Error::NoNamespace)?;
+    let name = kates.name_any();
+    // Before the StatefulSet: its pods mount the certificates.
+    let issued = if kates.spec.replicas > 1 {
+        quorum::certificates(kates, ctx, &namespace, params, Timestamp::now()).await?
+    } else {
+        Ok(BTreeMap::new())
+    };
+    let issued = match issued {
+        Ok(issued) => issued,
+        Err(message) => {
+            let generation = kates.metadata.generation;
+            after.observed_generation = generation;
+            let (conditions, now) = (&mut after.conditions, Timestamp::now());
+            status::set(
+                conditions,
+                "Ready",
+                "False",
+                "QuorumSecretTaken",
+                &message,
+                generation,
+                now,
+            );
+            return Ok((None, None));
+        }
+    };
+    if let Some(budget) = &objects.budget {
+        Api::<PodDisruptionBudget>::namespaced(ctx.client.clone(), &namespace)
+            .patch(&name, params, &Patch::Apply(budget))
+            .await?;
+    }
+    let set = Api::<StatefulSet>::namespaced(ctx.client.clone(), &namespace)
+        .patch(&name, params, &Patch::Apply(&objects.set))
+        .await?;
+    if kates.spec.replicas > 1 {
+        roll_quorum(kates, ctx, &set, &issued, before, after).await
+    } else {
+        roll(kates, ctx, &set, before, after).await
+    }
 }
 
 /// Tells `kubectl describe` of a change of Ready and of a pod replaced.
@@ -296,6 +384,86 @@ async fn roll(
     }
     replace(ctx, &namespace, &pod).await?;
     Ok((drain, Some(pod.name_any())))
+}
+
+/// A quorum's pass: finds the leader and labels its pod, drains it if asked, and replaces at
+/// most one stale member, followers first and the leader last, while the quorum is settled.
+async fn roll_quorum(
+    kates: &Kates,
+    ctx: &Context,
+    set: &StatefulSet,
+    issued: &BTreeMap<String, Timestamp>,
+    before: &KatesStatus,
+    after: &mut KatesStatus,
+) -> Result<(Option<Result<Drain, Unknown>>, Option<String>), Error> {
+    let namespace = kates.namespace().ok_or(Error::NoNamespace)?;
+    let now = Timestamp::now();
+    observe(kates, set, after, now);
+    let (members, pods) = quorum::observe(
+        kates,
+        ctx,
+        &namespace,
+        update_revision(set).as_deref(),
+        issued,
+    )
+    .await?;
+    let leader = quorum::leader(&members).map(str::to_owned);
+    quorum::label(ctx, &namespace, &pods, leader.as_deref()).await?;
+    after.leader.clone_from(&leader);
+    let generation = kates.metadata.generation;
+    let ready = status::find(&after.conditions, "Ready").is_some_and(|c| c.status == "True");
+    if ready && leader.is_none() {
+        let conditions = &mut after.conditions;
+        status::set(
+            conditions,
+            "Ready",
+            "False",
+            "NoLeader",
+            "the quorum has no leader",
+            generation,
+            now,
+        );
+    }
+    // Through the Service, so to the leader: the one member a run or fault can be live on.
+    let drain = sync_drain(kates, ctx, &namespace, before, leader.is_some()).await;
+    mark_drain(kates, drain.as_ref(), after, now);
+    let rolling = |after: &mut KatesStatus, message: &str| {
+        let conditions = &mut after.conditions;
+        status::set(
+            conditions,
+            "Ready",
+            "False",
+            "RollingOut",
+            message,
+            generation,
+            now,
+        );
+    };
+    match quorum::next(&members) {
+        quorum::Next::Done => Ok((drain, None)),
+        quorum::Next::Wait(why) => {
+            rolling(after, &format!("the next member is replaced once {why}"));
+            Ok((drain, None))
+        }
+        quorum::Next::Replace(pod) => {
+            if leader.as_deref() == Some(pod.as_str()) && held(kates.spec.mode, drain.as_ref()) {
+                rolling(after, "the leader is replaced once the drain ends");
+                return Ok((drain, None));
+            }
+            if let Some(found) = pods.get(&pod) {
+                replace(ctx, &namespace, found).await?;
+            }
+            Ok((drain, Some(pod)))
+        }
+    }
+}
+
+/// The revision a pod must run, once the `StatefulSet` has seen its latest spec.
+fn update_revision(set: &StatefulSet) -> Option<String> {
+    let observed = set.status.clone().unwrap_or_default();
+    observed
+        .update_revision
+        .filter(|_| observed.observed_generation == set.metadata.generation)
 }
 
 /// Why the backend's drain state is not known this pass.
@@ -445,11 +613,7 @@ async fn stale_pod(
     namespace: &str,
     set: &StatefulSet,
 ) -> Result<Option<Pod>, kube::Error> {
-    let observed = set.status.clone().unwrap_or_default();
-    let Some(update) = observed
-        .update_revision
-        .filter(|_| observed.observed_generation == set.metadata.generation)
-    else {
+    let Some(update) = update_revision(set) else {
         return Ok(None);
     };
     let pods = Api::<Pod>::namespaced(ctx.client.clone(), namespace);
@@ -541,6 +705,8 @@ pub struct Objects {
     pub service: Value,
     pub peers: Value,
     pub set: Value,
+    /// With a quorum: keeps a majority through node drains, one member down at a time.
+    pub budget: Option<Value>,
 }
 
 /// `bound`: the pod's account gets the backend's role, so faults are not turned off.
@@ -580,7 +746,7 @@ pub fn objects(kates: &Kates, bound: bool) -> Objects {
     // Kubernetes' default is 300 s: the time the API stays gone when its node dies.
     let gone = |key: &str| json!({"key": key, "operator": "Exists", "effect": "NoExecute", "tolerationSeconds": 30});
 
-    Objects {
+    let mut objects = Objects {
         account: json!({"apiVersion": "v1", "kind": "ServiceAccount", "metadata": meta(&name)}),
         service: json!({
             "apiVersion": "v1", "kind": "Service", "metadata": meta(&name),
@@ -595,7 +761,7 @@ pub fn objects(kates: &Kates, bound: bool) -> Objects {
         set: json!({
             "apiVersion": "apps/v1", "kind": "StatefulSet", "metadata": meta(&name),
             "spec": {
-                "replicas": 1,
+                "replicas": spec.replicas,
                 "serviceName": peers,
                 // The operator replaces the pod, once a drain allows it.
                 "updateStrategy": {"type": "OnDelete"},
@@ -635,7 +801,91 @@ pub fn objects(kates: &Kates, bound: bool) -> Objects {
                 },
             },
         }),
+        budget: None,
+    };
+    if spec.replicas > 1 {
+        objects.budget = Some(json!({
+            "apiVersion": "policy/v1", "kind": "PodDisruptionBudget", "metadata": meta(&name),
+            "spec": {"maxUnavailable": 1, "selector": {"matchLabels": selector}},
+        }));
+        with_quorum(&mut objects, kates);
     }
+    objects
+}
+
+/// A quorum's members: the Service on the leader alone, the members' port, certificates and
+/// settings, a volume each, and pods started together.
+fn with_quorum(objects: &mut Objects, kates: &Kates) {
+    let spec = &kates.spec;
+    let (name, namespace) = (kates.name_any(), kates.namespace().unwrap_or_default());
+    // Only the leader takes writes: the Service sends traffic to it alone.
+    objects.service["spec"]["selector"][quorum::ROLE] = json!(quorum::LEADER);
+    let port = quorum::PORT;
+    let quorum_port =
+        json!({"name": "quorum", "port": port, "targetPort": "quorum", "protocol": "TCP"});
+    push(&mut objects.peers["spec"]["ports"], quorum_port);
+    let pod = &mut objects.set["spec"]["template"]["spec"];
+    let container = &mut pod["containers"][0];
+    let listen = json!({"name": "quorum", "containerPort": port, "protocol": "TCP"});
+    push(&mut container["ports"], listen);
+    for setting in quorum_env(&name, &namespace, spec.replicas) {
+        push(&mut container["env"], setting);
+    }
+    let tls = json!({"name": "quorum-tls", "mountPath": quorum::MOUNT, "readOnly": true});
+    push(&mut container["volumeMounts"], tls);
+    let dir = json!({"name": "quorum", "mountPath": quorum::DIR});
+    push(&mut container["volumeMounts"], dir);
+    let secret = json!({"secretName": quorum::TLS_SECRET, "defaultMode": 0o440});
+    push(
+        &mut pod["volumes"],
+        json!({"name": "quorum-tls", "secret": secret}),
+    );
+    let quorum = spec.quorum.clone().unwrap_or_default();
+    let storage = quorum.storage.unwrap_or_else(|| "1Gi".to_owned());
+    let mut claim = json!({
+        "metadata": {"name": "quorum"},
+        "spec": {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": storage}}},
+    });
+    if let Some(class) = quorum.storage_class_name {
+        claim["spec"]["storageClassName"] = json!(class);
+    }
+    objects.set["spec"]["volumeClaimTemplates"] = json!([claim]);
+    // Together: a member that starts after the others elected has an empty log, and is no voter
+    // until it catches up.
+    objects.set["spec"]["podManagementPolicy"] = json!("Parallel");
+    // A member's term and vote mean nothing once the resource is gone.
+    objects.set["spec"]["persistentVolumeClaimRetentionPolicy"] =
+        json!({"whenDeleted": "Delete", "whenScaled": "Retain"});
+}
+
+fn push(list: &mut Value, item: Value) {
+    if let Some(items) = list.as_array_mut() {
+        items.push(item);
+    }
+}
+
+/// The settings of a member of a quorum of `replicas`, its id being its pod's name.
+#[must_use]
+pub fn quorum_env(name: &str, namespace: &str, replicas: i32) -> Vec<Value> {
+    let plain = |name: &str, value: &str| json!({"name": name, "value": value});
+    vec![
+        json!({"name": "POD_NAME", "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}}),
+        plain(
+            "KATES_QUORUM_PEERS",
+            &quorum::peers(name, namespace, replicas),
+        ),
+        plain("KATES_QUORUM_MEMBER_ID", "$(POD_NAME)"),
+        plain("KATES_QUORUM_DIR", quorum::DIR),
+        plain(
+            "KATES_QUORUM_TLS_CERT",
+            &format!("{}/$(POD_NAME).crt", quorum::MOUNT),
+        ),
+        plain(
+            "KATES_QUORUM_TLS_KEY",
+            &format!("{}/$(POD_NAME).key", quorum::MOUNT),
+        ),
+        plain("KATES_QUORUM_TLS_CA", &format!("{}/ca.crt", quorum::MOUNT)),
+    ]
 }
 
 /// The container's environment: what the typed fields set, then `spec.env`, which replaces a
@@ -705,12 +955,21 @@ pub fn observe(kates: &Kates, set: &StatefulSet, status: &mut KatesStatus, now: 
     // Not currentRevision: under OnDelete the StatefulSet never moves it.
     let rolled_out = observed.observed_generation == set.metadata.generation
         && observed.update_revision.is_some()
-        && observed.updated_replicas.unwrap_or(0) >= 1;
+        && observed.updated_replicas.unwrap_or(0) >= kates.spec.replicas;
     status.ready_replicas = observed.ready_replicas.unwrap_or(0);
     status.observed_generation = kates.metadata.generation;
-    let (value, reason, message) = match (rolled_out, status.ready_replicas > 0) {
+    let not_ready = if kates.spec.replicas > 1 {
+        format!(
+            "{} of {} pods are ready",
+            status.ready_replicas, kates.spec.replicas
+        )
+    } else {
+        "the pod is not ready".to_owned()
+    };
+    let (value, reason, message) = match (rolled_out, status.ready_replicas >= kates.spec.replicas)
+    {
         (true, true) => ("True", "Running", ""),
-        (true, false) => ("False", "NotReady", "the pod is not ready"),
+        (true, false) => ("False", "NotReady", not_ready.as_str()),
         (false, _) => ("False", "RollingOut", "the pod is being replaced"),
     };
     if value == "True" {
@@ -1030,5 +1289,85 @@ mod tests {
             ..revision("a", "a", 1)
         });
         assert_eq!(stale.1, "RollingOut");
+    }
+
+    #[test]
+    fn three_members_get_a_quorum_and_the_service_follows_the_leader() {
+        let objects = objects(
+            &kates(json!({"replicas": 3, "quorum": {"storage": "2Gi"}})),
+            true,
+        );
+        let set = &objects.set["spec"];
+        assert_eq!(set["replicas"], 3);
+        assert_eq!(
+            set["podManagementPolicy"], "Parallel",
+            "members start together"
+        );
+        assert_eq!(
+            set["volumeClaimTemplates"][0]["spec"]["resources"]["requests"]["storage"],
+            "2Gi"
+        );
+        assert_eq!(
+            objects.service["spec"]["selector"][quorum::ROLE],
+            quorum::LEADER
+        );
+        assert!(
+            objects.peers["spec"]["selector"]
+                .get(quorum::ROLE)
+                .is_none(),
+            "peers name every member"
+        );
+        let container = &set["template"]["spec"]["containers"][0];
+        let env = container["env"].as_array().unwrap();
+        let value = |name: &str| {
+            env.iter()
+                .find(|e| e["name"] == name)
+                .map(|e| e["value"].clone())
+        };
+        assert_eq!(
+            value("KATES_QUORUM_PEERS").unwrap(),
+            json!(quorum::peers("main", "kates", 3))
+        );
+        assert_eq!(
+            value("KATES_QUORUM_TLS_KEY").unwrap(),
+            "/etc/kates/quorum/$(POD_NAME).key"
+        );
+        let pod_name = env.iter().position(|e| e["name"] == "POD_NAME").unwrap();
+        let cert = env
+            .iter()
+            .position(|e| e["name"] == "KATES_QUORUM_TLS_CERT")
+            .unwrap();
+        assert!(
+            pod_name < cert,
+            "$(POD_NAME) expands only from a variable defined before it"
+        );
+        let volumes = set["template"]["spec"]["volumes"].as_array().unwrap();
+        assert!(
+            volumes
+                .iter()
+                .any(|v| v["secret"]["secretName"] == quorum::TLS_SECRET)
+        );
+        assert_eq!(objects.budget.unwrap()["spec"]["maxUnavailable"], 1);
+    }
+
+    #[test]
+    fn one_member_has_no_quorum() {
+        let objects = objects(&kates(json!({})), true);
+        assert_eq!(objects.set["spec"]["replicas"], 1);
+        assert!(objects.set["spec"].get("podManagementPolicy").is_none());
+        assert!(objects.set["spec"].get("volumeClaimTemplates").is_none());
+        assert!(
+            objects.service["spec"]["selector"]
+                .get(quorum::ROLE)
+                .is_none()
+        );
+        assert!(objects.budget.is_none());
+        let env = objects.set["spec"]["template"]["spec"]["containers"][0]["env"]
+            .as_array()
+            .unwrap();
+        assert!(
+            env.iter()
+                .all(|e| !e["name"].as_str().unwrap().starts_with("KATES_QUORUM_"))
+        );
     }
 }

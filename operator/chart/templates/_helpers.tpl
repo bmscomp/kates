@@ -63,15 +63,28 @@ imagePullSecrets:
 - apiGroups: ["events.k8s.io"]
   resources: ["events"]
   verbs: ["create", "patch"]
-{{- /* Under OnDelete the operator replaces a Kates pod itself, once a drain allows it. */}}
+{{- /* Under OnDelete the operator replaces a Kates pod itself, once a drain allows it; in a
+quorum it labels the leader's pod, which the Service selects. */}}
 - apiGroups: [""]
   resources: ["pods"]
-  verbs: ["get", "delete"]
+  verbs: ["get", "delete", "patch"]
 {{- /* kates-api-key: the one key Secret it reads, to set /api/drain. */}}
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["get"]
   resourceNames: ["kates-connection", "kates-api-key"]
+{{- /* A quorum's CA and its members' certificates, by name, so one replicated Kates per
+namespace. create cannot be narrowed by name, and reads nothing. */}}
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "patch"]
+  resourceNames: ["kates-quorum-ca", "kates-quorum-tls"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["create"]
+- apiGroups: ["policy"]
+  resources: ["poddisruptionbudgets"]
+  verbs: ["get", "create", "patch"]
 {{- end -}}
 
 {{- define "kates-operator.podSecurityContext" -}}

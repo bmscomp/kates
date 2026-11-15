@@ -14,12 +14,21 @@ use serde::{Deserialize, Serialize};
     singular = "kates",
     namespaced,
     status = "KatesStatus",
-    doc = "One Kates backend. crd-version: 1",
+    doc = "One Kates backend. crd-version: 2",
     cel,
     // The name becomes a Service's, and the pods' with a suffix.
     validation = Rule::new("self.metadata.name.matches('^[a-z]([-a-z0-9]{0,50}[a-z0-9])?$')")
         .message("name must start with a letter and hold at most 52 lower-case letters, digits and -: it names the Service and the pods"),
+    // A quorum's size and volumes are set once: changing them is scaling, which O5 adds.
+    validation = Rule::new("self.spec.replicas == oldSelf.spec.replicas")
+        .message("spec.replicas cannot change: delete and recreate the resource"),
+    validation = Rule::new("has(self.spec.quorum) == has(oldSelf.spec.quorum) && (!has(self.spec.quorum) || self.spec.quorum == oldSelf.spec.quorum)")
+        .message("spec.quorum cannot change once set: its volumes are made with the pods"),
+    validation = Rule::new("!has(self.spec.quorum) || self.spec.replicas > 1")
+        .message("spec.quorum goes with replicas 3 or 5"),
     printcolumn = r#"{"name":"Version","type":"string","jsonPath":".status.version"}"#,
+    printcolumn = r#"{"name":"Replicas","type":"integer","jsonPath":".spec.replicas"}"#,
+    printcolumn = r#"{"name":"Leader","type":"string","jsonPath":".status.leader"}"#,
     printcolumn = r#"{"name":"Ready","type":"string","jsonPath":".status.conditions[?(@.type=='Ready')].status"}"#,
     printcolumn = r#"{"name":"Mode","type":"string","jsonPath":".spec.mode"}"#,
     printcolumn = r#"{"name":"Drained","type":"string","jsonPath":".status.conditions[?(@.type=='Drained')].status"}"#,
@@ -35,6 +44,14 @@ pub struct KatesSpec {
     /// back to Active.
     #[serde(default)]
     pub mode: Mode,
+    /// How many members: 1, or 3 or 5 for a quorum that keeps working with one or two of them
+    /// gone. Fixed once the resource exists.
+    #[serde(default = "one")]
+    #[x_kube(validation = Rule::new("self in [1, 3, 5]").message("replicas must be 1, 3 or 5"))]
+    pub replicas: i32,
+    /// The members' quorum, with replicas 3 or 5. Fixed once set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quorum: Option<Quorum>,
     /// The image repository. Empty: ghcr.io/bmscomp/kates.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
@@ -50,12 +67,29 @@ pub struct KatesSpec {
     /// above are refused.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[x_kube(
-        validation = Rule::new("self.all(e, !e.name.startsWith('QUARKUS_DATASOURCE_') && !(e.name in ['KATES_KAFKA_BOOTSTRAP_SERVERS', 'KATES_KAFKA_SECURITY_PROTOCOL', 'KATES_KAFKA_SASL_MECHANISM', 'KATES_KAFKA_SASL_USERNAME', 'KATES_KAFKA_SASL_PASSWORD', 'KATES_API_KEY', 'KATES_API_SECURITY_ENABLED']))")
-            .message("env must not name what database, kafka and apiKeySecretRef set")
+        validation = Rule::new("self.all(e, !e.name.startsWith('QUARKUS_DATASOURCE_') && !e.name.startsWith('KATES_QUORUM_') && !(e.name in ['KATES_KAFKA_BOOTSTRAP_SERVERS', 'KATES_KAFKA_SECURITY_PROTOCOL', 'KATES_KAFKA_SASL_MECHANISM', 'KATES_KAFKA_SASL_USERNAME', 'KATES_KAFKA_SASL_PASSWORD', 'KATES_API_KEY', 'KATES_API_SECURITY_ENABLED', 'POD_NAME']))")
+            .message("env must not name what database, kafka, apiKeySecretRef and the quorum set")
     )]
     #[x_kube(merge_strategy = ListMerge::Map(vec!["name".into()]))]
     #[schemars(length(max = 256))]
     pub env: Vec<EnvVar>,
+}
+
+fn one() -> i32 {
+    1
+}
+
+/// Each member keeps its Raft term and vote on a volume of its own.
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Quorum {
+    /// The size of each member's volume, such as 1Gi. Empty: 1Gi.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(regex(pattern = r"^[0-9]+(Mi|Gi)$"))]
+    pub storage: Option<String>,
+    /// The `StorageClass` of each member's volume. Empty: the cluster's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_class_name: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -118,6 +152,9 @@ pub struct KatesStatus {
     pub version: Option<String>,
     #[serde(default)]
     pub ready_replicas: i32,
+    /// The member that leads the quorum, which the Service sends traffic to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leader: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[x_kube(merge_strategy = ListMerge::Map(vec!["type".into()]))]
     pub conditions: Vec<Condition>,
