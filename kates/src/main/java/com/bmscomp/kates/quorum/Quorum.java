@@ -179,6 +179,23 @@ public class Quorum {
         return member;
     }
 
+    /** The term this member is in, as it last heard; {@code 0} with no quorum or while it does not serve. */
+    public long term() {
+        QuorumMember current = member;
+        return current == null || !current.serving() ? 0 : current.term();
+    }
+
+    /**
+     * Throws unless this member may write now, as {@link #acceptsWrites()} decides: called right
+     * before a fault goes into Kubernetes, so a member that stopped leading since its plan started
+     * injects nothing.
+     */
+    public void requireWrites() {
+        if (!acceptsWrites()) {
+            throw new com.bmscomp.kates.engine.NotLeaderException(leaderId());
+        }
+    }
+
     /** The leader this member knows of, or null with no quorum or during an election. */
     public String leaderId() {
         QuorumMember current = member;

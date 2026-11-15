@@ -77,6 +77,13 @@ public class LitmusChaosProvider implements ChaosProvider {
         return "litmus-crd";
     }
 
+    // Built without config, as the tests build it, a Quorum is alone and always leads.
+    @Inject
+    com.bmscomp.kates.quorum.Quorum quorum = new com.bmscomp.kates.quorum.Quorum();
+
+    @org.eclipse.microprofile.config.inject.ConfigProperty(name = "kates.engine.max-duration-ms", defaultValue = "7200000")
+    long maxDurationMs = 7_200_000;
+
     @Override
     public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec) {
         return triggerFault(spec, injectedAt -> {});
@@ -116,6 +123,11 @@ public class LitmusChaosProvider implements ChaosProvider {
 
             ChaosEngine engine = buildChaosEngine(spec, engineName, experimentName);
             String resultName = engineName + "-" + experimentName;
+
+            // Confirmed right before the engine exists: a member that stopped leading writes nothing.
+            quorum.requireWrites();
+            engine.getMetadata()
+                    .setAnnotations(FaultMarks.of(quorum.term(), Instant.now().plusMillis(maxDurationMs)));
 
             // Once the pods are picked, before the engine that injects the fault exists.
             onInject.accept(startNanos);

@@ -96,6 +96,22 @@ public class KubernetesChaosProvider implements ChaosProvider {
     @Inject
     com.bmscomp.kates.engine.KatesExecutor executor;
 
+    // Built without config, as the tests build it, a Quorum is alone and always leads.
+    @Inject
+    com.bmscomp.kates.quorum.Quorum quorum = new com.bmscomp.kates.quorum.Quorum();
+
+    @org.eclipse.microprofile.config.inject.ConfigProperty(name = "kates.engine.max-duration-ms", defaultValue = "7200000")
+    long maxDurationMs = 7_200_000;
+
+    /**
+     * The marks a fault written now carries: this leader's term, and a deadline at the engine's run
+     * bound. shortcut: a fault the live leader leaves after a crashed plan thread lives up to that
+     * bound (2 h); upgrade to the plan's own bound if that is seen.
+     */
+    Map<String, String> marks() {
+        return FaultMarks.of(quorum.term(), Instant.now().plusMillis(maxDurationMs));
+    }
+
     @Override
     public String name() {
         return "kubernetes";
@@ -156,6 +172,9 @@ public class KubernetesChaosProvider implements ChaosProvider {
                             start = Instant.now();
                             startNanos = System.nanoTime();
                         }
+                        // Confirmed after the delay, right before any write: a member that stopped
+                        // leading since the plan started writes nothing (J4 F1).
+                        quorum.requireWrites();
                         // The fault goes in from here, once its delay is over.
                         onInject.accept(startNanos);
                         applyDisruption(spec, engineName);
@@ -282,6 +301,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
                 .withName(policyName)
                 .withNamespace(spec.targetNamespace())
                 .addToLabels("managed-by", "kates")
+                .addToAnnotations(marks())
                 .endMetadata()
                 .withNewSpec()
                 .withNewPodSelector()
@@ -452,7 +472,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
         }
 
         if (!targets.pools().isEmpty()) {
-            new NodePoolScaleDown(client, scalePollIntervalMs).run(spec, targets.pools());
+            new NodePoolScaleDown(client, scalePollIntervalMs, marks()).run(spec, targets.pools());
         }
         int scaled = 0;
         for (String name : targets.statefulSets()) {
@@ -488,19 +508,22 @@ public class KubernetesChaosProvider implements ChaosProvider {
         // already-reduced value, so only stamp when absent.
         Map<String, String> annotations = ss.getMetadata().getAnnotations();
         boolean alreadySnapshotted = annotations != null && annotations.containsKey(ORIGINAL_REPLICAS_ANNOTATION);
-        if (!alreadySnapshotted) {
-            String scaledDownAt = String.valueOf(System.currentTimeMillis());
-            client.apps()
-                    .statefulSets()
-                    .inNamespace(namespace)
-                    .withName(name)
-                    .edit(s -> new StatefulSetBuilder(s)
-                            .editMetadata()
-                            .addToAnnotations(ORIGINAL_REPLICAS_ANNOTATION, String.valueOf(current))
-                            .addToAnnotations(SCALED_DOWN_AT_ANNOTATION, scaledDownAt)
-                            .endMetadata()
-                            .build());
-        }
+        // The marks are written every time: a snapshot an earlier plan left carries an older term,
+        // which the reconciler would take for a dead leader's fault and undo under this one.
+        Map<String, String> marks = marks();
+        String scaledDownAt = String.valueOf(System.currentTimeMillis());
+        client.apps()
+                .statefulSets()
+                .inNamespace(namespace)
+                .withName(name)
+                .edit(s -> {
+                    var metadata = new StatefulSetBuilder(s).editMetadata().addToAnnotations(marks);
+                    if (!alreadySnapshotted) {
+                        metadata.addToAnnotations(ORIGINAL_REPLICAS_ANNOTATION, String.valueOf(current))
+                                .addToAnnotations(SCALED_DOWN_AT_ANNOTATION, scaledDownAt);
+                    }
+                    return metadata.endMetadata().build();
+                });
         LOG.info("SCALE_DOWN: StatefulSet " + name + " from " + current + " → " + (current - 1));
         client.apps().statefulSets().inNamespace(namespace).withName(name).scale(current - 1);
         return true;

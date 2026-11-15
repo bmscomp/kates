@@ -171,6 +171,47 @@ class LitmusChaosProviderTest {
         assertTrue(outcome.isPass(), outcome.failureReason());
     }
 
+    @Test
+    void anEngineCarriesItsTermAndDeadline() throws Exception {
+        install("disk-fill");
+        provider.resultPollIntervalMs = 20;
+        com.bmscomp.kates.quorum.Quorum quorum = org.mockito.Mockito.mock(com.bmscomp.kates.quorum.Quorum.class);
+        when(quorum.term()).thenReturn(7L);
+        provider.quorum = quorum;
+        FaultSpec spec = FaultSpec.builder("fill")
+                .targetBrokerId(2)
+                .disruptionType(DisruptionType.DISK_FILL)
+                .build();
+
+        provider.triggerFault(spec);
+        ChaosEngine engine = awaitEngine();
+
+        assertEquals("7", engine.getMetadata().getAnnotations().get(FaultMarks.TERM));
+        assertNotNull(java.time.Instant.parse(engine.getMetadata().getAnnotations().get(FaultMarks.DEADLINE)));
+    }
+
+    @Test
+    void anEngineIsNotCreatedByAFollower() throws Exception {
+        install("disk-fill");
+        com.bmscomp.kates.quorum.Quorum quorum = org.mockito.Mockito.mock(com.bmscomp.kates.quorum.Quorum.class);
+        org.mockito.Mockito.doThrow(new com.bmscomp.kates.engine.NotLeaderException("m1"))
+                .when(quorum)
+                .requireWrites();
+        provider.quorum = quorum;
+        FaultSpec spec = FaultSpec.builder("fill")
+                .targetBrokerId(2)
+                .disruptionType(DisruptionType.DISK_FILL)
+                .build();
+
+        ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+        assertFalse(outcome.isPass());
+        assertTrue(outcome.failureReason().contains("does not lead"), outcome.failureReason());
+        assertEquals(
+                List.of(),
+                client.resources(ChaosEngine.class).inNamespace("kafka").list().getItems());
+    }
+
     private static String env(ChaosEngine engine, String name) {
         return engine.getSpec().experiments.getFirst().spec.components.env.stream()
                 .filter(e -> e.name.equals(name))

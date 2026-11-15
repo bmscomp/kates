@@ -72,6 +72,21 @@ class QuorumTest {
     }
 
     @Test
+    void requireWritesRefusesOnAFollower() throws Exception {
+        start(3, new AtomicBoolean(false));
+        Quorum leader = soleWriter(members);
+
+        leader.requireWrites();
+        assertEquals(((Number) leader.health().get("term")).longValue(), leader.term());
+        for (Quorum member : members) {
+            if (member != leader) {
+                org.junit.jupiter.api.Assertions.assertThrows(
+                        com.bmscomp.kates.engine.NotLeaderException.class, member::requireWrites);
+            }
+        }
+    }
+
+    @Test
     void aClosedMemberIsRestartedBySchedule() throws Exception {
         start(1, new AtomicBoolean(false));
         Quorum quorum = members.get(0);
