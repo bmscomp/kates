@@ -48,6 +48,9 @@ public class ScheduleResource {
     @Inject
     Validator validator;
 
+    @Inject
+    ScheduleFirings firings;
+
     /**
      * A 400 naming each field of the schedule's test request that the Kates
      * API would refuse, by its path under {@code testRequest}, or empty when
@@ -242,6 +245,9 @@ public class ScheduleResource {
                             return refused.get();
                         }
                     }
+                    boolean passOver = (request.enabled == Boolean.TRUE && !schedule.isEnabled())
+                            || (request.cronExpression != null
+                                    && !request.cronExpression.equals(schedule.getCronExpression()));
                     if (request.name != null) schedule.setName(request.name);
                     if (request.cronExpression != null) schedule.setCronExpression(request.cronExpression);
                     if (request.enabled != null) schedule.setEnabled(request.enabled);
@@ -251,6 +257,11 @@ public class ScheduleResource {
                         } catch (JsonProcessingException e) {
                             throw new RuntimeException(e);
                         }
+                    }
+                    if (passOver) {
+                        // Turning a schedule on or re-timing it passes over the due times before now,
+                        // before the save, so a tick between the two still sees it as it was.
+                        firings.claim(ScheduleFirings.Kind.TESTS, id, java.time.Instant.now());
                     }
                     repository.save(schedule);
                     return Response.ok(schedule).build();

@@ -3,6 +3,8 @@ package com.bmscomp.kates.disruption;
 import java.time.Instant;
 import jakarta.persistence.*;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 /**
  * JPA entity for a scheduled/recurring disruption test.
  * Supports either a playbook name or a raw plan JSON.
@@ -35,6 +37,11 @@ public class DisruptionScheduleEntity {
 
     @Column(name = "last_run_at")
     private Instant lastRunAt;
+
+    /** Written only by ScheduleFirings, in SQL, so a save of a stale copy never takes a claim back. */
+    @JsonIgnore
+    @Column(name = "last_due", insertable = false, updatable = false)
+    private Instant lastDue;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
@@ -113,5 +120,9 @@ public class DisruptionScheduleEntity {
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public Instant getLastDue() {
+        return lastDue;
     }
 }

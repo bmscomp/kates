@@ -1,8 +1,6 @@
 package com.bmscomp.kates.schedule;
 
-import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
-import java.time.temporal.ChronoUnit;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -10,7 +8,6 @@ import jakarta.inject.Inject;
 
 import com.cronutils.model.CronType;
 import com.cronutils.model.definition.CronDefinitionBuilder;
-import com.cronutils.model.time.ExecutionTime;
 import com.cronutils.parser.CronParser;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.scheduler.Scheduled;
@@ -24,8 +21,10 @@ import com.bmscomp.kates.engine.TestOrchestrator;
 import com.bmscomp.kates.util.Result;
 
 /**
- * Evaluates all enabled schedules every 60 seconds.
- * When a cron expression matches the current minute, the associated test is executed.
+ * Evaluates all enabled schedules every 10 seconds, and starts the test of
+ * each due time once: DueTimes picks it, up to 5 minutes late, and
+ * ScheduleFirings claims it in the database, so a second member that believes
+ * it leads, or the next tick, finds it taken.
  */
 @ApplicationScoped
 public class TestScheduler {
@@ -46,7 +45,7 @@ public class TestScheduler {
     com.bmscomp.kates.quorum.Quorum quorum;
 
     @Inject
-    com.bmscomp.kates.service.SchedulerLeaseService leases;
+    ScheduleFirings firings;
 
     @Inject
     SpecLimits specLimits;
@@ -54,35 +53,32 @@ public class TestScheduler {
     @Inject
     com.bmscomp.kates.service.AuditService auditService;
 
-    @Scheduled(every = "60s", identity = "kates-schedule-evaluator")
+    @Scheduled(every = "10s", identity = "kates-schedule-evaluator")
     void evaluateSchedules() {
-        // A draining instance fires nothing, and leaves the lease to one that may.
-        // The guard's flag, set with the orchestrator's by PUT /api/drain: asking
-        // the orchestrator would create it on the first tick, and its startup
-        // recovery with it.
-        // A member that does not lead fires nothing either, so a follower never holds the lease.
+        evaluate(Instant.now());
+    }
+
+    /** One tick at {@code now}; package-private, so a test ticks at the time it needs. */
+    void evaluate(Instant now) {
+        // A draining instance fires nothing. The guard's flag, set with the
+        // orchestrator's by PUT /api/drain: asking the orchestrator would create
+        // it on the first tick, and its startup recovery with it.
+        // A member that does not lead fires nothing either.
         if (drain.isDraining() || !quorum.acceptsWrites()) {
             return;
         }
-        // With replicas > 1 every instance fires this — only the lease holder
-        // may trigger runs, or each schedule would execute once per replica.
-        if (!leases.tryAcquire("test-scheduler", java.time.Duration.ofSeconds(55))) {
-            return;
-        }
         List<ScheduledTestRun> schedules = repository.findAllEnabled();
-        if (schedules.isEmpty()) {
-            return;
-        }
-
-        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
         LOG.debugf("Evaluating %d schedules at %s", schedules.size(), now);
 
         for (ScheduledTestRun schedule : schedules) {
             try {
-                if (matchesCron(schedule.getCronExpression(), now)) {
-                    LOG.info("Schedule '" + schedule.getName() + "' triggered at " + now);
-                    executeSchedule(schedule);
-                }
+                Instant since = DueTimes.since(schedule.getCreatedAt(), schedule.getLastDue(), schedule.getLastRunAt());
+                DueTimes.toFire(schedule.getCronExpression(), since, now)
+                        .filter(due -> firings.claim(ScheduleFirings.Kind.TESTS, schedule.getId(), due))
+                        .ifPresent(due -> {
+                            LOG.info("Schedule '" + schedule.getName() + "' triggered for " + due);
+                            executeSchedule(schedule, due);
+                        });
             } catch (Exception e) {
                 LOG.warn("Failed to evaluate schedule '" + schedule.getName() + "'", e);
             }
@@ -105,13 +101,16 @@ public class TestScheduler {
      * scenario with a type of its own goes without. A schedule saved before
      * the Kates API kept only the fields a request sets holds the old Java
      * defaults, which are all within the limits, so it still fires.
+     *
+     * <p>The run carries the Idempotency-Key {@code schedule:<id>:<due>}, so it
+     * names the schedule and due time that started it.
      */
-    void executeSchedule(ScheduledTestRun schedule) {
+    void executeSchedule(ScheduledTestRun schedule, Instant due) {
         try {
             CreateTestRequest request = JSON.readValue(schedule.getRequestJson(), CreateTestRequest.class);
             Map<String, String> outsideLimits = specLimits.violations(request.getSpec());
             Result<TestRun, Exception> result = outsideLimits.isEmpty()
-                    ? orchestrator.executeTest(request)
+                    ? orchestrator.executeTest(request, "schedule:" + schedule.getId() + ":" + due)
                     : Result.failure(new InvalidTestSpecException(outsideLimits));
             if (result.isSuccess()) {
                 var run = result.asSuccess().orElseThrow();
@@ -134,9 +133,4 @@ public class TestScheduler {
 
     /** Standard 5-field UNIX cron; schedules are validated with it on POST and PUT. */
     public static final CronParser CRON = new CronParser(CronDefinitionBuilder.instanceDefinitionFor(CronType.UNIX));
-
-    /** Whether the expression fires in the minute of {@code now}; throws when it doesn't parse. */
-    public static boolean matchesCron(String cronExpr, ZonedDateTime now) {
-        return ExecutionTime.forCron(CRON.parse(cronExpr)).isMatch(now.truncatedTo(ChronoUnit.MINUTES));
-    }
 }

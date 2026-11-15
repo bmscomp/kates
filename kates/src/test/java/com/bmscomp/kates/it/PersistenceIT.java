@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import jakarta.inject.Inject;
@@ -22,7 +21,6 @@ import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.domain.TestType;
-import com.bmscomp.kates.service.SchedulerLeaseService;
 import com.bmscomp.kates.service.TestRunRepository;
 import com.bmscomp.kates.webhook.WebhookService;
 
@@ -45,9 +43,6 @@ class PersistenceIT {
 
     @Inject
     WebhookService webhookService;
-
-    @Inject
-    SchedulerLeaseService leases;
 
     @Test
     void flywayMigrationsAllApplied() {
@@ -106,31 +101,6 @@ class PersistenceIT {
         webhookService.unregister("it-hook");
         em.clear();
         assertFalse(webhookService.list().stream().anyMatch(r -> r.name().equals("it-hook")));
-    }
-
-    @Test
-    void schedulerLeaseClaimSemantics() {
-        String lease = "it-lease-" + UUID.randomUUID();
-
-        // First claim and same-holder renewal both succeed.
-        assertTrue(leases.tryAcquire(lease, Duration.ofSeconds(30)));
-        assertTrue(leases.tryAcquire(lease, Duration.ofSeconds(30)));
-
-        // A live lease held by another replica cannot be stolen...
-        QuarkusTransaction.requiringNew()
-                .run(() -> em.createNativeQuery("UPDATE scheduler_leases SET holder = 'other-replica',"
-                                + " expires_at = NOW() + INTERVAL '60 seconds' WHERE name = :name")
-                        .setParameter("name", lease)
-                        .executeUpdate());
-        assertFalse(leases.tryAcquire(lease, Duration.ofSeconds(30)));
-
-        // ...but an expired one can.
-        QuarkusTransaction.requiringNew()
-                .run(() -> em.createNativeQuery(
-                                "UPDATE scheduler_leases SET expires_at = NOW() - INTERVAL '1 second' WHERE name = :name")
-                        .setParameter("name", lease)
-                        .executeUpdate());
-        assertTrue(leases.tryAcquire(lease, Duration.ofSeconds(30)));
     }
 
     /**

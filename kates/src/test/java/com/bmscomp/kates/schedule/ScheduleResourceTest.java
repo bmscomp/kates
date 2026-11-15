@@ -534,7 +534,7 @@ class ScheduleResourceTest {
         ScheduledTestRun s = storedSchedule(
                 "{\"type\":\"STRESS\",\"backend\":\"trogdor\",\"spec\":{\"consumerGroup\":\"perf-cg\"}}");
 
-        scheduler.executeSchedule(s);
+        scheduler.executeSchedule(s, java.time.Instant.now());
 
         Mockito.verify(repository, Mockito.never()).updateLastRun(anyString(), anyString());
         Mockito.verifyNoInteractions(trogdorClient);
@@ -553,7 +553,7 @@ class ScheduleResourceTest {
                 + "{\"name\":\"steady\",\"phaseType\":\"STEADY\",\"durationMs\":60000,"
                 + "\"spec\":{\"topic\":\"not a topic!\"}}]}}");
 
-        scheduler.executeSchedule(s);
+        scheduler.executeSchedule(s, java.time.Instant.now());
 
         Mockito.verify(repository, Mockito.never()).updateLastRun(anyString(), anyString());
         Mockito.verifyNoInteractions(trogdorClient);
@@ -600,7 +600,7 @@ class ScheduleResourceTest {
                         + "\"phases\":[{\"name\":\"steady\",\"phaseType\":\"STEADY\",\"durationMs\":60000}]}}",
                 "{\"type\":\"LOAD\",\"backend\":\"trogdor\",\"scenario\":{\"phases\":[{\"name\":\"steady\","
                         + "\"phaseType\":\"STEADY\",\"durationMs\":60000,\"targetThroughput\":0}]}}")) {
-            scheduler.executeSchedule(storedSchedule(stored));
+            scheduler.executeSchedule(storedSchedule(stored), java.time.Instant.now());
         }
         Mockito.verify(repository, Mockito.never()).updateLastRun(anyString(), anyString());
         Mockito.verify(trogdorClient, Mockito.never()).createTask(any());
@@ -639,7 +639,7 @@ class ScheduleResourceTest {
         ArgumentCaptor<ScheduledTestRun> saved = ArgumentCaptor.forClass(ScheduledTestRun.class);
         Mockito.verify(repository).save(saved.capture());
 
-        scheduler.executeSchedule(saved.getValue());
+        scheduler.executeSchedule(saved.getValue(), java.time.Instant.now());
 
         ArgumentCaptor<String> runId = ArgumentCaptor.forClass(String.class);
         Mockito.verify(repository).updateLastRun(eq(saved.getValue().getId()), runId.capture());
@@ -691,7 +691,7 @@ class ScheduleResourceTest {
         // A run the check let through would fail here, at submission.
         Mockito.when(trogdorClient.createTask(any())).thenThrow(new IllegalStateException("no coordinator in tests"));
 
-        scheduler.executeSchedule(storedSchedule(requestJson));
+        scheduler.executeSchedule(storedSchedule(requestJson), java.time.Instant.now());
 
         Mockito.verify(repository, Mockito.never()).updateLastRun(anyString(), anyString());
         Mockito.verifyNoInteractions(trogdorClient);
@@ -729,7 +729,7 @@ class ScheduleResourceTest {
     void aStoredRequestWithinTheLimitsStillRuns(String name, String requestJson) {
         Mockito.when(trogdorClient.createTask(any())).thenThrow(new IllegalStateException("no coordinator in tests"));
 
-        scheduler.executeSchedule(storedSchedule(requestJson));
+        scheduler.executeSchedule(storedSchedule(requestJson), java.time.Instant.now());
 
         ArgumentCaptor<String> runId = ArgumentCaptor.forClass(String.class);
         Mockito.verify(repository).updateLastRun(eq("s1"), runId.capture());
