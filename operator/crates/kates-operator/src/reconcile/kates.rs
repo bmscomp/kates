@@ -170,7 +170,10 @@ async fn apply(kates: &Kates, ctx: &Context) -> Result<Action, Error> {
                 )
                 .await?;
         }
-        for service in [&objects.service, &objects.peers] {
+        for service in [&objects.service, &objects.peers]
+            .into_iter()
+            .chain(&objects.members)
+        {
             let name = service["metadata"]["name"].as_str().unwrap_or_default();
             services
                 .patch(name, &params, &Patch::Apply(service))
@@ -252,6 +255,12 @@ async fn foreign(
     .into_iter()
     .flatten()
     .next();
+    for member in &objects.members {
+        if found.is_some() {
+            break;
+        }
+        found = taken(&services, &named(member), uid).await?;
+    }
     if found.is_none() && objects.budget.is_some() {
         let budgets = Api::<PodDisruptionBudget>::namespaced(client.clone(), namespace);
         found = taken(&budgets, &name, uid).await?;
@@ -704,6 +713,8 @@ pub struct Objects {
     pub account: Value,
     pub service: Value,
     pub peers: Value,
+    /// With a quorum: a Service each, the address its peers dial.
+    pub members: Vec<Value>,
     pub set: Value,
     /// With a quorum: keeps a majority through node drains, one member down at a time.
     pub budget: Option<Value>,
@@ -801,6 +812,7 @@ pub fn objects(kates: &Kates, bound: bool) -> Objects {
                 },
             },
         }),
+        members: Vec::new(),
         budget: None,
     };
     if spec.replicas > 1 {
@@ -824,6 +836,18 @@ fn with_quorum(objects: &mut Objects, kates: &Kates) {
     let quorum_port =
         json!({"name": "quorum", "port": port, "targetPort": "quorum", "protocol": "TCP"});
     push(&mut objects.peers["spec"]["ports"], quorum_port);
+    objects.members = quorum::members(&name, spec.replicas)
+        .into_iter()
+        .map(|pod| {
+            let mut service = objects.peers.clone();
+            service["metadata"]["name"] = json!(pod);
+            service["spec"]["selector"]["statefulset.kubernetes.io/pod-name"] = json!(pod);
+            if let Some(spec) = service["spec"].as_object_mut() {
+                spec.remove("clusterIP");
+            }
+            service
+        })
+        .collect();
     let pod = &mut objects.set["spec"]["template"]["spec"];
     let container = &mut pod["containers"][0];
     let listen = json!({"name": "quorum", "containerPort": port, "protocol": "TCP"});
@@ -1317,6 +1341,19 @@ mod tests {
                 .is_none(),
             "peers name every member"
         );
+        let members: Vec<_> = objects
+            .members
+            .iter()
+            .map(|service| {
+                assert!(
+                    service["spec"].get("clusterIP").is_none(),
+                    "an address that stays"
+                );
+                assert_eq!(service["spec"]["publishNotReadyAddresses"], true);
+                service["spec"]["selector"]["statefulset.kubernetes.io/pod-name"].clone()
+            })
+            .collect();
+        assert_eq!(members, [json!("main-0"), json!("main-1"), json!("main-2")]);
         let container = &set["template"]["spec"]["containers"][0];
         let env = container["env"].as_array().unwrap();
         let value = |name: &str| {
@@ -1362,6 +1399,7 @@ mod tests {
                 .is_none()
         );
         assert!(objects.budget.is_none());
+        assert_eq!(objects.members.len(), 0);
         let env = objects.set["spec"]["template"]["spec"]["containers"][0]["env"]
             .as_array()
             .unwrap();

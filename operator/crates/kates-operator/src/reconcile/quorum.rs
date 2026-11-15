@@ -46,10 +46,12 @@ pub fn members(name: &str, replicas: i32) -> Vec<String> {
     (0..replicas).map(|i| format!("{name}-{i}")).collect()
 }
 
-/// A member's name in DNS, through the headless Service, and in its certificate.
+/// A member's name in DNS and in its certificate: its own Service, whose address outlives the
+/// pod's. Through the headless Service, a peer that had looked up a pod went on dialling its old
+/// address for up to 30 s after it restarted, the JVM's and gRPC's caches.
 #[must_use]
-pub fn host(name: &str, namespace: &str, pod: &str) -> String {
-    format!("{pod}.{name}-peers.{namespace}.svc")
+pub fn host(namespace: &str, pod: &str) -> String {
+    format!("{pod}.{namespace}.svc")
 }
 
 /// `kates.quorum.peers`: every member, its own included.
@@ -57,7 +59,7 @@ pub fn host(name: &str, namespace: &str, pod: &str) -> String {
 pub fn peers(name: &str, namespace: &str, replicas: i32) -> String {
     members(name, replicas)
         .iter()
-        .map(|pod| format!("{pod}={}:{PORT}", host(name, namespace, pod)))
+        .map(|pod| format!("{pod}={}:{PORT}", host(namespace, pod)))
         .collect::<Vec<_>>()
         .join(",")
 }
@@ -233,7 +235,7 @@ pub async fn certificates(
         } else {
             changed = true;
             issued.insert(pod.clone(), now);
-            issue(&ca, &owner, &pod, &host(&name, namespace, &pod), now)?
+            issue(&ca, &owner, &pod, &host(namespace, &pod), now)?
         };
         data.insert(crt, pem);
         data.insert(key, private);
@@ -388,7 +390,7 @@ pub async fn observe(
         let renewed = renewed(issued.get(&pod_name).copied(), started);
         let stale = update_revision.is_some_and(|revision| super::kates::stale(&pod, revision))
             || (renewed && pod.metadata.deletion_timestamp.is_none());
-        let url = format!("http://{}:8080", host(&name, namespace, &pod_name));
+        let url = format!("http://{}:8080", host(namespace, &pod_name));
         let view = match ctx.connections.client_for(&url) {
             Ok(client) => client.quorum().await.ok(),
             Err(_) => None,
@@ -452,8 +454,7 @@ mod tests {
     fn peers_name_every_member_by_its_dns_name() {
         assert_eq!(
             peers("main", "kates", 3),
-            "main-0=main-0.main-peers.kates.svc:9300,main-1=main-1.main-peers.kates.svc:9300,\
-             main-2=main-2.main-peers.kates.svc:9300"
+            "main-0=main-0.kates.svc:9300,main-1=main-1.kates.svc:9300,main-2=main-2.kates.svc:9300"
         );
     }
 
@@ -461,30 +462,14 @@ mod tests {
     fn a_member_certificate_is_signed_by_the_stored_ca() {
         let now: Timestamp = "2026-11-15T00:00:00Z".parse().unwrap();
         let ca = new_ca("kates/main", now).unwrap();
-        let (cert, key) = issue(
-            &ca,
-            "kates/main",
-            "main-0",
-            "main-0.main-peers.kates.svc",
-            now,
-        )
-        .unwrap();
+        let (cert, key) = issue(&ca, "kates/main", "main-0", "main-0.kates.svc", now).unwrap();
         assert!(cert.starts_with("-----BEGIN CERTIFICATE-----"));
         assert!(
             key.starts_with("-----BEGIN PRIVATE KEY-----"),
             "PKCS#8, as the backend reads it"
         );
         // Rebuilt from the stored key alone, the issuer signs again: no CA certificate parsing.
-        assert!(
-            issue(
-                &ca,
-                "kates/main",
-                "main-1",
-                "main-1.main-peers.kates.svc",
-                now
-            )
-            .is_ok()
-        );
+        assert!(issue(&ca, "kates/main", "main-1", "main-1.kates.svc", now).is_ok());
     }
 
     #[test]

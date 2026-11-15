@@ -245,8 +245,9 @@ rm -f "$claims"
 
 echo "== deleting the resource removes what it made"
 "${k[@]}" delete kates "$name" --timeout=120s >/dev/null
-"${k[@]}" wait --for=delete "statefulset/$name" "secret/kates-quorum-ca" "secret/kates-quorum-tls" "pdb/$name" --timeout=120s >/dev/null \
-  && pass "StatefulSet, Secrets and budget gone" || fail "something was left"
+"${k[@]}" wait --for=delete "statefulset/$name" "secret/kates-quorum-ca" "secret/kates-quorum-tls" "pdb/$name" \
+  "service/$name-0" "service/$name-1" "service/$name-2" --timeout=120s >/dev/null \
+  && pass "StatefulSet, Secrets, budget and member Services gone" || fail "something was left"
 for _ in $(seq 1 30); do [ -z "$("${k[@]}" get pvc -l "app.kubernetes.io/instance=$name" -o name)" ] && break; sleep 2; done
 check "the members' volumes are gone" "" "$("${k[@]}" get pvc -l "app.kubernetes.io/instance=$name" -o name)"
 "${k[@]}" delete deploy,service,secret "$name-db" >/dev/null 2>&1
