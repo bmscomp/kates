@@ -247,4 +247,39 @@ class TestRunRepositoryTest {
                         .get(0)
                         .getIntegrity());
     }
+
+    @Test
+    void runsAreFoundByTheMemberThatCreatedThem() {
+        com.bmscomp.kates.quorum.Quorum quorum = org.mockito.Mockito.mock(com.bmscomp.kates.quorum.Quorum.class);
+        io.quarkus.test.junit.QuarkusMock.installMockForType(quorum, com.bmscomp.kates.quorum.Quorum.class);
+        TestRun mine = saveRunning(quorum, "kates-1");
+        TestRun theirs = saveRunning(quorum, "kates-2");
+        TestRun beforeAnyQuorum = saveRunning(quorum, null);
+        org.mockito.Mockito.when(quorum.memberId()).thenReturn("kates-1");
+        repository.save(new TestRun(TestType.LOAD, new TestSpec()).withStatus(TestResult.TaskStatus.DONE));
+        List<TestResult.TaskStatus> live =
+                List.of(TestResult.TaskStatus.RUNNING, TestResult.TaskStatus.PENDING, TestResult.TaskStatus.STOPPING);
+
+        assertEquals(
+                List.of(mine.getId()),
+                repository.findByStatusAndMember(live, "kates-1", true).stream()
+                        .map(TestRun::getId)
+                        .toList());
+        assertEquals(
+                java.util.Set.of(theirs.getId(), beforeAnyQuorum.getId()),
+                repository.findByStatusAndMember(live, "kates-1", false).stream()
+                        .map(TestRun::getId)
+                        .collect(java.util.stream.Collectors.toSet()));
+        repository.save(mine.withStatus(TestResult.TaskStatus.FAILED));
+        assertTrue(
+                repository.findByStatusAndMember(live, "kates-1", true).isEmpty(),
+                "a later save keeps the member and the run is no longer live");
+    }
+
+    private TestRun saveRunning(com.bmscomp.kates.quorum.Quorum quorum, String member) {
+        org.mockito.Mockito.when(quorum.memberId()).thenReturn(member);
+        TestRun run = new TestRun(TestType.LOAD, new TestSpec()).withStatus(TestResult.TaskStatus.RUNNING);
+        repository.save(run);
+        return run;
+    }
 }

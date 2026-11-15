@@ -43,6 +43,10 @@ public class GrpcTestService extends MutinyTestServiceGrpc.TestServiceImplBase {
     @Inject
     Validator validator;
 
+    // Injected over this default; built by hand, as tests build it, the service is alone.
+    @Inject
+    com.bmscomp.kates.quorum.Quorum quorum = new com.bmscomp.kates.quorum.Quorum();
+
     @Override
     public Uni<com.bmscomp.kates.grpc.proto.TestRun> createTest(
             com.bmscomp.kates.grpc.proto.CreateTestRequest request) {
@@ -195,6 +199,7 @@ public class GrpcTestService extends MutinyTestServiceGrpc.TestServiceImplBase {
             // only stop the tasks, which left the run STOPPING (answered as
             // CANCELLED) until a poll settled it, and marked a run that had
             // already finished as STOPPING too.
+            requireLeader();
             try {
                 return orchestrator
                         .cancelTest(request.getId())
@@ -214,6 +219,7 @@ public class GrpcTestService extends MutinyTestServiceGrpc.TestServiceImplBase {
             // The same delete as DELETE /api/tests/{id}. Removing only the row
             // left a running run's workers producing and its concurrency slot
             // taken, so new runs answered 429 until a restart.
+            requireLeader();
             if (!orchestrator.deleteTest(request.getId())) {
                 throw Status.NOT_FOUND
                         .withDescription("Test not found: " + request.getId())
@@ -221,5 +227,14 @@ public class GrpcTestService extends MutinyTestServiceGrpc.TestServiceImplBase {
             }
             return com.google.protobuf.Empty.getDefaultInstance();
         });
+    }
+
+    /** A follower stores nothing: on one, a cancel or delete would fail a run the leader is running. */
+    private void requireLeader() {
+        if (!quorum.acceptsWrites()) {
+            throw Status.UNAVAILABLE
+                    .withDescription(com.bmscomp.kates.engine.NotLeaderException.message(quorum.leaderId()))
+                    .asRuntimeException();
+        }
     }
 }

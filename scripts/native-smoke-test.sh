@@ -333,6 +333,16 @@ LEADER="$(one_leader "${BOOT_TIMEOUT}" "${MEMBERS[@]}")"
 info "  ok   $(member "${LEADER}") leads: $(health "${LEADER}" | grep -o '"quorum":{[^}]*}')"
 REST=()
 for i in "${MEMBERS[@]}"; do [ "${i}" = "${LEADER}" ] || REST+=("${i}"); done
+post_test() { # post_test <member>: the status POST /api/tests answers
+    curl -s -o /dev/null -w '%{http_code}' -X POST "http://localhost:$((APP_PORT + 1 + $1))/api/tests" \
+        -H 'Content-Type: application/json' \
+        -d '{"type":"LOAD","spec":{"topic":"native-smoke","numRecords":1,"recordSize":128}}' || true
+}
+FOLLOWER_POST="$(post_test "${REST[0]}")"
+[ "${FOLLOWER_POST}" = "503" ] || fail "a follower answered POST /api/tests ${FOLLOWER_POST}, not 503"
+LEADER_POST="$(post_test "${LEADER}")"
+[ "${LEADER_POST}" = "202" ] || fail "the leader answered POST /api/tests ${LEADER_POST}, not 202"
+info "  ok   a follower refuses a run (503), the leader starts it (202)"
 APP="$(member "${REST[0]}")"
 docker rm -f "$(member "${LEADER}")" >/dev/null
 NEXT="$(one_leader 30 "${REST[@]}")"

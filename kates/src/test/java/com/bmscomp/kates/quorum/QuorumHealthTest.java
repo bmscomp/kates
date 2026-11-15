@@ -62,6 +62,7 @@ class QuorumHealthTest {
                 .body("quorum.memberId", is("k0"))
                 .body("quorum.leader", is(true))
                 .body("quorum.leaderId", is("k0"))
-                .body("quorum.term", greaterThanOrEqualTo(1));
+                .body("quorum.term", greaterThanOrEqualTo(1))
+                .body("quorum.appliedIndex", greaterThanOrEqualTo(0));
     }
 }

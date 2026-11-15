@@ -15,4 +15,8 @@ public class DrainingException extends BenchmarkException {
     public DrainingException() {
         super(MESSAGE);
     }
+
+    protected DrainingException(String message) {
+        super(message);
+    }
 }

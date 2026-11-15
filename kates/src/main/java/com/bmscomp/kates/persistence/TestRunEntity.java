@@ -91,6 +91,10 @@ public class TestRunEntity {
     @Column(name = "client_key", length = 128, unique = true, updatable = false)
     private String clientKey;
 
+    /** The quorum member that created the run (V30), written once, as {@code clientKey} is. */
+    @Column(name = "member_id", length = 253, updatable = false)
+    private String memberId;
+
     @OneToMany(mappedBy = "testRun", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @OrderBy("id ASC")
     private List<TestResultEntity> results = new ArrayList<>();
@@ -204,6 +208,14 @@ public class TestRunEntity {
 
     public void setClientKey(String clientKey) {
         this.clientKey = clientKey;
+    }
+
+    public String getMemberId() {
+        return memberId;
+    }
+
+    public void setMemberId(String memberId) {
+        this.memberId = memberId;
     }
 
     public List<TestResultEntity> getResults() {

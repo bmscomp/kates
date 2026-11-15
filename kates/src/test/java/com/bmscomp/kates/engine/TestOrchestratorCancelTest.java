@@ -111,6 +111,7 @@ class TestOrchestratorCancelTest {
                 new SlaEvaluator(),
                 SPEC_LIMITS,
                 events,
+                new com.bmscomp.kates.quorum.Quorum(),
                 "fake",
                 "localhost:9092",
                 MAX_CONCURRENT,

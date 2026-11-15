@@ -324,7 +324,7 @@ func mcpActivityTestsSince(ctx context.Context, call *mcpCall, since time.Time, 
 // are injected for part of its run, or one whose backend process stopped
 // before it ended and has not started again to mark it INTERRUPTED
 // (DisruptionLauncher.java:95-123, DisruptionReportRepository.java:35-43,
-// DisruptionOrphanReconciler.java:171-222).
+// DisruptionOrphanReconciler.java:189-240).
 func mcpActivityDisruptionsSince(ctx context.Context, call *mcpCall, since time.Time, page mcpActivityPage) (mcpActivityDisruptions, error) {
 	out := mcpActivityDisruptions{StoredAsRunning: []mcpActivityDisruptionRow{}, Since: []mcpActivityDisruptionRow{}}
 	for p := 0; p < mcpActivityMaxPages; p++ {
@@ -463,8 +463,8 @@ var mcpCaveatsRunsActivity = []mcpCaveat{
 			mcpAnchoredRef(mcpJava+"security/GrpcApiKeyInterceptor.java:67-70,100,156-159",
 				"static final Map<String, String> AUDITED", "audit(action, method, Status.Code.PERMISSION_DENIED",
 				"private void audit("),
-			mcpAnchoredRef(mcpJava+"schedule/TestScheduler.java:114-120", "Actor.SCHEDULER"),
-			mcpAnchoredRef(mcpJava+"disruption/DisruptionScheduler.java:120-126", "Actor.SCHEDULER"),
+			mcpAnchoredRef(mcpJava+"schedule/TestScheduler.java:118-124", "Actor.SCHEDULER"),
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionScheduler.java:124-130", "Actor.SCHEDULER"),
 			mcpAnchoredRef(mcpJava+"disruption/DisruptionResource.java:93", "auditTrail.done();"),
 			"kates/src/main/resources/db/migration/V26__audit_actor.sql:1-8",
 		},
@@ -484,9 +484,9 @@ var mcpCaveatsRunsActivity = []mcpCaveat{
 			mcpJava + "disruption/DisruptionLauncher.java:114-144",
 			mcpJava + "disruption/DisruptionPersistence.java:16-37",
 			mcpJava + "disruption/DisruptionReportRepository.java:20-43",
-			mcpJava + "disruption/DisruptionOrphanReconciler.java:171-222",
+			mcpJava + "disruption/DisruptionOrphanReconciler.java:189-240",
 			mcpJava + "disruption/DisruptionTemplateResource.java:70-72",
-			mcpJava + "disruption/DisruptionScheduler.java:108-120",
+			mcpJava + "disruption/DisruptionScheduler.java:112-124",
 			mcpJava + "disruption/DisruptionReportEntity.java:39-47",
 			mcpAnchoredRef(mcpJava+"disruption/DisruptionAnalysisResource.java:118-203",
 				`@Path("/compound")`, `"results", outcome.results()`),

@@ -43,6 +43,9 @@ public class TestScheduler {
     com.bmscomp.kates.disruption.DisruptionConcurrencyGuard drain;
 
     @Inject
+    com.bmscomp.kates.quorum.Quorum quorum;
+
+    @Inject
     com.bmscomp.kates.service.SchedulerLeaseService leases;
 
     @Inject
@@ -57,7 +60,8 @@ public class TestScheduler {
         // The guard's flag, set with the orchestrator's by PUT /api/drain: asking
         // the orchestrator would create it on the first tick, and its startup
         // recovery with it.
-        if (drain.isDraining()) {
+        // A member that does not lead fires nothing either, so a follower never holds the lease.
+        if (drain.isDraining() || !quorum.acceptsWrites()) {
             return;
         }
         // With replicas > 1 every instance fires this — only the lease holder

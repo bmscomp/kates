@@ -106,6 +106,7 @@ class TestTimeoutReaperSubmissionTest {
                 new SlaEvaluator(),
                 SPEC_LIMITS,
                 mock(Event.class),
+                new com.bmscomp.kates.quorum.Quorum(),
                 "fake",
                 "localhost:9092",
                 MAX_CONCURRENT,
