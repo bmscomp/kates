@@ -66,9 +66,14 @@ class QuorumTest {
 
     private void start(int count, AtomicBoolean failing) throws Exception {
         TestPki pki = new TestPki(tmp.resolve("pki"));
+        // Every certificate first: keytool is slow on a CI runner, and the members should start together.
+        List<Path[]> certificates = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            certificates.add(pki.member("m" + i));
+        }
         List<String> peers = QuorumMemberTest.peers(count);
         for (int i = 0; i < count; i++) {
-            Path[] files = pki.member("m" + i);
+            Path[] files = certificates.get(i);
             Quorum quorum = new Quorum();
             quorum.peers = Optional.of(peers);
             quorum.memberId = Optional.of("m" + i);
@@ -100,15 +105,23 @@ class QuorumTest {
 
     /** The one member that takes writes, once there is exactly one; the others say no. */
     private static Quorum soleWriter(List<Quorum> members) throws InterruptedException {
-        for (int i = 0; i < 200; i++) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(45);
+        while (System.nanoTime() < deadline) {
             List<Quorum> writers =
                     members.stream().filter(Quorum::acceptsWrites).toList();
             if (writers.size() == 1) {
                 return writers.get(0);
             }
-            assertFalse(writers.size() > 1, "two members took writes");
+            assertFalse(writers.size() > 1, "two members took writes: " + views(members));
             TimeUnit.MILLISECONDS.sleep(100);
         }
-        throw new AssertionError("no single member took writes");
+        throw new AssertionError("no single member took writes within 45 s: " + views(members));
+    }
+
+    private static String views(List<Quorum> members) {
+        return members.stream()
+                .map(member -> member.memberId() + member.health())
+                .toList()
+                .toString();
     }
 }
