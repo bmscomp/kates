@@ -1,10 +1,8 @@
 # kates-operator
 
-Kates runs and compliance checks as Kubernetes resources. `KatesTest` is one run and `KafkaCompliance` a standing check. A team can commit `loadtest.yaml`, watch it with `kubectl get katestests`, and gate a pipeline on it.
+A `Kates` resource installs one Kates backend, or with `replicas: 3` or `5` a quorum of them that keeps a leader when a member is lost. The operator upgrades it without losing a live run, and removes what it made when the resource is deleted.
 
-The operator drives a Kates API through its REST API: one that is already running, or one it installs from a [`Kates`](#kates) resource. It needs Kates 1.38.0 or newer: older versions can't honour an idempotency key, so every `KatesTest` waits at `Synced=False`, reason `ApiTooOld`, and starts no run.
-
-`KatesTest` and `KafkaCompliance` are deprecated in 0.2.0 and go in 0.3.0. The API server prints a warning on every request for either kind, and the operator logs one at start while any of their resources is left. Move each to a `CronJob` that runs the `kates` CLI, as [Replacing the run kinds](#replacing-the-run-kinds) shows. Both still work in 0.2.0. The `Kates` kind stays.
+0.3.0 removed `KatesTest` and `KafkaCompliance`, which 0.2.0 deprecated. Before upgrading from 0.2.x, read [Upgrading to 0.3.0](#upgrading-to-030). To run a test or a compliance check on a schedule, run the `kates` CLI from a `CronJob`, as [Replacing the run kinds](#replacing-the-run-kinds) shows.
 
 ## Install
 
@@ -49,81 +47,7 @@ helm install kates-operator ./kates-operator -n team --skip-crds \
 
 CRDs are applied by a pre-install and pre-upgrade hook that never downgrades: with several releases on a cluster, the newest wins. On a cluster that already has the CRDs, pass `--skip-crds`. A conflict on `customresourcedefinitions.apiextensions.k8s.io` during install means the flag was missed, and `--force-conflicts` is a downgrade, not the fix.
 
-Don't let two releases watch the same namespace: each would reconcile the same resources.
-
-## Connect a namespace
-
-Each watched namespace holds a Secret named `kates-connection`, with the keys `url`, `apiKey` and optional `caBundle`:
-
-```bash
-kubectl create secret generic kates-connection -n payments \
-  --from-literal=url=http://kates.kates.svc:8080 --from-literal=apiKey=<key>
-```
-
-The key needs `read` and `test:run`. Use a named key from the Kates keys file, so the audit log names the team. `connection.fallback: true` lends the Secret `connection.existingSecret` to every watched namespace that has no `kates-connection`. With `watchAnyNamespace`, that lends the key to everyone who can create a `KatesTest`.
-
-To rotate a key, add the new hash to the Kates keys file, swap the Secret, then remove the old hash. The operator reads the key on every pass, so it needs no restart.
-
-## KatesTest
-
-```yaml
-apiVersion: kates.io/v1alpha1
-kind: KatesTest
-metadata:
-  name: nightly-load
-spec:
-  type: LOAD
-  spec:
-    numRecords: 100000
-    acks: all
-  sla:
-    maxP99LatencyMs: 100
-```
-
-`spec.spec` takes the wire names of `POST /api/tests`, and the CRD refuses a mistyped key. `spec.sla` is graded by the Kates API, the same way the report and the JUnit export grade it. Once the run has started, the whole `spec` is immutable, because the resource is the evidence of what the run was judged against.
-
-A CI gate is two commands, race-free on either outcome:
-
-```bash
-kubectl wait --for=jsonpath='{.status.finishedAt}' katestest/nightly-load --timeout=30m
-kubectl wait --for=condition=Ready katestest/nightly-load --timeout=0
-```
-
-The first returns on every ending, and the second exits non-zero on a failed run. `kubectl describe` shows the failing key. The value-less `jsonpath` form needs kubectl 1.29 or newer.
-
-Deleting a `KatesTest` whose run is live cancels the run first. The run's record stays in Kates. A deleted and re-created `KatesTest` is a new run.
-
-### On a schedule
-
-There is no schedule kind. Run `kates test apply` from a `CronJob`, as [Replacing the run kinds](#replacing-the-run-kinds) shows.
-
-### GitOps
-
-To rerun a `KatesTest`, rename it: the new name is a new run. With pruning on, the old resource is deleted, and its run is cancelled first if it is still live.
-
-- A spec edit under the same name, after the run started, is refused at dry-run. Flux dry-runs every object first, so that one refusal fails the whole Kustomization. Keep `KatesTest`s in their own Kustomization or Application.
-- Don't use Flux `spec.force: true`, or Argo CD `Replace=true,Force=true`. A refused edit then deletes and re-creates the resource, which starts a new run with no review.
-- Never set `ttlSecondsAfterFinished` on a resource a GitOps tool holds: the tool re-creates it, and the run repeats every TTL. The TTL is for one-shot resources a pipeline creates under a unique name.
-
-## KafkaCompliance
-
-```yaml
-apiVersion: kates.io/v1alpha1
-kind: KafkaCompliance
-metadata:
-  name: krafter-rules
-spec:
-  interval: 1h
-  reference:
-    target: {namespace: kafka, name: krafter}
-    brokers:
-      count: {min: 3}
-      zones: {min: 3}
-```
-
-`spec.reference` is a `KafkaReference` `.spec`, inline, and the API's strict reader checks it. The resource's name becomes the stored check's name, so it must be a DNS label. Intervals under a minute are raised to one minute, and intervals over a year lowered to one year.
-
-A check also runs when the spec changes, and when the Strimzi `Kafka` it names has finished reconciling a change, if that namespace is in `kafka.namespaces`. Any other target is checked on its interval alone, and `KafkaWatched=False` says why. `spec.suspend: true` stops new checks.
+Don't let two releases watch the same namespace: each would reconcile the same `Kates` resources.
 
 ## Kates
 
@@ -203,6 +127,20 @@ What it doesn't do yet:
 - It doesn't create PostgreSQL. A changed Secret is not noticed: delete the pod to pick it up.
 - Kafka over TLS with a truststore file isn't expressible yet. `spec.env` takes any other setting of the container, except the names `database`, `kafka` and `apiKeySecretRef` set.
 
+## Upgrading to 0.3.0
+
+0.2.x holds a finalizer on each live `KatesTest`, and 0.3.0 no longer clears it. So, in this order:
+
+1. **While 0.2.x still runs**, move each `KatesTest` and `KafkaCompliance` to a `CronJob` (below), then delete them. Deleting a live `KatesTest` cancels its run, so wait for it to finish first.
+2. **Remove** `kafka`, `connection` and `rbac.kafkaNamespaceRole` from your values: the chart's schema refuses them. Upgrade with `helm upgrade`.
+3. **Delete** the two CRDs, which Helm leaves in place:
+
+```bash
+kubectl delete crd katestests.kates.io kafkacompliances.kates.io
+```
+
+A `KatesTest` left with its finalizer keeps its CRD in `Terminating`. Clear it by hand: `kubectl patch katestest <name> -n <namespace> --type=merge -p '{"metadata":{"finalizers":null}}'`.
+
 ## Replacing the run kinds
 
 A `CronJob` runs the `kates` CLI against the API: `kates test apply --wait` for a `KatesTest`, `kates compliance check` for a `KafkaCompliance`. The Job fails when the run misses a gate or the check fails, so the `CronJob`'s history shows each miss. The scenario file takes the keys of `kates test apply`, not the wire names of `spec.spec`: see `kates test apply --help`.
@@ -244,9 +182,9 @@ spec:
                 - name: KATES_VERSION
                   value: "1.40.0"
                 - name: KATES_URL
-                  valueFrom: {secretKeyRef: {name: kates-connection, key: url}}
+                  valueFrom: {secretKeyRef: {name: kates-cli, key: url}}
                 - name: KATES_API_KEY
-                  valueFrom: {secretKeyRef: {name: kates-connection, key: apiKey}}
+                  valueFrom: {secretKeyRef: {name: kates-cli, key: apiKey}}
               command: [/bin/sh, -ec]
               args:
                 - |
@@ -264,38 +202,27 @@ spec:
               configMap: {name: nightly-load}
 ```
 
-For a `KafkaCompliance`, put its `spec.reference` in the ConfigMap as a `KafkaReference` file, and run `./kates compliance check -f /scenario/reference.yaml` instead. The check runs on the schedule only, not when the Strimzi `Kafka` changes. A test needs a key with `read` and `test:run`, a check `read` alone, so the `kates-connection` key the operator uses serves both.
+For a `KafkaCompliance`, put its `spec.reference` in the ConfigMap as a `KafkaReference` file, and run `./kates compliance check -f /scenario/reference.yaml` instead. The check runs on the schedule only, not when the Strimzi `Kafka` changes. The Secret `kates-cli` holds the API's `url` and an `apiKey`: a test needs a key with `read` and `test:run`, a check `read` alone. A `kates-connection` Secret left from 0.2.x has the same keys and serves as well.
 
 The pod downloads the CLI from GitHub and checks it against the release's `checksums.txt`. Where pods have no route to GitHub, serve the tarball and `checksums.txt` from a mirror and point `release` at it. `kates-tester` is unsigned. Where the Kates chart's `kyvernoPolicy.cosign` is on with Enforce, its pod is refused in that release's namespace: run the `CronJob` in another namespace, or use your own signed image with the CLI in it.
-
-Once a namespace has its `CronJob`s, delete its `KatesTest`s and `KafkaCompliance`s. Deleting a live `KatesTest` cancels its run, so wait for it to finish first.
 
 ## Operating it
 
 | Annotation | Effect |
 | --- | --- |
-| `kates.io/pause-reconciliation: "true"` | No calls to the Kates API. A deleted resource is never paused |
-| `kates.io/reconcile-at: <new value>` | Forces a pass, recorded in `status.lastHandledReconcileAt` |
+| `kates.io/pause-reconciliation: "true"` | The operator leaves the resource as it is. A deleted resource is never paused |
 
-Before `helm uninstall`, before dropping a namespace from `watchNamespaces`, and before deleting a namespace, delete its live `KatesTest`s and its `Kates` resources. A finished `KatesTest` holds no finalizer and blocks nothing.
+Before `helm uninstall`, before dropping a namespace from `watchNamespaces`, and before deleting a namespace, delete its `Kates` resources. With `watchNamespaces` or the default mode, the RoleBinding that gives the operator its rights lives in the namespace, so `kubectl delete namespace` removes those rights too, and the operator can no longer clear its finalizer.
 
-A live one left behind needs a hand. With `watchNamespaces` or the default mode, the RoleBinding that gives the operator its rights lives in the namespace, so `kubectl delete namespace` removes those rights along with everything else. The operator can then no longer clear its finalizer, and the namespace stays Terminating until you do:
-
-```bash
-kubectl patch katestest <name> -n <namespace> --type=merge -p '{"metadata":{"finalizers":null}}'
-```
-
-Kates ends the run at its own timeout. With `watchAnyNamespace` the ClusterRoleBinding survives: if the Secret goes first, the finalizer comes off with a `CancelSkipped` Event.
-
-A `Kates` left behind is cleared the same way, and its ClusterRoleBinding then stays: delete it too, or a ServiceAccount later created under that name in that namespace inherits its rights.
+A `Kates` left behind is cleared by hand, and its ClusterRoleBinding then stays: delete it too, or a ServiceAccount later created under that name in that namespace inherits its rights.
 
 ```bash
 kubectl patch kates <name> -n <namespace> --type=merge -p '{"metadata":{"finalizers":null}}'
 kubectl delete clusterrolebinding kates-backend.<namespace>.<name>
 ```
 
-The NetworkPolicy allows egress on 8080, 443 and 6443. A Kates URL on any other port needs `networkPolicy.egressRules`, or the blocked call shows as `ApiUnavailable`.
+The NetworkPolicy allows egress on 8080, 443 and 6443, the Kates pods' API and the Kubernetes API.
 
-Metrics are on `:8080/metrics` under `kates_operator_`, and `monitoring.enabled` renders a PodMonitor. `/readyz` fails on an unreachable API server or a stale served CRD, and it reports the Lease and any refused Kafka namespace in its body without failing on them.
+Metrics are on `:8080/metrics` under `kates_operator_`, and `monitoring.enabled` renders a PodMonitor. `/readyz` fails on an unreachable API server or a stale served CRD, and it reports whether the pod holds the Lease in its body without failing on it.
 
 One pod holds the Lease `kates-operator` in the release namespace. `replicas: 2` only shortens the gap after a crash, to between 5 and 15 seconds.

@@ -34,7 +34,6 @@ jobs:
             rust:
               - 'operator/**'
               - 'charts/kates-operator/**'
-              - 'schemas/test-request.v1.schema.json'
               - 'rust-toolchain.toml'
               - 'versions.env'
               - '.github/workflows/ci-operator.yml'
@@ -109,16 +108,16 @@ jobs:
           set -euo pipefail
           schemas="${RUNNER_TEMP}/schemas"
           mkdir -p "${schemas}"
-          yq -o=json '.spec.versions[0].schema.openAPIV3Schema' operator/chart/crds/katestests.kates.io.yaml \
+          yq -o=json '.spec.versions[0].schema.openAPIV3Schema' operator/chart/crds/kates.kates.io.yaml \
             | jq '.properties.spec |= walk(if type == "object" and (.properties | type) == "object"
                                            then . + {additionalProperties: false} else . end)' \
-            > "${schemas}/katestest_v1alpha1.json"
+            > "${schemas}/kates_v1alpha1.json"
           validate() {
-            printf 'apiVersion: kates.io/v1alpha1\nkind: KatesTest\nmetadata: {name: ci}\nspec: %s\n' "$1" \
+            printf 'apiVersion: kates.io/v1alpha1\nkind: Kates\nmetadata: {name: ci}\nspec: %s\n' "$1" \
               | kubeconform -strict -summary -schema-location "${schemas}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" -
           }
-          validate '{type: LOAD, spec: {numRecords: 1, acks: all}, sla: {maxP99LatencyMs: 100}}'
-          if validate '{type: LOAD, spec: {records: 1}}'; then
+          validate '{version: "1.40.0", database: {secretRef: {name: db}}, kafka: {bootstrapServers: "k:9092"}}'
+          if validate '{version: "1.40.0", database: {secretRef: {name: db}}, kafka: {bootstrapServers: "k:9092"}, replica: 3}'; then
             echo "::error::kubeconform accepted a mistyped key"
             exit 1
           fi
@@ -192,9 +191,6 @@ jobs:
 
       - name: Deploy Kafka, Kates and the operator
         run: operator/e2e-stack.sh docker.io/library/kates-operator:ci
-
-      - name: Run the e2e checks
-        run: operator/e2e.sh payments kafka krafter
 
       - name: A Kates resource becomes a backend that runs a test
         run: operator/e2e-kates.sh payments

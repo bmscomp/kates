@@ -1,14 +1,7 @@
-kates-operator reconciles KatesTest and KafkaCompliance in: {{ include "kates-operator.namespaces" . }}
+kates-operator reconciles Kates resources in: {{ include "kates-operator.namespaces" . }}
 
-Each of those namespaces needs a Secret named kates-connection (keys url, apiKey, optional caBundle):
+  kubectl get kates -A
 
-  kubectl create secret generic kates-connection -n <namespace> \
-    --from-literal=url=http://kates.kates.svc:8080 --from-literal=apiKey=<a key with read, test:run>
-
-Then:
-
-  kubectl get katestests,kafkacompliances -A
-
-KatesTest and KafkaCompliance are deprecated and go in kates-operator 0.3.0.
-Run kates test apply or kates compliance check from a CronJob instead: see
-"Replacing the run kinds" in the chart README.
+KatesTest and KafkaCompliance were removed in 0.3.0. To run tests or compliance
+checks on a schedule, run kates test apply or kates compliance check from a
+CronJob: see "Replacing the run kinds" in the chart README.

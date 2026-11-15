@@ -39,12 +39,6 @@ imagePullSecrets:
 
 {{/* What the operator may do where it reconciles. */}}
 {{- define "kates-operator.rules" -}}
-- apiGroups: ["kates.io"]
-  resources: ["katestests", "kafkacompliances"]
-  verbs: ["get", "list", "watch", "patch", "update", "delete"]
-- apiGroups: ["kates.io"]
-  resources: ["katestests/status", "kafkacompliances/status", "katestests/finalizers", "kafkacompliances/finalizers"]
-  verbs: ["get", "patch", "update"]
 {{- /* patch and update: the finalizer that removes a pod's ClusterRoleBinding. */}}
 - apiGroups: ["kates.io"]
   resources: ["kates"]
@@ -76,7 +70,7 @@ quorum it labels the leader's pod, which the Service selects. */}}
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["get"]
-  resourceNames: ["kates-connection", "kates-api-key"]
+  resourceNames: ["kates-api-key"]
 {{- /* A quorum's CA and its members' certificates, by name, so one replicated Kates per
 namespace. create cannot be narrowed by name, and reads nothing. */}}
 - apiGroups: [""]

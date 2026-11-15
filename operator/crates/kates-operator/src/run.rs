@@ -1,7 +1,6 @@
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use axum::Router;
@@ -13,30 +12,24 @@ use futures::channel::oneshot;
 use futures::stream::{self, BoxStream, Stream, StreamExt as _};
 use futures::{FutureExt as _, future};
 use k8s_openapi::api::apps::v1::StatefulSet;
-use k8s_openapi::api::authorization::v1::{
-    ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
-};
-use kates_crds::{KafkaCompliance, Kates, KatesTest};
-use kube::api::{Api, DynamicObject, ListParams, PostParams};
-use kube::discovery;
+use kates_crds::Kates;
+use kube::Client;
+use kube::api::Api;
 use kube::runtime::Controller;
 use kube::runtime::events::{Recorder, Reporter};
-use kube::runtime::reflector::{ObjectRef, Store};
 use kube::runtime::watcher;
-use kube::{Client, ResourceExt as _};
 use kube_lease_manager::{LeaseManager, LeaseManagerBuilder};
 use prometheus_client::encoding::text::encode;
 use prometheus_client::registry::Registry;
-use serde::de::DeserializeOwned;
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::watch;
 
-use crate::connection::{Connections, FALLBACK_DIR};
-use crate::context::{Context, KafkaWatch, Watched};
+use crate::connection::Connections;
+use crate::context::Context;
 use crate::crds;
-use crate::metrics::{Metrics, StoreCollector, Stores};
-use crate::reconcile::{compliance, kates, test};
+use crate::metrics::Metrics;
+use crate::reconcile::kates;
 
 const OPENMETRICS: &str = "application/openmetrics-text; version=1.0.0; charset=utf-8";
 const LEASE: &str = "kates-operator";
@@ -84,11 +77,10 @@ impl Scope {
     }
 }
 
-/// What `/readyz` reads, and reports in its body without failing on it where it says so.
+/// What `/readyz` reports in its body without failing on it.
 #[derive(Default)]
 struct Health {
     leader: AtomicBool,
-    kafka_refused: RwLock<BTreeSet<String>>,
 }
 
 struct App {
@@ -107,12 +99,9 @@ pub async fn run() -> Fallible {
     let namespace = env_or("POD_NAMESPACE", client.default_namespace());
     let pod = env_or("POD_NAME", "kates-operator");
     let scope = Scope::parse(&env_or("KATES_OPERATOR_NAMESPACES", &namespace));
-    let kafka_scope = Scope::parse(&env_or("KATES_OPERATOR_KAFKA_NAMESPACES", ""));
 
     let mut registry = Registry::default();
     let metrics = Metrics::register(&mut registry);
-    let stores = Stores::default();
-    registry.register_collector(Box::new(StoreCollector(stores.clone())));
     let health = Arc::new(Health::default());
 
     let listener = TcpListener::bind(("0.0.0.0", 8080)).await?;
@@ -138,9 +127,7 @@ pub async fn run() -> Fallible {
         namespace,
         pod,
         scope,
-        kafka_scope,
         metrics: metrics.clone(),
-        stores,
         health: health.clone(),
         leader: leader.clone(),
     })
@@ -167,9 +154,7 @@ struct LeadArgs {
     namespace: String,
     pod: String,
     scope: Scope,
-    kafka_scope: Scope,
     metrics: Metrics,
-    stores: Stores,
     health: Arc<Health>,
     leader: watch::Receiver<bool>,
 }
@@ -182,9 +167,7 @@ async fn lead(args: LeadArgs) -> Fallible {
         namespace,
         pod,
         scope,
-        kafka_scope,
         metrics,
-        stores,
         health,
         mut leader,
     } = args;
@@ -201,14 +184,6 @@ async fn lead(args: LeadArgs) -> Fallible {
         () = shutdown() => return Ok(()),
     }
 
-    let kafka = kafka_watch(&client, &kafka_scope).await;
-    if let Some(watch) = &kafka {
-        health
-            .kafka_refused
-            .write()
-            .expect("the health state")
-            .clone_from(&watch.refused);
-    }
     let connections = connections(metrics.clone());
     let ctx = Arc::new(Context {
         recorder: Recorder::new(
@@ -222,46 +197,12 @@ async fn lead(args: LeadArgs) -> Fallible {
         metrics,
         connections,
         field_manager: format!("kates-operator-{namespace}"),
-        kafka,
         backend_role: names(&env_or("KATES_OPERATOR_BACKEND_ROLE", "")).pop_first(),
         backend_namespaces: names(&env_or("KATES_OPERATOR_BACKEND_NAMESPACES", "")),
     });
 
     kates::sweep(&ctx).await?;
-    warn_deprecated(&scope, &client).await;
     let mut streams: Vec<BoxStream<'static, ()>> = Vec::new();
-    for api in scope.apis::<KatesTest>(&client) {
-        let controller = Controller::new(api, watcher::Config::default())
-            .graceful_shutdown_on(lease_lost(leader.clone()))
-            .shutdown_on_signal();
-        stores
-            .tests
-            .write()
-            .expect("the stores")
-            .push(controller.store());
-        streams.push(quiet(controller.run(
-            test::reconcile,
-            test::error_policy,
-            ctx.clone(),
-        )));
-    }
-    for api in scope.apis::<KafkaCompliance>(&client) {
-        let controller = Controller::new(api, watcher::Config::default());
-        let store = controller.store();
-        stores
-            .checks
-            .write()
-            .expect("the stores")
-            .push(store.clone());
-        let controller = kafka_triggers(controller, &client, ctx.kafka.as_ref(), &store)
-            .graceful_shutdown_on(lease_lost(leader.clone()))
-            .shutdown_on_signal();
-        streams.push(quiet(controller.run(
-            compliance::reconcile,
-            compliance::error_policy,
-            ctx.clone(),
-        )));
-    }
     let sets = scope.apis::<StatefulSet>(&client);
     for (api, sets) in scope.apis::<Kates>(&client).into_iter().zip(sets) {
         let controller = Controller::new(api, watcher::Config::default())
@@ -276,30 +217,6 @@ async fn lead(args: LeadArgs) -> Fallible {
     }
     stream::select_all(streams).collect::<()>().await;
     Ok(())
-}
-
-// Both run kinds go in 0.3.0: say so at start while one of their resources is left.
-async fn warn_deprecated(scope: &Scope, client: &Client) {
-    warn_if_used(scope.apis::<KatesTest>(client), "kates test apply").await;
-    warn_if_used(
-        scope.apis::<KafkaCompliance>(client),
-        "kates compliance check",
-    )
-    .await;
-}
-
-async fn warn_if_used<K>(apis: Vec<Api<K>>, replacement: &str)
-where
-    K: kube::Resource<DynamicType = ()> + Clone + DeserializeOwned + std::fmt::Debug,
-{
-    for api in apis {
-        let page = api.list_metadata(&ListParams::default().limit(1)).await;
-        if page.is_ok_and(|page| !page.items.is_empty()) {
-            let kind = K::kind(&());
-            tracing::warn!(%kind, "{kind} is deprecated and goes in kates-operator 0.3.0: run {replacement} from a CronJob instead");
-            return;
-        }
-    }
 }
 
 // A failed pass is already counted and logged by its error policy.
@@ -344,113 +261,10 @@ fn lease_lost(mut leader: watch::Receiver<bool>) -> impl Future<Output = ()> + S
     trigger.map(|_| ())
 }
 
-async fn kafka_watch(client: &Client, scope: &Scope) -> Option<KafkaWatch> {
-    let group = discovery::group(client, "kafka.strimzi.io").await;
-    let resource = group
-        .ok()
-        .and_then(|group| group.recommended_kind("Kafka"))
-        .map(|(resource, _)| resource);
-    let Some(resource) = resource else {
-        tracing::info!("no Strimzi Kafka CRD: compliance runs on its interval only");
-        return None;
-    };
-    let (any_namespace, namespaces) = match scope {
-        Scope::Any => (true, BTreeSet::new()),
-        Scope::Listed(namespaces) => (false, namespaces.clone()),
-    };
-    let mut refused = BTreeSet::new();
-    for namespace in &namespaces {
-        if !may_list_kafkas(client, namespace).await {
-            tracing::warn!(
-                namespace,
-                "the operator may not list kafkas here: bind its Role"
-            );
-            refused.insert(namespace.clone());
-        }
-    }
-    Some(KafkaWatch {
-        resource,
-        any_namespace,
-        namespaces,
-        refused,
-    })
-}
-
-// Without this, kube-runtime would retry a 403 list forever, visible only in the log.
-async fn may_list_kafkas(client: &Client, namespace: &str) -> bool {
-    let review = SelfSubjectAccessReview {
-        spec: SelfSubjectAccessReviewSpec {
-            resource_attributes: Some(ResourceAttributes {
-                group: Some("kafka.strimzi.io".to_owned()),
-                resource: Some("kafkas".to_owned()),
-                verb: Some("list".to_owned()),
-                namespace: Some(namespace.to_owned()),
-                ..ResourceAttributes::default()
-            }),
-            ..SelfSubjectAccessReviewSpec::default()
-        },
-        ..SelfSubjectAccessReview::default()
-    };
-    let api: Api<SelfSubjectAccessReview> = Api::all(client.clone());
-    api.create(&PostParams::default(), &review)
-        .await
-        .ok()
-        .and_then(|answer| answer.status)
-        .is_some_and(|status| status.allowed)
-}
-
-fn kafka_triggers(
-    mut controller: Controller<KafkaCompliance>,
-    client: &Client,
-    kafka: Option<&KafkaWatch>,
-    store: &Store<KafkaCompliance>,
-) -> Controller<KafkaCompliance> {
-    let Some(kafka) = kafka else {
-        return controller;
-    };
-    let mut apis: Vec<Api<DynamicObject>> = Vec::new();
-    if kafka.any_namespace {
-        apis.push(Api::all_with(client.clone(), &kafka.resource));
-    }
-    for namespace in &kafka.namespaces {
-        if kafka.watched(namespace) == Watched::Yes {
-            apis.push(Api::namespaced_with(
-                client.clone(),
-                namespace,
-                &kafka.resource,
-            ));
-        }
-    }
-    for api in apis {
-        let store = store.clone();
-        controller = controller.watches_with(
-            api,
-            kafka.resource.clone(),
-            watcher::Config::default(),
-            move |object| checks_of(&store, &object),
-        );
-    }
-    controller
-}
-
-fn checks_of(
-    store: &Store<KafkaCompliance>,
-    kafka: &DynamicObject,
-) -> Vec<ObjectRef<KafkaCompliance>> {
-    let target = (kafka.namespace().unwrap_or_default(), kafka.name_any());
-    store
-        .state()
-        .iter()
-        .filter(|check| compliance::target(check) == target)
-        .map(|check| ObjectRef::from_obj(&**check))
-        .collect()
-}
-
 fn connections(requests: Metrics) -> Connections {
-    Connections::new(
-        PathBuf::from(FALLBACK_DIR),
-        Arc::new(move |method, route, status| requests.api_request(method, route, status)),
-    )
+    Connections::new(Arc::new(move |method, route, status| {
+        requests.api_request(method, route, status);
+    }))
 }
 
 fn names(list: &str) -> BTreeSet<String> {
@@ -500,13 +314,7 @@ async fn readyz(State(app): State<Arc<App>>) -> impl IntoResponse {
     } else {
         "standby"
     };
-    let refused = app.health.kafka_refused.read().expect("the health state");
-    let body = if refused.is_empty() {
-        format!("ok ({role})")
-    } else {
-        let namespaces = refused.iter().cloned().collect::<Vec<_>>().join(", ");
-        format!("ok ({role}); kafkas not readable in: {namespaces}")
-    };
+    let body = format!("ok ({role})");
     (StatusCode::OK, body)
 }
 
@@ -543,8 +351,6 @@ mod tests {
     use crate::metrics::Metrics;
 
     const SERVED: &str = r#"{"components":{"schemas":{
-        "io.kates.v1alpha1.KatesTest":{"description":"crd-version: 1"},
-        "io.kates.v1alpha1.KafkaCompliance":{"description":"crd-version: 1"},
         "io.kates.v1alpha1.Kates":{"description":"crd-version: 2"}}}}"#;
 
     const VERSION: &str = r#"{"major":"1","minor":"34","gitVersion":"v1.34.11","gitCommit":"c",

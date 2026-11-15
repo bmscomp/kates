@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# The smallest stack operator/e2e.sh runs on: one-broker Kafka, the Kates API from
-# charts/, and this operator with an image the cluster already holds.
+# The smallest stack the operator e2e runs on: one-broker Kafka, the Kates chart (whose Kafka
+# settings and images the Kates resources reuse), and this operator with an image the cluster
+# already holds.
 #
 #   KUBECONFIG=<scratch> operator/e2e-stack.sh <image>
 #
@@ -31,11 +32,7 @@ helm upgrade --install kates charts/kates -n kates --wait --timeout 8m \
 kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
 # Watched, but not in rbac.backendNamespaces: its Kates pods get no role.
 kubectl create namespace "$ns-plain" --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n "$ns" create secret generic kates-connection --dry-run=client -o yaml \
-  --from-literal=url=http://kates.kates.svc:8080 \
-  --from-literal=apiKey="$(kubectl -n kates get secret kates-api-key -o jsonpath='{.data.api-key}' | base64 -d)" \
-  | kubectl apply -f -
 
 helm upgrade --install kates-operator operator/chart -n kates-operator --create-namespace --wait --timeout 3m \
   --set image.repository="${image%:*}" --set image.tag="${image##*:}" --set image.pullPolicy=Never \
-  --set "watchNamespaces={$ns,$ns-plain}" --set "rbac.backendNamespaces={$ns}" --set 'kafka.namespaces={kafka}'
+  --set "watchNamespaces={$ns,$ns-plain}" --set "rbac.backendNamespaces={$ns}"
