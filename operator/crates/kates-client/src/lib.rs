@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, LOCATION, RETRY_AFTER};
+use reqwest::header::{HeaderMap, RETRY_AFTER};
 use reqwest::{Certificate, Method, Response, StatusCode, redirect};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
@@ -81,125 +81,6 @@ struct ApiError {
     message: Option<String>,
     #[serde(default, rename = "fieldErrors")]
     field_errors: BTreeMap<String, String>,
-}
-
-/// `TestResult.TaskStatus`; a status this build does not know reads as still running.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunStatus {
-    Pending,
-    Running,
-    Done,
-    Failed,
-}
-
-impl RunStatus {
-    fn parse(status: &str) -> Self {
-        match status {
-            "PENDING" => Self::Pending,
-            "DONE" => Self::Done,
-            "FAILED" => Self::Failed,
-            _ => Self::Running,
-        }
-    }
-
-    #[must_use]
-    pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Done | Self::Failed)
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WireRun {
-    id: String,
-    status: String,
-    client_key: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Run {
-    pub id: String,
-    pub status: RunStatus,
-    pub client_key: Option<String>,
-}
-
-impl From<WireRun> for Run {
-    fn from(run: WireRun) -> Self {
-        Self {
-            status: RunStatus::parse(&run.status),
-            id: run.id,
-            client_key: run.client_key,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct Violation {
-    pub metric: String,
-    pub threshold: f64,
-    pub actual: f64,
-    pub reason: Option<String>,
-}
-
-impl std::fmt::Display for Violation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.reason {
-            Some(reason) => write!(f, "{}: {reason}", self.metric),
-            None => write!(
-                f,
-                "{}: {} against {}",
-                self.metric, self.actual, self.threshold
-            ),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct SlaVerdict {
-    pub passed: bool,
-    #[serde(default)]
-    pub violations: Vec<Violation>,
-}
-
-/// What the operator reads of `GET /api/tests/{id}/report`.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Report {
-    #[serde(default)]
-    pub summary: Value,
-    pub overall_sla_verdict: Option<SlaVerdict>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct ComplianceSummary {
-    pub pass: i64,
-    pub fail: i64,
-    pub warn: i64,
-    pub waived: i64,
-    pub unknown: i64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ComplianceResult {
-    pub rule: String,
-    pub status: String,
-    pub detail: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ComplianceReport {
-    pub verdict: String,
-    #[serde(default)]
-    pub summary: ComplianceSummary,
-    #[serde(default)]
-    pub results: Vec<ComplianceResult>,
-}
-
-/// An answered check. `check_id` is absent when the API ran it but could not store the report.
-#[derive(Debug, Clone)]
-pub struct ComplianceAnswer {
-    pub report: ComplianceReport,
-    pub check_id: Option<String>,
 }
 
 /// The answer of `/api/drain`. `drained`: the switch is set and nothing is live, so the pod can
@@ -286,22 +167,6 @@ impl Client {
         self
     }
 
-    /// `GET /api/health`'s `capabilities`; an API older than the field lists none.
-    ///
-    /// # Errors
-    /// See [`Error`].
-    pub async fn capabilities(&self, key: &SecretString) -> Result<Vec<String>, Error> {
-        #[derive(Deserialize)]
-        struct Health {
-            #[serde(default)]
-            capabilities: Vec<String>,
-        }
-        let health: Health = self
-            .json(Method::GET, "/api/health", "/api/health", key, None, None)
-            .await?;
-        Ok(health.capabilities)
-    }
-
     /// The member's view of its quorum, from the public `GET /api/health`: no key is sent. A
     /// backend with no quorum, or one older than it, says `enabled: false`.
     ///
@@ -344,121 +209,6 @@ impl Client {
             Some(&body),
         )
         .await
-    }
-
-    /// Starts a run, or finds the one `idempotency_key` already started.
-    ///
-    /// # Errors
-    /// See [`Error`].
-    pub async fn create_test(
-        &self,
-        key: &SecretString,
-        idempotency_key: &str,
-        request: &Value,
-    ) -> Result<Run, Error> {
-        let run: WireRun = self
-            .json(
-                Method::POST,
-                "/api/tests",
-                "/api/tests",
-                key,
-                Some(idempotency_key),
-                Some(request),
-            )
-            .await?;
-        Ok(run.into())
-    }
-
-    /// # Errors
-    /// See [`Error`].
-    pub async fn get_test(&self, key: &SecretString, id: &str) -> Result<Run, Error> {
-        let path = format!("/api/tests/{id}");
-        let run: WireRun = self
-            .json(Method::GET, "/api/tests/{id}", &path, key, None, None)
-            .await?;
-        Ok(run.into())
-    }
-
-    /// The run `client_key` created. An API older than the filter lists everything, so an item
-    /// counts only if it carries the key itself.
-    ///
-    /// # Errors
-    /// See [`Error`].
-    pub async fn find_by_client_key(
-        &self,
-        key: &SecretString,
-        client_key: &str,
-    ) -> Result<Option<Run>, Error> {
-        #[derive(Deserialize)]
-        struct Page {
-            #[serde(default)]
-            items: Vec<WireRun>,
-        }
-        let path = format!("/api/tests?clientKey={client_key}");
-        let page: Page = self
-            .json(Method::GET, "/api/tests", &path, key, None, None)
-            .await?;
-        Ok(page
-            .items
-            .into_iter()
-            .find(|run| run.client_key.as_deref() == Some(client_key))
-            .map(Run::from))
-    }
-
-    /// # Errors
-    /// `Conflict` when the run is not running. See [`Error`].
-    pub async fn cancel_test(&self, key: &SecretString, id: &str) -> Result<(), Error> {
-        let path = format!("/api/tests/{id}/cancel");
-        let _: Value = self
-            .json(
-                Method::POST,
-                "/api/tests/{id}/cancel",
-                &path,
-                key,
-                None,
-                None,
-            )
-            .await?;
-        Ok(())
-    }
-
-    /// # Errors
-    /// See [`Error`].
-    pub async fn report(&self, key: &SecretString, id: &str) -> Result<Report, Error> {
-        let path = format!("/api/tests/{id}/report");
-        self.json(
-            Method::GET,
-            "/api/tests/{id}/report",
-            &path,
-            key,
-            None,
-            None,
-        )
-        .await
-    }
-
-    /// Runs a compliance check. A stored report's id comes from the `Location` header.
-    ///
-    /// # Errors
-    /// See [`Error`].
-    pub async fn check_compliance(
-        &self,
-        key: &SecretString,
-        reference: &Value,
-    ) -> Result<ComplianceAnswer, Error> {
-        const ROUTE: &str = "/api/conformity/check";
-        let response = self
-            .call(Method::POST, ROUTE, ROUTE, key, None, Some(reference))
-            .await?;
-        let check_id = response
-            .headers()
-            .get(LOCATION)
-            .and_then(|location| location.to_str().ok())
-            .and_then(|location| location.rsplit('/').next())
-            .filter(|id| !id.is_empty())
-            .map(str::to_owned);
-        let report = decode(response).await?;
-        Ok(ComplianceAnswer { report, check_id })
     }
 
     async fn json<T: serde::de::DeserializeOwned>(
@@ -619,7 +369,7 @@ fn classify(status: StatusCode, headers: &HeaderMap, body: &str, host: &str) -> 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use wiremock::matchers::{header, method, path, query_param};
+    use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
@@ -643,7 +393,7 @@ mod tests {
             .respond_with(response)
             .mount(&server)
             .await;
-        client(&server).get_test(&key(), "r").await.unwrap_err()
+        client(&server).drain(&key()).await.unwrap_err()
     }
 
     #[tokio::test]
@@ -670,46 +420,6 @@ mod tests {
                 webhooks_in_flight: 2,
             }
         );
-    }
-
-    #[tokio::test]
-    async fn create_sends_the_key_and_the_idempotency_key() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/prefix/api/tests"))
-            .and(header("authorization", "Bearer the-key"))
-            .and(header("idempotency-key", "uid-1"))
-            .respond_with(ResponseTemplate::new(202).set_body_json(
-                json!({"id": "r1", "status": "PENDING", "clientKey": "uid-1", "results": []}),
-            ))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let url = format!("{}/prefix/", server.uri());
-        let run = Client::new(&url, None)
-            .unwrap()
-            .create_test(&key(), "uid-1", &json!({"type": "LOAD"}))
-            .await
-            .unwrap();
-        assert_eq!(run.id, "r1");
-        assert_eq!(run.status, RunStatus::Pending);
-        assert_eq!(run.client_key.as_deref(), Some("uid-1"));
-    }
-
-    #[tokio::test]
-    async fn an_older_api_that_lists_everything_finds_nothing() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/api/tests"))
-            .and(query_param("clientKey", "uid-1"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                json!({"items": [{"id": "other", "status": "RUNNING"}], "total": 1}),
-            ))
-            .mount(&server)
-            .await;
-        let found = client(&server).find_by_client_key(&key(), "uid-1").await;
-        assert_eq!(found, Ok(None));
     }
 
     #[tokio::test]
@@ -800,44 +510,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_check_id_comes_from_location_and_a_lost_report_has_none() {
-        let body = json!({"verdict": "FAIL", "summary": {"pass": 1, "fail": 1, "warn": 0,
-            "waived": 0, "unknown": 0}, "results": [{"rule": "kafka.replicas.min",
-            "status": "FAIL", "detail": "2 < 3"}]});
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/api/conformity/check"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(&body)
-                    .insert_header("Location", "/api/conformity/checks/c1"),
-            )
-            .up_to_n_times(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("POST"))
-            .and(path("/api/conformity/check"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(&body))
-            .mount(&server)
-            .await;
-
-        let client = client(&server);
-        let stored = client.check_compliance(&key(), &json!({})).await.unwrap();
-        assert_eq!(stored.check_id.as_deref(), Some("c1"));
-        assert_eq!(stored.report.summary.fail, 1);
-        let lost = client.check_compliance(&key(), &json!({})).await.unwrap();
-        assert_eq!(lost.check_id, None);
-    }
-
-    #[tokio::test]
-    async fn the_observer_gets_the_route_template_and_never_the_url() {
+    async fn the_observer_gets_the_route_template() {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = seen.clone();
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .set_body_json(json!({"id": "secret-id", "status": "DONE"})),
+                    .set_body_json(json!({"draining": false, "drained": false})),
             )
             .mount(&server)
             .await;
@@ -845,16 +525,16 @@ mod tests {
             .observed_by(Arc::new(move |m, r, s| {
                 sink.lock().unwrap().push((m, r, s));
             }))
-            .get_test(&key(), "secret-id")
+            .drain(&key())
             .await
             .unwrap();
-        assert_eq!(*seen.lock().unwrap(), [("GET", "/api/tests/{id}", 200)]);
+        assert_eq!(*seen.lock().unwrap(), [("GET", "/api/drain", 200)]);
     }
 
     #[tokio::test]
     async fn a_network_error_says_why() {
         let client = Client::new("http://127.0.0.1:1", None).unwrap();
-        let error = client.get_test(&key(), "r").await.unwrap_err();
+        let error = client.drain(&key()).await.unwrap_err();
         let Error::Unavailable { status, detail, .. } = error else {
             panic!("{error:?}");
         };

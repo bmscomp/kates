@@ -1,7 +1,6 @@
 use std::collections::BTreeSet;
 
 use kube::Client;
-use kube::core::ApiResource;
 use kube::runtime::events::{Event, EventType, Recorder};
 
 use crate::connection::Connections;
@@ -14,8 +13,6 @@ pub struct Context {
     pub metrics: Metrics,
     pub connections: Connections,
     pub field_manager: String,
-    /// `None` without the Strimzi CRD: compliance then runs on its interval only.
-    pub kafka: Option<KafkaWatch>,
     /// The `ClusterRole` each `Kates` pod is bound to. `None` in a namespace-scoped install,
     /// which creates nothing cluster-scoped.
     pub backend_role: Option<String>,
@@ -32,34 +29,6 @@ pub fn role_in<'a>(
     namespace: &str,
 ) -> Option<&'a str> {
     role.filter(|_| namespaces.contains(namespace))
-}
-
-/// The namespaces whose `Kafka`s trigger a check, fixed at start.
-pub struct KafkaWatch {
-    pub resource: ApiResource,
-    pub any_namespace: bool,
-    pub namespaces: BTreeSet<String>,
-    pub refused: BTreeSet<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Watched {
-    Yes,
-    NotConfigured,
-    Forbidden,
-}
-
-impl KafkaWatch {
-    #[must_use]
-    pub fn watched(&self, namespace: &str) -> Watched {
-        if self.refused.contains(namespace) {
-            Watched::Forbidden
-        } else if self.any_namespace || self.namespaces.contains(namespace) {
-            Watched::Yes
-        } else {
-            Watched::NotConfigured
-        }
-    }
 }
 
 /// One transition worth telling `kubectl describe`.

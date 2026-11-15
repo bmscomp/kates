@@ -1,4 +1,4 @@
-//! The Kates operator: `KatesTest` and `KafkaCompliance`, driving the Kates REST API.
+//! The Kates operator: a `Kates` resource installs one Kates backend, or a quorum of them.
 
 pub mod connection;
 pub mod context;

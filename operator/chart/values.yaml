@@ -1,6 +1,5 @@
-# The Kates operator. It drives a Kates API that is already running and never
-# installs one. A resource reads its API and key from the Secret
-# kates-connection in its own namespace (keys url, apiKey, optional caBundle).
+# The Kates operator. A Kates resource installs one Kates backend, and with
+# replicas 3 or 5 a quorum of them.
 
 global:
   # -- Registry prepended to the image, with a slash, for clusters that pull
@@ -25,11 +24,6 @@ watchNamespaces: []
 # -- Reconcile every namespace, with a ClusterRoleBinding.
 watchAnyNamespace: false
 
-kafka:
-  # -- Namespaces whose Strimzi Kafkas trigger a compliance check when they
-  # change. Empty: checks run on their interval only.
-  namespaces: []
-
 rbac:
   clusterRoles:
     # -- false renders nothing cluster-scoped, for a namespace admin: apply the
@@ -39,9 +33,6 @@ rbac:
   aggregateRoles:
     # -- Fold the kinds into the built-in view, edit and admin roles.
     create: true
-  # -- Render the Role that lets the operator read Kafkas in kafka.namespaces.
-  # false: someone with rights there applies it from helm template --show-only.
-  kafkaNamespaceRole: true
   # -- Namespaces whose Kates pods get the backend's cluster role, for faults,
   # topology and compliance reads. Empty: none, and faults are off. Name only
   # namespaces where you trust everyone who can run a pod with that role in
@@ -53,15 +44,6 @@ rbac:
   # pod ephemeral containers, for CPU_STRESS and IO_STRESS. The Kates chart's
   # rbac.directChaos. Needs rbac.clusterRoles.create.
   backendDirectChaos: false
-
-connection:
-  # -- Lend every watched namespace the Secret below when it has no
-  # kates-connection of its own. With watchAnyNamespace that lends this key to
-  # every user who can create a KatesTest.
-  fallback: false
-  # -- The fallback Secret (keys url, apiKey, optional caBundle). This chart
-  # never renders it, so no key sits in Helm values.
-  existingSecret: kates-operator-connection
 
 crdUpgrade:
   # -- Apply the CRDs from a pre-install and pre-upgrade hook, never over a

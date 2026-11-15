@@ -71,8 +71,6 @@ spec:
                   fieldPath: metadata.namespace
             - name: KATES_OPERATOR_NAMESPACES
               value: {{ include "kates-operator.namespaces" . | quote }}
-            - name: KATES_OPERATOR_KAFKA_NAMESPACES
-              value: {{ if .Values.watchAnyNamespace }}"*"{{ else }}{{ join "," .Values.kafka.namespaces | quote }}{{ end }}
             {{- if .Values.rbac.clusterRoles.create }}
             - name: KATES_OPERATOR_BACKEND_ROLE
               value: kates-backend-{{ .Release.Namespace }}
@@ -97,20 +95,3 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if .Values.connection.fallback }}
-          volumeMounts:
-            - name: connection
-              mountPath: /etc/kates-operator/connection
-              readOnly: true
-          {{- end }}
-      {{- if .Values.connection.fallback }}
-      # Projected with no subPath, so the kubelet refreshes a rotated key; optional, so a
-      # missing Secret leaves the resources at NoConnection and the pod running.
-      volumes:
-        - name: connection
-          projected:
-            sources:
-              - secret:
-                  name: {{ .Values.connection.existingSecret }}
-                  optional: true
-      {{- end }}

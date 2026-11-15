@@ -26,7 +26,7 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    # Ports only, with no to: the template cannot know which namespace a kates-connection names.
+    # Ports only, with no to: the Kates resources it reaches may be in any watched namespace.
     - ports:
         - port: 8080
           protocol: TCP
