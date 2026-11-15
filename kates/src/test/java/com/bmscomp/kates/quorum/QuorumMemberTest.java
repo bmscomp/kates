@@ -66,8 +66,9 @@ class QuorumMemberTest {
     void threeMembersElectOneLeaderAndAnotherWhenItGoes() throws Exception {
         TestPki pki = new TestPki(tmp.resolve("pki"));
         List<String> peers = peers(3);
+        Path[][] files = certificates(pki, 3);
         for (int i = 0; i < 3; i++) {
-            started.add(QuorumMember.start(settings(peers, i, pki.member("m" + i))));
+            started.add(QuorumMember.start(settings(peers, i, files[i])));
         }
 
         QuorumMember first = await(() -> soleLeader(started));
@@ -82,6 +83,11 @@ class QuorumMemberTest {
             }
         }
 
+        // A member that has applied nothing is no voter: wait until each has the leader's entries.
+        long applied = first.appliedIndex();
+        for (QuorumMember member : started) {
+            await(() -> member.appliedIndex() >= applied ? member : null);
+        }
         first.close();
         List<QuorumMember> rest = new ArrayList<>(started);
         rest.remove(first);
@@ -95,10 +101,13 @@ class QuorumMemberTest {
         TestPki pki = new TestPki(tmp.resolve("pki"));
         TestPki other = new TestPki(tmp.resolve("other"));
         List<String> peers = peers(3);
-        started.add(QuorumMember.start(settings(peers, 0, pki.member("m0"))));
-        started.add(QuorumMember.start(settings(peers, 1, pki.member("m1"))));
+        Path[] m0 = pki.member("m0");
+        Path[] m1 = pki.member("m1");
+        Path[] m2 = other.member("m2");
+        started.add(QuorumMember.start(settings(peers, 0, m0)));
+        started.add(QuorumMember.start(settings(peers, 1, m1)));
         // Its own CA trusts its own certificate only: it can neither reach nor be reached.
-        QuorumMember stranger = QuorumMember.start(settings(peers, 2, other.member("m2")));
+        QuorumMember stranger = QuorumMember.start(settings(peers, 2, m2));
         started.add(stranger);
 
         QuorumMember leader = await(() -> soleLeader(started.subList(0, 2)));
@@ -113,9 +122,12 @@ class QuorumMemberTest {
         TestPki pki = new TestPki(tmp.resolve("pki"));
         List<String> peers = peers(3);
         List<QuorumMember.Settings> settings = new ArrayList<>();
+        Path[][] files = certificates(pki, 3);
         for (int i = 0; i < 3; i++) {
-            settings.add(settings(peers, i, pki.member("m" + i)));
-            started.add(QuorumMember.start(settings.get(i)));
+            settings.add(settings(peers, i, files[i]));
+        }
+        for (QuorumMember.Settings each : settings) {
+            started.add(QuorumMember.start(each));
         }
         QuorumMember leader = await(() -> soleLeader(started));
         long term = leader.term();
@@ -139,8 +151,9 @@ class QuorumMemberTest {
     void aLeaderThatLosesItsMajorityStopsLeading() throws Exception {
         TestPki pki = new TestPki(tmp.resolve("pki"));
         List<String> peers = peers(3);
+        Path[][] files = certificates(pki, 3);
         for (int i = 0; i < 3; i++) {
-            started.add(QuorumMember.start(settings(peers, i, pki.member("m" + i))));
+            started.add(QuorumMember.start(settings(peers, i, files[i])));
         }
         QuorumMember leader = await(() -> soleLeader(started));
         for (QuorumMember member : new ArrayList<>(started)) {
@@ -184,6 +197,15 @@ class QuorumMemberTest {
             TimeUnit.MILLISECONDS.sleep(100);
         }
         throw new AssertionError("not within " + ELECTION);
+    }
+
+    /** Every member's files first: keytool is slow on a CI runner, and the members should start together. */
+    static Path[][] certificates(TestPki pki, int count) throws Exception {
+        Path[][] files = new Path[count][];
+        for (int i = 0; i < count; i++) {
+            files[i] = pki.member("m" + i);
+        }
+        return files;
     }
 
     static List<String> peers(int count) throws IOException {

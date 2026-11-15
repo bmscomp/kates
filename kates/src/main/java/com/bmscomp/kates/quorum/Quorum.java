@@ -147,6 +147,7 @@ public class Quorum {
             health.put("leader", current.isLeader());
             health.put("leaderId", current.leaderId());
             health.put("term", current.term());
+            health.put("appliedIndex", current.appliedIndex());
         }
         return health;
     }

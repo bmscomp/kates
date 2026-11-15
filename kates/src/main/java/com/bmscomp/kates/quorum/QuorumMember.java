@@ -221,6 +221,15 @@ public final class QuorumMember implements AutoCloseable {
         return info().getCurrentTerm();
     }
 
+    /**
+     * The last log index this member applied. A member with an empty log does not count as a voter
+     * once the quorum has committed anything (Ratis' rule, for a member that lost its disk), so a
+     * member counts toward a majority only once it has caught up to some entry.
+     */
+    public long appliedIndex() {
+        return info().getLastAppliedIndex();
+    }
+
     private DivisionInfo info() {
         try {
             return server.getDivision(GROUP).getInfo();

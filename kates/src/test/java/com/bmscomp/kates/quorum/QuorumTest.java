@@ -45,6 +45,13 @@ class QuorumTest {
         assertTrue(leader.acceptsWrites());
         assertEquals(1, takeovers.size(), "not again in the same term");
 
+        // A member that has applied nothing is no voter: wait until each has the leader's entries.
+        long applied = applied(leader);
+        for (Quorum member : members) {
+            for (int i = 0; i < 200 && applied(member) < applied; i++) {
+                TimeUnit.MILLISECONDS.sleep(100);
+            }
+        }
         leader.stop(null);
         members.remove(leader);
         Quorum next = soleWriter(members);
@@ -66,14 +73,10 @@ class QuorumTest {
 
     private void start(int count, AtomicBoolean failing) throws Exception {
         TestPki pki = new TestPki(tmp.resolve("pki"));
-        // Every certificate first: keytool is slow on a CI runner, and the members should start together.
-        List<Path[]> certificates = new ArrayList<>();
-        for (int i = 0; i < count; i++) {
-            certificates.add(pki.member("m" + i));
-        }
+        Path[][] certificates = QuorumMemberTest.certificates(pki, count);
         List<String> peers = QuorumMemberTest.peers(count);
         for (int i = 0; i < count; i++) {
-            Path[] files = certificates.get(i);
+            Path[] files = certificates[i];
             Quorum quorum = new Quorum();
             quorum.peers = Optional.of(peers);
             quorum.memberId = Optional.of("m" + i);
@@ -116,6 +119,10 @@ class QuorumTest {
             TimeUnit.MILLISECONDS.sleep(100);
         }
         throw new AssertionError("no single member took writes within 45 s: " + views(members));
+    }
+
+    private static long applied(Quorum member) {
+        return ((Number) member.health().get("appliedIndex")).longValue();
     }
 
     private static String views(List<Quorum> members) {
