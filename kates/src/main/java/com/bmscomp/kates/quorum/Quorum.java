@@ -221,6 +221,25 @@ public class Quorum {
         return term();
     }
 
+    /**
+     * Hands leadership to the member after this one in {@code kates.quorum.peers}, so members that
+     * hand over in turn reach each in order; returns that member's id.
+     *
+     * @throws IOException if the transfer did not happen within {@code timeout}
+     * @throws IllegalStateException with no quorum
+     */
+    public String handOver(java.time.Duration timeout) throws IOException {
+        QuorumMember current = member;
+        if (current == null) {
+            throw new IllegalStateException("no quorum to hand over in");
+        }
+        List<String> ids =
+                settings.peers().stream().map(peer -> peer.getId().toString()).toList();
+        String target = ids.get((ids.indexOf(current.memberId()) + 1) % ids.size());
+        current.handOver(target, timeout);
+        return target;
+    }
+
     /** The leader this member knows of, or null with no quorum or during an election. */
     public String leaderId() {
         QuorumMember current = member;

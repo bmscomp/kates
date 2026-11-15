@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # A Kates resource with three members: one leader takes the traffic, a new one is elected when it
-# dies and recovers its run, a version change keeps a majority, the leader replaced last, and a
-# leader cut off from its peers takes no write once another leads.
+# dies and recovers its run, a version change keeps a majority, the leader replaced last, a
+# leader cut off from its peers takes no write once another leads, and a leader cut off from
+# PostgreSQL hands over.
 #
 #   KUBECONFIG=<scratch> operator/e2e-quorum.sh [namespace]
 #
@@ -242,6 +243,40 @@ done | sort -u | awk '{print $1}' | uniq -d)
 [ -z "$dup" ] && pass "one leader per term in every member's log" || fail "two members took writes in term(s) $dup"
 kill "${forwards[@]}" 2>/dev/null
 rm -f "$claims"
+
+echo "== the leader cut off from PostgreSQL hands over"
+"${k[@]}" wait --for=condition=Ready "kates/$name" --timeout=5m >/dev/null
+for _ in $(seq 1 30); do [ -n "$(leader)" ] && break; sleep 2; done
+cut=$(leader)
+cut_ip=$("${k[@]}" get pod "$cut" -o jsonpath='{.status.podIP}')
+db_ip=$("${k[@]}" get pods -l "app=$name-db" -o jsonpath='{.items[0].status.podIP}')
+# Its database alone: the members, Kafka and port 8080 stay reachable.
+db_cut() { # db_cut -I|-D
+  for node in $nodes; do
+    docker exec "$node" iptables "$1" FORWARD -s "$cut_ip" -d "$db_ip" -p tcp --dport 5432 -j DROP
+    docker exec "$node" iptables "$1" FORWARD -s "$db_ip" -d "$cut_ip" -p tcp --sport 5432 -j DROP
+  done
+}
+db_cut -I
+start=$(date +%s)
+second=
+for _ in $(seq 1 90); do
+  second=$(leader)
+  [ -n "$second" ] && [ "$second" != "$cut" ] && [ "$(labelled)" = "$second" ] && break
+  second=; sleep 1
+done
+handed=$(( $(date +%s) - start ))
+[ -n "$second" ] && pass "$second leads $handed s after $cut lost PostgreSQL" || fail "$cut still leads 90 s after losing PostgreSQL"
+connect
+# An empty body: the leader answers 400, a member that does not lead 503, before validation.
+check "the new leader takes writes" 400 "$(curl -s -m 5 -o /dev/null -w '%{http_code}' -X POST "$api/api/tests" \
+  -H 'Content-Type: application/json' -d '{}')"
+db_cut -D
+
+# Nightly: CI's Kind has three nodes, and this takes one away for a few minutes.
+if [ "${KATES_E2E_NODE_LOSS:-}" = 1 ]; then
+  operator/e2e-node-loss.sh "$ns" "$name" || failed=1
+fi
 
 echo "== deleting the resource removes what it made"
 "${k[@]}" delete kates "$name" --timeout=120s >/dev/null

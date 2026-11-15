@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -132,12 +133,22 @@ public final class QuorumMember implements AutoCloseable {
 
     private final RaftClient client;
     private final RaftPeerId selfId;
+    private final RaftGroup group;
+    private final Parameters parameters;
 
-    private QuorumMember(RaftServer server, RaftClient client, RaftPeerId selfId, String memberId) {
+    private QuorumMember(
+            RaftServer server,
+            RaftClient client,
+            RaftPeerId selfId,
+            String memberId,
+            RaftGroup group,
+            Parameters parameters) {
         this.server = server;
         this.client = client;
         this.selfId = selfId;
         this.memberId = memberId;
+        this.group = group;
+        this.parameters = parameters;
     }
 
     /** Starts the member. Its term and vote are kept in {@code dir}, which must outlive a restart. */
@@ -205,7 +216,7 @@ public final class QuorumMember implements AutoCloseable {
                 .setParameters(parameters)
                 .setRetryPolicy(RetryPolicies.noRetry())
                 .build();
-        QuorumMember member = new QuorumMember(server, client, self.getId(), settings.memberId());
+        QuorumMember member = new QuorumMember(server, client, self.getId(), settings.memberId(), group, parameters);
         started.set(member);
         return member;
     }
@@ -247,6 +258,31 @@ public final class QuorumMember implements AutoCloseable {
             return client.io().sendReadOnly(Message.EMPTY, selfId).isSuccess();
         } catch (IOException e) {
             return false;
+        }
+    }
+
+    /**
+     * Asks this member, as leader, to hand leadership to {@code target}: it waits for the target
+     * to catch up, then the target holds an election it wins. On its own client, since the
+     * transfer takes longer than the confirming read's timeout allows.
+     *
+     * @throws IOException if the transfer did not happen within {@code timeout}
+     */
+    public void handOver(String target, Duration timeout) throws IOException {
+        RaftProperties properties = new RaftProperties();
+        RaftClientConfigKeys.Rpc.setRequestTimeout(
+                properties, TimeDuration.valueOf(timeout.toMillis() + 2000, TimeUnit.MILLISECONDS));
+        try (RaftClient admin = RaftClient.newBuilder()
+                .setRaftGroup(group)
+                .setLeaderId(selfId)
+                .setProperties(properties)
+                .setParameters(parameters)
+                .setRetryPolicy(RetryPolicies.noRetry())
+                .build()) {
+            var reply = admin.admin().transferLeadership(RaftPeerId.valueOf(target), timeout.toMillis());
+            if (!reply.isSuccess()) {
+                throw new IOException("leadership not handed to " + target + ": " + reply.getException());
+            }
         }
     }
 

@@ -238,6 +238,27 @@ class QuorumMemberTest {
         assertFalse(leader.isLeader(), "alone, it does not lead again");
     }
 
+    @Test
+    void theLeaderHandsLeadershipToTheMemberItNames() throws Exception {
+        TestPki pki = new TestPki(tmp.resolve("pki"));
+        List<String> peers = peers(3);
+        Path[][] files = certificates(pki, 3);
+        for (int i = 0; i < 3; i++) {
+            started.add(QuorumMember.start(settings(peers, i, files[i])));
+        }
+        QuorumMember leader = await(() -> soleLeader(started));
+        long term = leader.term();
+        QuorumMember target =
+                started.stream().filter(m -> m != leader).findFirst().orElseThrow();
+
+        leader.handOver(target.memberId(), Duration.ofSeconds(10));
+
+        QuorumMember next = await(() -> soleLeader(started));
+        assertEquals(target.memberId(), next.memberId());
+        assertTrue(next.term() > term, "a later term");
+        assertFalse(leader.isLeader());
+    }
+
     private static void assertRefused(
             String message, List<String> peers, String id, String dir, String cert, String key, String ca) {
         IllegalArgumentException refused = assertThrows(
