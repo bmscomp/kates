@@ -83,7 +83,7 @@ public class GlobalExceptionMapper implements ExceptionMapper<Exception> {
 
     /**
      * Whether the cause chain says the database could not be reached, as opposed to a statement it
-     * refused: a connection-class SQL state (08), Hibernate's or JDBC's connection exception, or
+     * refused: a connection-class SQL state (08) or a server shutting down or starting (57P01 to 57P03), Hibernate's or JDBC's connection exception, or
      * Agroal's acquisition timeout. Depth-capped against cycles.
      */
     public static boolean isDatabaseUnavailable(Throwable t) {
@@ -95,7 +95,9 @@ public class GlobalExceptionMapper implements ExceptionMapper<Exception> {
             if (t instanceof java.sql.SQLException sql) {
                 String state = sql.getSQLState();
                 String message = sql.getMessage();
-                if ((state != null && state.startsWith("08"))
+                // 08: no connection. 57P01-57P03: the server shutting down or starting, as a
+                // CloudNativePG switchover leaves on the connections it kills.
+                if ((state != null && (state.startsWith("08") || state.matches("57P0[123]")))
                         || (message != null && message.contains("acquisition timeout"))) {
                     return true;
                 }

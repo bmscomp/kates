@@ -234,6 +234,8 @@ jobs:
           [ "$(printf '%s\n' "$cluster" | yq .spec.bootstrap.initdb.database)" = kates ]
           if printf '%s\n' "$out" | grep -q '^kind: StatefulSet'; then exit 1; fi
           printf '%s\n' "$out" | grep -q 'jdbc:postgresql://kates-db-rw\.'
+          # The backend's own socket timeout, which the URL overrides: a 503 within about 30 s, not 60.
+          printf '%s\n' "$out" | grep -q 'jdbc:postgresql://kates-db-rw\..*socketTimeout=30&'
           printf '%s\n' "$out" | grep -A3 'name: QUARKUS_DATASOURCE_PASSWORD' | grep -q 'name: kates-db-app'
           printf '%s\n' "$out" | grep -q 'until nc -z kates-db-rw\.'
           printf '%s\n' "$out" | grep -q 'cnpg.io/cluster: kates-db'

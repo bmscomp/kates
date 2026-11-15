@@ -451,7 +451,8 @@ var mcpCaveatsRunsActivity = []mcpCaveat{
 			"acted. Every REST and gRPC call that changes something leaves a row, a refused or failed one too, " +
 			"with how it ended in details, and its target is the id of the run or disruption it started when it " +
 			"started one. The Kates API's daily retention sweep leaves one as system:scheduler for each finished " +
-			"run it deletes. A call without a valid key, and a dry run, leave none. Rows written before the Kates " +
+			"run it deletes. A call without a valid key, and a dry run, leave none, and so does a REST call " +
+			"answered 503 because the Kates API could not reach its database, which it logs instead. Rows written before the Kates " +
 			"API recorded actors name no one, and then only the REST test endpoints wrote rows at all. Runs and " +
 			"disruption reports record no owner of their own: who started one shows only in its audit row.",
 		Refs: []string{
@@ -459,7 +460,8 @@ var mcpCaveatsRunsActivity = []mcpCaveat{
 				`auditService.record("DELETE", "test", id, auditDetails, actor);`),
 			mcpAnchoredRef(mcpJava+"service/TestCleanupScheduler.java:97", "Actor.SCHEDULER"),
 			mcpAnchoredRef(mcpJava+"audit/AuditResponseFilter.java:44-78",
-				"public void filter(ContainerRequestContext request", "if (actor == null)", "static String idOf("),
+				"public void filter(ContainerRequestContext request", "if (actor == null)", "if (isDatabaseOutage(response))",
+				"static String idOf("),
 			mcpAnchoredRef(mcpJava+"security/GrpcApiKeyInterceptor.java:67-70,100,156-159",
 				"static final Map<String, String> AUDITED", "audit(action, method, Status.Code.PERMISSION_DENIED",
 				"private void audit("),

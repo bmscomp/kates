@@ -36,6 +36,15 @@ class GlobalExceptionMapperTest {
     }
 
     @Test
+    void aDatabaseShuttingDownOrStartingIsAnOutage() {
+        // What a CloudNativePG switchover leaves on the connections it kills.
+        for (String state : new String[] {"57P01", "57P02", "57P03"}) {
+            Response response = mapper.toResponse(new RuntimeException(new java.sql.SQLException("x", state)));
+            assertEquals(503, response.getStatus(), state);
+        }
+    }
+
+    @Test
     void aConstraintViolationIsNotAnOutage() {
         Response response = mapper.toResponse(new RuntimeException(new java.sql.SQLException("dup", "23505")));
         assertEquals(500, response.getStatus());

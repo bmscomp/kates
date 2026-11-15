@@ -175,7 +175,14 @@ public final class QuorumMember implements AutoCloseable {
                 .setStateMachine(new Confirmations())
                 .setOption(RaftStorage.StartupOption.RECOVER)
                 .build();
-        server.start();
+        try {
+            server.start();
+        } catch (IOException | RuntimeException e) {
+            // Ratis starts the division, which locks the storage directory, before it binds: a start
+            // that fails must close what it started, or every later start finds the directory locked.
+            server.close();
+            throw e;
+        }
         RaftProperties clientProperties = new RaftProperties();
         RaftClientConfigKeys.Rpc.setRequestTimeout(clientProperties, CONFIRM_TIMEOUT);
         RaftClient client = RaftClient.newBuilder()

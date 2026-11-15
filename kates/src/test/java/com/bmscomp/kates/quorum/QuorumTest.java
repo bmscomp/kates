@@ -107,6 +107,26 @@ class QuorumTest {
     }
 
     @Test
+    void aRestartThatFailedSucceedsOnceThePortIsFree() throws Exception {
+        start(1, new AtomicBoolean(false));
+        Quorum quorum = members.get(0);
+        soleWriter(members);
+        int port = Integer.parseInt(quorum.peers.orElseThrow().get(0).replaceAll(".*:", ""));
+
+        quorum.member().closeServer();
+        try (java.net.ServerSocket held = new java.net.ServerSocket(port)) {
+            quorum.takeOver();
+            assertTrue(quorum.notServingSince().isPresent(), "the port is held: " + quorum.health());
+        }
+        // A failed start must leave nothing behind, such as the storage directory's lock.
+        quorum.takeOver();
+
+        assertEquals("RUNNING", quorum.health().get("state"), quorum.health().toString());
+        assertTrue(quorum.notServingSince().isEmpty());
+        soleWriter(members);
+    }
+
+    @Test
     void noRestartAfterShutdown() throws Exception {
         start(1, new AtomicBoolean(false));
         Quorum quorum = members.get(0);
