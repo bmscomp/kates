@@ -30,6 +30,7 @@ import org.apache.ratis.server.RaftServer;
 import org.apache.ratis.server.RaftServerConfigKeys;
 import org.apache.ratis.server.storage.RaftStorage;
 import org.apache.ratis.statemachine.impl.BaseStateMachine;
+import org.apache.ratis.util.LifeCycle;
 import org.apache.ratis.thirdparty.io.netty.handler.ssl.SslProvider;
 import org.apache.ratis.util.TimeDuration;
 
@@ -188,6 +189,21 @@ public final class QuorumMember implements AutoCloseable {
 
     public String memberId() {
         return memberId;
+    }
+
+    /** The Ratis server's life cycle: RUNNING while it serves. */
+    public LifeCycle.State state() {
+        return server.getLifeCycleState();
+    }
+
+    /** False once Ratis has closed the server, as it does after a pause past its close threshold. */
+    public boolean serving() {
+        return state().isRunning();
+    }
+
+    /** Closes the server only, as Ratis' JvmPauseMonitor does; for tests. */
+    void closeServer() throws IOException {
+        server.close();
     }
 
     /** True once this member leads and has committed an entry of its term, so it knows it leads. */

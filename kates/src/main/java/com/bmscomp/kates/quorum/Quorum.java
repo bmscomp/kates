@@ -54,12 +54,18 @@ public class Quorum {
 
     private volatile QuorumMember member;
     private volatile long recoveredTerm = -1;
+    private QuorumMember.Settings settings;
+    private volatile boolean stopping;
+    private volatile Instant notServingSince;
 
     void start(@Observes StartupEvent event) throws IOException {
         if (peers.isEmpty()) {
             return;
         }
-        QuorumMember.Settings settings = QuorumMember.Settings.parse(
+        // Ratis exits the JVM when a server it starts cannot bind, which would kill live runs over a
+        // member this class starts again anyway: an ExitException instead, caught by revive().
+        org.apache.ratis.util.ExitUtils.disableSystemExit();
+        settings = QuorumMember.Settings.parse(
                 peers.get(), memberId(), dir.orElse(null), cert.orElse(null), key.orElse(null), ca.orElse(null));
         member = QuorumMember.start(settings);
         LOG.infof(
@@ -68,6 +74,7 @@ public class Quorum {
     }
 
     void stop(@Observes ShutdownEvent event) {
+        stopping = true;
         QuorumMember current = member;
         if (current == null) {
             return;
@@ -87,7 +94,7 @@ public class Quorum {
     /** Whether this instance leads, as it last heard: cheap, and late by up to a step-down. */
     public boolean isLeader() {
         QuorumMember current = member;
-        return current == null || current.isLeader();
+        return current == null || (current.serving() && current.isLeader());
     }
 
     /**
@@ -101,7 +108,7 @@ public class Quorum {
         if (current == null) {
             return peers.isEmpty();
         }
-        if (!current.confirmLeadership()) {
+        if (!current.serving() || !current.confirmLeadership()) {
             return false;
         }
         long term = current.term();
@@ -127,14 +134,53 @@ public class Quorum {
     @Scheduled(every = "2s", identity = "quorum-takeover", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void takeOver() {
         if (member != null) {
+            revive();
             acceptsWrites();
         }
+    }
+
+    /**
+     * Starts the member again from its disk if Ratis has closed its server, as it does after a
+     * pause longer than raft.server.close.threshold (60 s): the process lives on, and without this
+     * the member is lost to the quorum until the pod restarts, answering health with its old term.
+     */
+    private void revive() {
+        QuorumMember current = member;
+        if (stopping || current.serving()) {
+            return;
+        }
+        if (notServingSince == null) {
+            notServingSince = Instant.now();
+        }
+        LOG.warnf("quorum member %s: Ratis server %s, starting it again from its disk", current.memberId(), current.state());
+        try {
+            current.close();
+        } catch (IOException | RuntimeException e) {
+            LOG.debugf("closing the old member: %s", e);
+        }
+        try {
+            member = QuorumMember.start(settings);
+            notServingSince = null;
+            recoveredTerm = -1;
+            LOG.infof("quorum member %s serves again", settings.memberId());
+        } catch (IOException | RuntimeException e) {
+            LOG.warnf("quorum member %s could not start again, retrying: %s", settings.memberId(), e);
+        }
+    }
+
+    /** Since when this member's Ratis server has not been running; empty while it serves, or with no quorum. */
+    public Optional<Instant> notServingSince() {
+        return Optional.ofNullable(notServingSince);
+    }
+
+    QuorumMember member() {
+        return member;
     }
 
     /** The leader this member knows of, or null with no quorum or during an election. */
     public String leaderId() {
         QuorumMember current = member;
-        return current == null ? null : current.leaderId();
+        return current == null || !current.serving() ? null : current.leaderId();
     }
 
     /** What {@code /api/health} shows. */
@@ -143,7 +189,10 @@ public class Quorum {
         Map<String, Object> health = new LinkedHashMap<>();
         health.put("enabled", current != null);
         if (current != null) {
+            health.put("state", current.state().name());
             health.put("memberId", current.memberId());
+        }
+        if (current != null && current.serving()) {
             health.put("leader", current.isLeader());
             health.put("leaderId", current.leaderId());
             health.put("term", current.term());

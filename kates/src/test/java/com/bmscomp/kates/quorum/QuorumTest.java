@@ -71,6 +71,54 @@ class QuorumTest {
         assertTrue(takeovers.get(takeovers.size() - 1).startsWith(leader.memberId() + "@"));
     }
 
+    @Test
+    void aClosedMemberIsRestartedBySchedule() throws Exception {
+        start(1, new AtomicBoolean(false));
+        Quorum quorum = members.get(0);
+        soleWriter(members);
+
+        quorum.member().closeServer();
+        assertTrue(quorum.notServingSince().isEmpty(), "nothing noticed before the schedule runs");
+        quorum.takeOver();
+
+        assertTrue(quorum.notServingSince().isEmpty(), "restarted: " + quorum.health());
+        assertEquals("RUNNING", quorum.health().get("state"));
+        assertTrue(quorum.member().serving());
+        soleWriter(members);
+    }
+
+    @Test
+    void healthWhileClosedNamesTheState() throws Exception {
+        start(1, new AtomicBoolean(false));
+        Quorum quorum = members.get(0);
+        soleWriter(members);
+        int port = Integer.parseInt(quorum.peers.orElseThrow().get(0).replaceAll(".*:", ""));
+
+        quorum.member().closeServer();
+        // The port held by someone else: the new server cannot bind, so the member stays down.
+        try (java.net.ServerSocket held = new java.net.ServerSocket(port)) {
+            quorum.takeOver();
+
+            assertEquals("CLOSED", quorum.health().get("state"));
+            assertFalse(quorum.health().containsKey("term"), "no stale term: " + quorum.health());
+            assertTrue(quorum.notServingSince().isPresent());
+            assertFalse(quorum.acceptsWrites(), "a member that does not serve takes no write");
+        }
+    }
+
+    @Test
+    void noRestartAfterShutdown() throws Exception {
+        start(1, new AtomicBoolean(false));
+        Quorum quorum = members.get(0);
+        QuorumMember before = quorum.member();
+
+        quorum.stop(null);
+        quorum.takeOver();
+
+        assertTrue(before == quorum.member(), "no member started after shutdown");
+        assertFalse(quorum.member().serving());
+    }
+
     private void start(int count, AtomicBoolean failing) throws Exception {
         TestPki pki = new TestPki(tmp.resolve("pki"));
         Path[][] certificates = QuorumMemberTest.certificates(pki, count);
