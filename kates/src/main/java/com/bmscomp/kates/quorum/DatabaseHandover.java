@@ -62,8 +62,14 @@ public class DatabaseHandover {
             String to = quorum.handOver(TRANSFER_TIMEOUT);
             LOG.warnf("PostgreSQL unreachable since %s: leadership handed to %s", unreachableSince, to);
         } catch (java.io.IOException | RuntimeException e) {
+            handOverFailed();
             LOG.warnf("PostgreSQL unreachable since %s, and handing leadership on failed: %s", unreachableSince, e);
         }
+    }
+
+    /** The rest stops handovers bouncing between members; one that failed is retried at the next check. */
+    void handOverFailed() {
+        handedOverAt = null;
     }
 
     /** Whether to hand over now, given whether the database answered and how much is live. */

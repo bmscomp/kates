@@ -48,6 +48,15 @@ class DatabaseHandoverTest {
     }
 
     @Test
+    void aFailedHandoverIsRetriedWithoutTheRest() {
+        DatabaseHandover handover = new DatabaseHandover();
+        handover.decide(at(0), false, 0);
+        assertTrue(handover.decide(at(15), false, 0));
+        handover.handOverFailed();
+        assertTrue(handover.decide(at(20), false, 0), "retried at the next check, not 2 minutes later");
+    }
+
+    @Test
     void theDatabaseBackResetsTheClock() {
         DatabaseHandover handover = new DatabaseHandover();
         handover.decide(at(0), false, 0);
