@@ -3,14 +3,14 @@ package com.bmscomp.kates.api;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Optional;
+
 import org.eclipse.microprofile.health.HealthCheckResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-
-import java.time.Duration;
-import java.time.Instant;
-import java.util.Optional;
 
 import com.bmscomp.kates.engine.TestOrchestrator;
 import com.bmscomp.kates.quorum.Quorum;

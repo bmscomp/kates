@@ -30,8 +30,8 @@ import org.apache.ratis.server.RaftServer;
 import org.apache.ratis.server.RaftServerConfigKeys;
 import org.apache.ratis.server.storage.RaftStorage;
 import org.apache.ratis.statemachine.impl.BaseStateMachine;
-import org.apache.ratis.util.LifeCycle;
 import org.apache.ratis.thirdparty.io.netty.handler.ssl.SslProvider;
+import org.apache.ratis.util.LifeCycle;
 import org.apache.ratis.util.TimeDuration;
 
 /**

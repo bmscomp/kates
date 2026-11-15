@@ -19,6 +19,10 @@ public class IntegrationTestProfile implements QuarkusTestProfile {
         return Map.of(
                 "quarkus.datasource.db-kind", "postgresql",
                 "quarkus.hibernate-orm.schema-management.strategy", "none",
-                "quarkus.flyway.migrate-at-start", "true");
+                "quarkus.flyway.migrate-at-start", "true",
+                // What %prod sets in application.properties: the ITs run against PostgreSQL as shipped.
+                "quarkus.datasource.jdbc.additional-jdbc-properties.socketTimeout", "30",
+                "quarkus.datasource.jdbc.additional-jdbc-properties.connectTimeout", "5",
+                "quarkus.datasource.jdbc.additional-jdbc-properties.tcpKeepAlive", "true");
     }
 }

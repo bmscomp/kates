@@ -152,7 +152,9 @@ public class Quorum {
         if (notServingSince == null) {
             notServingSince = Instant.now();
         }
-        LOG.warnf("quorum member %s: Ratis server %s, starting it again from its disk", current.memberId(), current.state());
+        LOG.warnf(
+                "quorum member %s: Ratis server %s, starting it again from its disk",
+                current.memberId(), current.state());
         try {
             current.close();
         } catch (IOException | RuntimeException e) {

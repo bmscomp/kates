@@ -43,6 +43,11 @@ public class GlobalExceptionMapper implements ExceptionMapper<Exception> {
             return error(409, "Conflict", "The resource was modified concurrently — re-read it and retry");
         }
 
+        if (isDatabaseUnavailable(exception)) {
+            LOG.warnf("Database unavailable: %s", root.toString());
+            return databaseUnavailable();
+        }
+
         if (root instanceof TimeoutException) {
             LOG.warn("Request timed out", exception);
             return error(504, "Gateway Timeout", root.getMessage());
@@ -69,6 +74,43 @@ public class GlobalExceptionMapper implements ExceptionMapper<Exception> {
             }
         }
         return false;
+    }
+
+    /** What a client is told when the database cannot be reached: retry in this many seconds. */
+    public static final String DATABASE_RETRY_AFTER = "5";
+
+    public static final String DATABASE_UNAVAILABLE = "The Kates API cannot reach its database; retry once it is back";
+
+    /**
+     * Whether the cause chain says the database could not be reached, as opposed to a statement it
+     * refused: a connection-class SQL state (08), Hibernate's or JDBC's connection exception, or
+     * Agroal's acquisition timeout. Depth-capped against cycles.
+     */
+    public static boolean isDatabaseUnavailable(Throwable t) {
+        for (int depth = 0; t != null && depth < 16; t = t.getCause(), depth++) {
+            if (t instanceof org.hibernate.exception.JDBCConnectionException
+                    || t instanceof java.sql.SQLTransientConnectionException) {
+                return true;
+            }
+            if (t instanceof java.sql.SQLException sql) {
+                String state = sql.getSQLState();
+                String message = sql.getMessage();
+                if ((state != null && state.startsWith("08"))
+                        || (message != null && message.contains("acquisition timeout"))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** 503 with Retry-After, for a database the Kates API cannot reach. */
+    public static Response databaseUnavailable() {
+        return Response.status(503)
+                .type(MediaType.APPLICATION_JSON_TYPE)
+                .header("Retry-After", DATABASE_RETRY_AFTER)
+                .entity(ApiError.of(503, "Service Unavailable", DATABASE_UNAVAILABLE))
+                .build();
     }
 
     private static Response error(int status, String label, String message) {

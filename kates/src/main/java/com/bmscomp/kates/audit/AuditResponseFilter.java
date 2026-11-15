@@ -24,6 +24,8 @@ import com.bmscomp.kates.service.AuditService;
 @Provider
 public class AuditResponseFilter implements ContainerResponseFilter {
 
+    private static final org.jboss.logging.Logger LOG = org.jboss.logging.Logger.getLogger(AuditResponseFilter.class);
+
     static final int TARGET_LENGTH = 128;
 
     @Context
@@ -53,7 +55,21 @@ public class AuditResponseFilter implements ContainerResponseFilter {
         String what = id != null ? id : request.getUriInfo().getPath();
         String target = what.length() <= TARGET_LENGTH ? what : what.substring(0, TARGET_LENGTH);
         String details = "HTTP " + response.getStatus();
+        // The row cannot be written to a database the answer says is unreachable: its retries only
+        // held the 503 back by another 30 s (DatabaseOutageIT). The attempt goes to the log instead.
+        if (isDatabaseOutage(response)) {
+            LOG.warnf(
+                    "Audit row not written, the database is unreachable: %s %s %s by %s",
+                    audited.action(), audited.type(), target, actor.name());
+            return;
+        }
         AuditService.blockingSafe(() -> auditService.record(audited.action(), audited.type(), target, details, actor));
+    }
+
+    private static boolean isDatabaseOutage(ContainerResponseContext response) {
+        return response.getStatus() == 503
+                && response.getEntity() instanceof com.bmscomp.kates.api.ApiError error
+                && com.bmscomp.kates.api.GlobalExceptionMapper.DATABASE_UNAVAILABLE.equals(error.getMessage());
     }
 
     /** The id an answer carries as an "id" entry, or null. */

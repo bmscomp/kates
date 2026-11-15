@@ -19,6 +19,29 @@ class GlobalExceptionMapperTest {
     }
 
     @Test
+    void aConnectionFailureIsAnOutage() {
+        Response response = mapper.toResponse(new RuntimeException(new java.sql.SQLException("x", "08006")));
+        assertEquals(503, response.getStatus());
+        assertEquals("5", response.getHeaderString("Retry-After"));
+        assertEquals(
+                "The Kates API cannot reach its database; retry once it is back",
+                ((ApiError) response.getEntity()).getMessage());
+    }
+
+    @Test
+    void anAcquisitionTimeoutIsAnOutage() {
+        Response response =
+                mapper.toResponse(new RuntimeException(new java.sql.SQLException("Sorry, acquisition timeout!")));
+        assertEquals(503, response.getStatus());
+    }
+
+    @Test
+    void aConstraintViolationIsNotAnOutage() {
+        Response response = mapper.toResponse(new RuntimeException(new java.sql.SQLException("dup", "23505")));
+        assertEquals(500, response.getStatus());
+    }
+
+    @Test
     void illegalArgumentReturnsBadRequest() {
         Response response = mapper.toResponse(new IllegalArgumentException("bad param"));
         assertEquals(400, response.getStatus());
