@@ -15,11 +15,14 @@ futures = "0.3"
 http = "1"
 jiff = "0.2"
 json-patch = "4"
+# The members' quorum CA and certificates, on the aws-lc-rs backend rustls already uses.
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
 kube-lease-manager = "0.13"
 secrecy = "0.10"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+time = "0.3"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 # k8s-openapi refuses to build unless the binary names a Kubernetes version.
 k8s-openapi.workspace = true

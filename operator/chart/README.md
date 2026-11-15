@@ -165,9 +165,25 @@ To call the API the operator reads the key `apiKeySecretRef` names, and its char
 
 The operator never takes over an object it did not create. If a ServiceAccount, Service or StatefulSet of the resource's name already exists, nothing is applied and `Ready` is false with reason `NameTaken`: rename one of them.
 
+### Three or five members
+
+```yaml
+spec:
+  replicas: 3          # 1 (default), 3 or 5; fixed once the resource exists
+  quorum:
+    storage: 1Gi       # each member's volume, for its Raft term and vote
+    # storageClassName: fast
+```
+
+With `replicas: 3` the members elect a leader among themselves, and keep one with a member gone; `5` keeps one with two gone. Only the leader takes writes: the others answer them 503 with `Retry-After` and serve reads. The `Kates` Service sends traffic to the leader alone, through the label `kates.io/quorum-role=leader`, which the operator moves to a new leader within about five seconds. `kubectl get kates` shows the leader. When the leader dies, a new one is elected within seconds, and before it takes a write it fails the runs the dead leader had live and removes the faults it had left.
+
+The members talk over mutual TLS on port 9300. The operator makes a CA for the quorum and a certificate for each member, valid a year, and renews each at two-thirds of its life by replacing that member's pod. They are kept in two Secrets, named `kates-quorum-ca` (never mounted) and `kates-quorum-tls`: the chart lets the operator read and change only Secrets of those names, so a namespace holds one `Kates` with a quorum, and a second gets `Ready=False`, reason `QuorumSecretTaken`.
+
+A version change replaces one member at a time, followers first and the leader last. The next is replaced only once every member is ready, knows the leader and holds an entry of its log: a member with an empty log is no voter, so replacing another before then could leave the quorum without a majority. Under `mode: Drain` the leader is replaced once its drain ends. A `PodDisruptionBudget` lets a node drain take one member at a time. Deleting the resource deletes the members' volumes.
+
 What it doesn't do yet:
 
-- It runs one pod. More than one waits for Kates' own quorum.
+- It doesn't scale a quorum: `replicas` is set when the resource is made.
 - No PostgreSQL Secret for the `INTEGRATION_CDC` test, and no `rbac.extraRules`: the Kates chart's `rbac.cdcSecretNamespaces` and `rbac.extraRules` have no counterpart yet.
 - It doesn't create PostgreSQL. A changed Secret is not noticed: delete the pod to pick it up.
 - Kafka over TLS with a truststore file isn't expressible yet. `spec.env` takes any other setting of the container, except the names `database`, `kafka` and `apiKeySecretRef` set.

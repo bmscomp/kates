@@ -217,6 +217,30 @@ pub struct Drain {
     pub webhooks_in_flight: u32,
 }
 
+/// `/api/health`'s `quorum`, as one member sees it.
+#[derive(Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct QuorumView {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub member_id: Option<String>,
+    /// It leads, and has committed an entry of its term.
+    #[serde(default)]
+    pub leader: bool,
+    #[serde(default)]
+    pub leader_id: Option<String>,
+    #[serde(default)]
+    pub term: i64,
+    /// The last entry it applied; -1 with an empty log, when it is no voter.
+    #[serde(default = "no_entry")]
+    pub applied_index: i64,
+}
+
+fn no_entry() -> i64 {
+    -1
+}
+
 /// One Kates API. The key travels per call, so a rotated key needs no new client.
 #[derive(Clone)]
 pub struct Client {
@@ -276,6 +300,24 @@ impl Client {
             .json(Method::GET, "/api/health", "/api/health", key, None, None)
             .await?;
         Ok(health.capabilities)
+    }
+
+    /// The member's view of its quorum, from the public `GET /api/health`: no key is sent. A
+    /// backend with no quorum, or one older than it, says `enabled: false`.
+    ///
+    /// # Errors
+    /// See [`Error`].
+    pub async fn quorum(&self) -> Result<QuorumView, Error> {
+        #[derive(Deserialize)]
+        struct Health {
+            #[serde(default)]
+            quorum: QuorumView,
+        }
+        let none = SecretString::from(String::new());
+        let health: Health = self
+            .json(Method::GET, "/api/health", "/api/health", &none, None, None)
+            .await?;
+        Ok(health.quorum)
     }
 
     /// `GET /api/drain`.
