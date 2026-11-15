@@ -56,9 +56,9 @@ Tutorial 1 (Getting Started)
 ## Prerequisites
 
 All tutorials assume:
-- The full stack is deployed (`make all` + `make kates`)
-- The CLI is installed (`make cli-install`)
-- The CLI is configured with a context that carries the API key, as the Quick Start in [Introduction](../book/01-introduction.md#quick-start) sets it up (`kates ctx set local --url http://localhost:30083 --api-key …`)
+- The CLI is installed (`brew install bmscomp/tap/kates`), with Docker, Kind, kubectl and Helm, as [Tutorial 1](01-getting-started.md#step-1-install-the-tools-and-the-cli) sets them up
+- The full stack is deployed (`kates deploy --topology isolated`)
+- The CLI has a context that carries the API key (`kates ports` writes one)
 
 ## Resource Requirements
 

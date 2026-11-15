@@ -83,59 +83,49 @@ Kates is both a check before a merge (a short LOAD run) and the gate before prod
 
 You run the payments platform, and before it moves onto [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test, you have to say whether the cluster can carry it. The book turns that into targets a Kates run can check. `krafter` must take 2,000 records per second of 1 KiB with `acks=all`, and answer writes with a P99 of 100 ms or less from send to acknowledgment. It must also lose no acknowledged record when one broker or one zone fails.
 
-The Quick Start takes the first step: a LOAD run against `krafter` and its report. It assumes a checkout of the repository, for the `make` targets, and a stack that `make all` deployed in the [isolated topology](appendix-a-glossary.md#gl-isolated-topology), which puts the Kates API in the `kates` namespace and `krafter` in `kafka`. In the book's lab that stack runs on [`panda`](appendix-a-glossary.md#gl-panda), the three-node Kind cluster. Each step says what success looks like and where to go when it fails; the [CLI Issues](appendix-b-troubleshooting.md#cli-issues) in the Troubleshooting Index cover most of the failures.
+The Quick Start takes the first step: a LOAD run against `krafter` and its report. It installs the released CLI and deploys the stack in the [isolated topology](appendix-a-glossary.md#gl-isolated-topology), which puts the Kates API in the `kates` namespace and `krafter` in `kafka`. In the book's lab that stack runs on [`panda`](appendix-a-glossary.md#gl-panda), the three-node Kind cluster. It needs no checkout of the repository. Each step says what success looks like and where to go when it fails; the [CLI Issues](appendix-b-troubleshooting.md#cli-issues) in the Troubleshooting Index cover most of the failures.
 
-1. Build and install the CLI.
-
-   ```bash
-   make cli-install
-   ```
-
-   The target prints `✅ Installed:` and the version of the binary it wrote, then warns if `kates` on your `PATH` is another binary. When it refuses to write through a symlink another package owns, rerun it with `CLI_INSTALL_DIR=$HOME/.local/bin`, as its message says. If `kates` is then killed at once (exit 137) on macOS, see [CLI Binary Killed on macOS](12-deployment.md#cli-binary-killed-on-macos).
-
-2. Forward the Kates API to `localhost:30083`, in the background.
+1. Install Kind, kubectl, Helm and the CLI, on macOS or Linux, with Docker running and about 16 GB of RAM available to it.
 
    ```bash
-   make ports
+   brew install kind kubectl helm bmscomp/tap/kates
    ```
 
-   Success is a `Forwarding Kates API: http://localhost:30083` line and a closing `Port forwarding: N active, M skipped` line. `nothing was forwarded` means nothing is deployed in the namespaces it looked in: check that `make all` finished, or set `KATES_NS` as the single-namespace note below says.
+   `kates version` then prints the release. The `kates` formula also installs cosign, which checks the charts the deploy pulls. Without Homebrew, [Installation](10-cli-reference.md#installation) in CLI Reference gives the release installer and the archives.
 
-3. Read the [API key](appendix-a-glossary.md#gl-api-key) the `kates` chart generated into the `kates-api-key` [Secret](appendix-a-glossary.md#gl-secret).
+2. Deploy the stack.
 
    ```bash
-   KEY=$(kubectl get secret kates-api-key -n kates \
-     -o jsonpath='{.data.api-key}' | base64 -d)
+   kates deploy --topology isolated
    ```
 
-   The command prints nothing; `echo "${#KEY}"` printing a number above 0 shows the key arrived. A `NotFound` error usually means the Secret is in another namespace, such as `kates-stack`.
+   With no cluster reachable, it offers to create `panda` and switches kubectl to it; accept. With a cluster reachable, it deploys into kubectl's current context, so check `kubectl config current-context` first. Success is a summary of the installed components and their access points. After a failure, fix the cause and run it again: it skips or upgrades the components already installed.
 
-4. Create a [CLI context](appendix-a-glossary.md#gl-cli-context) with that key, and make it current.
+3. Forward the services in the background, and connect the CLI.
 
    ```bash
-   kates ctx set local --url http://localhost:30083 --api-key "$KEY"
-   kates ctx use local
+   kates ports
    ```
 
-   Success is `Context 'local' → http://localhost:30083`, then `Switched to 'local' → http://localhost:30083`. `--api-key was given but is empty` means step 3 found no key: repeat it.
+   It forwards the Kates API to `localhost:8080`, reads the [API key](appendix-a-glossary.md#gl-api-key) the `kates` chart generated into the `kates-api-key` [Secret](appendix-a-glossary.md#gl-secret), and writes both into a [CLI context](appendix-a-glossary.md#gl-cli-context) named `ports`, which it makes current. It says when the API rejects the key.
 
-5. Check that the CLI reaches the Kates API and the Kates API reaches `krafter`.
+4. Check that the CLI reaches the Kates API and the Kates API reaches `krafter`.
 
    ```bash
    kates health
    ```
 
-   The banner reads `System Status: UP`, and the Kafka Cluster section shows the bootstrap address. `DEGRADED` means the Kates API can't reach Kafka: see [Kates Can't Connect to Kafka](12-deployment.md#kates-cant-connect-to-kafka). A refused connection means the forward from step 2 died: run `make ports` again.
+   The banner reads `System Status: UP`, and the Kafka Cluster section shows the bootstrap address. `DEGRADED` means the Kates API can't reach Kafka: see [Kates Can't Connect to Kafka](12-deployment.md#kates-cant-connect-to-kafka). A refused connection means the forward from step 3 died: run `kates ports` again.
 
-6. Run your first test, and wait for it to finish.
+5. Run your first test, and wait for it to finish.
 
    ```bash
    kates test create --type LOAD --records 100000 --wait
    ```
 
-   It prints `Test created successfully` and the run's ID, then exits 0 when the run is done. An error that starts `[401] Missing API key` means the context has no key: repeat steps 3 and 4. A run that ends `FAILED` prints the `kates test get <id>` command that shows why.
+   It prints `Test created successfully` and the run's ID, then exits 0 when the run is done. An error that starts `[401] Missing API key` means the context has no key: repeat step 3. A run that ends `FAILED` prints the `kates test get <id>` command that shows why.
 
-7. Read the run's report, with the ID that step 6 printed.
+6. Read the run's report, with the ID that step 5 printed.
 
    ```bash
    kates report show <id>
@@ -145,7 +135,7 @@ The Quick Start takes the first step: a LOAD run against `krafter` and its repor
 
 Every `/api` endpoint except `/api/health` needs the API key, which is why `kates ctx set` takes `--api-key` and why `kates health` works before the key is set.
 
-`kates ports` does steps 2 to 4 at once: it forwards the API to `localhost:8080`, creates a CLI context named `ports` with the key from the Secret and makes it current. With the [single-namespace topology](appendix-a-glossary.md#gl-single-namespace-topology) (option 1 in `make all`), the Secret lives in `kates-stack`: use `-n kates-stack` in step 3, and `KATES_NS=kates-stack make ports` in step 2. The [Deployment Guide](12-deployment.md) covers how `kates deploy` fills a context's key.
+To connect without `kates ports`, forward the API yourself and create a context with the key: `kubectl get secret kates-api-key -n kates -o jsonpath='{.data.api-key}' | base64 -d` reads it, and `kates ctx set <name> --url <url> --api-key <key>` stores it. With the [single-namespace topology](appendix-a-glossary.md#gl-single-namespace-topology) (`--topology single`), the Secret lives in `kates-stack`. The [Deployment Guide](12-deployment.md) covers how `kates deploy` fills a context's key.
 
 The report also has an SLA section, which reads `All SLA thresholds met` unless the run missed a threshold it carried. The payments targets are judged on the `produce` row of `kates test get <id>`: its throughput, and its P99, which times each write from send to acknowledgment. This first run carries no targets yet: Part II writes them into a scenario file whose gates check them.
 

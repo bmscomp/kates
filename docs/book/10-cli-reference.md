@@ -21,16 +21,27 @@ Example IDs, such as `3f8a2c1e`, have the eight hexadecimal characters the Kates
 
 ## Installation
 
-The CLI is one binary. Install it in one of three ways:
+The CLI is one binary, released for macOS and Linux on amd64 and arm64. Install a release in one of three ways:
 
-- With Homebrew, `brew install bmscomp/tap/kates`, which also installs cosign.
-- From the GitHub Release, by downloading the archive for your platform and putting `kates` on your `PATH`.
-- From a checkout of the repository, with `make cli-install`, which builds and installs it.
+- With Homebrew, on macOS or Linux: `brew install bmscomp/tap/kates`, which also installs cosign. `brew upgrade bmscomp/tap/kates` moves to a newer release.
+- With the release installer, which downloads the archive for your platform, checks it against the release's `checksums.txt` and puts `kates` in `/usr/local/bin` (`INSTALL_DIR` changes it):
+
+  ```bash
+  curl -fsSL \
+    https://raw.githubusercontent.com/bmscomp/kates/main/scripts/install-kates.sh \
+    | bash
+  ```
+
+- From the [GitHub Release](https://github.com/bmscomp/kates/releases/latest), by downloading `kates-<os>-<arch>.tar.gz` and putting the `kates` it holds on your `PATH`.
+
+Without Homebrew, install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) as well, so `kates deploy` can check the charts it pulls. To deploy the lab, the CLI also needs Docker, Kind, kubectl and Helm: [Prerequisites](12-deployment.md#prerequisites) in the Deployment Guide lists them.
+
+To work on Kates itself, build the CLI from a checkout of the repository with `make cli-install`, which builds and installs it.
 
 The [Version & Compatibility Matrix](appendix-d-versions.md) gives the versions each release pins.
 
 ::: {.callout-note title="Installing on macOS by hand"}
-A binary copied into place by hand keeps the `com.apple.provenance` and `com.apple.quarantine` attributes, and the kernel can kill it on start. `make cli-install` strips them and ad-hoc signs the binary. Otherwise run `sudo xattr -dr com.apple.provenance /usr/local/bin/kates`, the same for `com.apple.quarantine`, and `sudo codesign -f -s - /usr/local/bin/kates`.
+A binary copied into place by hand, from a release archive, keeps the `com.apple.provenance` and `com.apple.quarantine` attributes, and the kernel can kill it on start. `make cli-install` strips them and ad-hoc signs the binary. Otherwise run `sudo xattr -dr com.apple.provenance /usr/local/bin/kates`, the same for `com.apple.quarantine`, and `sudo codesign -f -s - /usr/local/bin/kates`.
 :::
 
 ## Where to Start {#common-workflows}

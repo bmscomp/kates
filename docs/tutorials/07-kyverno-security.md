@@ -6,9 +6,8 @@ This tutorial walks you through managing Kyverno admission policies and running 
 
 Before starting this tutorial, ensure:
 
-- The full stack is deployed (`make all` + `make kates`)
-- The CLI is installed and configured (`make cli-install` + `kates ctx set local --url http://localhost:30083`)
-- **Kyverno** is installed in the cluster (included automatically when deploying with `make all`)
+- The CLI is installed (`brew install bmscomp/tap/kates`) and connected (`kates ports`), as in [Tutorial 1](01-getting-started.md)
+- The full stack is deployed with Kyverno (`kates deploy --topology isolated --with-kyverno`)
 - Kyverno policies are enabled in the Helm values (`kyvernoPolicy.enabled=true`)
 
 Verify Kyverno is running:

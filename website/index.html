@@ -236,11 +236,10 @@ recovery     <span class="num">6.4</span> s      lost records  <span class="num"
             <code>kates deploy</code>.
           </p>
           <ol class="steps">
-            <li><b>Install the CLI</b> with Homebrew, and clone the repository for its <code>make</code> targets.</li>
-            <li><b>Create the lab</b>: a three-zone Kind cluster named <code>panda</code>, with the Kates API image loaded.</li>
-            <li><b>Deploy the stack</b> with a wizard, or <code>--dry-run</code> to see the plan first. It installs into kubectl&#39;s current context, so check that first.</li>
+            <li><b>Install the tools and the CLI</b> with Homebrew, on macOS or Linux. No clone of the repository needed.</li>
+            <li><b>Deploy the stack</b> with a wizard, or <code>--dry-run</code> to see the plan first. With no cluster reachable, it offers to create <code>panda</code>, a three-zone Kind cluster; otherwise it installs into kubectl&#39;s current context, so check that first.</li>
             <li><b>Open the ports</b>: the CLI context is configured with the API URL and key.</li>
-            <li><b>Run a test</b> and read the graded report. When you finish, <code>make clean</code> removes the lab.</li>
+            <li><b>Run a test</b> and read the graded report. When you finish, <code>kind delete cluster --name panda</code> removes the lab.</li>
           </ol>
           <div class="cta-row">
             <a class="btn btn-primary" href="https://github.com/bmscomp/kates#quick-start">Full quick start</a>
@@ -250,22 +249,16 @@ recovery     <span class="num">6.4</span> s      lost records  <span class="num"
         <div class="how-code">
           <div class="code-block">
             <div class="code-title">Terminal</div>
-<pre tabindex="0" aria-label="Install commands"><code><span class="c"># 1. The CLI (macOS or Linux)</span>
-brew install bmscomp/tap/kates
-git clone https://github.com/bmscomp/kates &amp;&amp; cd kates
-git checkout "$(git describe --tags --abbrev=0 --match 'v*')"
+<pre tabindex="0" aria-label="Install commands"><code><span class="c"># 1. Kind, kubectl, Helm and the CLI (macOS or Linux), with Docker running</span>
+brew install kind kubectl helm bmscomp/tap/kates
 
-<span class="c"># 2. A three-zone Kind cluster named panda</span>
-make cluster
-make kates-native
-
-<span class="c"># 3. The stack: Strimzi, Kafka, monitoring, chaos, Kates API</span>
+<span class="c"># 2. The stack on a new three-zone Kind cluster: Strimzi, Kafka, monitoring, chaos, Kates API</span>
 kates deploy
 
-<span class="c"># 4. Port-forwards and a ready CLI context</span>
+<span class="c"># 3. Port-forwards and a ready CLI context</span>
 kates ports
 
-<span class="c"># 5. A first load test, then a CI gate (exit 1 below the grade)</span>
+<span class="c"># 4. A first load test, then a CI gate (exit 1 below the grade)</span>
 kates test create --type LOAD --records 100000 --wait
 kates gate --min-grade C --records 100000</code></pre>
           </div>

@@ -86,32 +86,34 @@ docker compose down -v
 
 ### Multi-zone Kubernetes lab (Kind)
 
-This path builds the whole stack on a local Kind cluster. You need:
+This path builds the whole stack on a local Kind cluster, from the released CLI. It needs no clone of this repository. You need:
 
-- a clone of this repository, for the `make` targets, which are read relative to the working directory, so run every command from the repository root;
-- Docker (any daemon the `docker` CLI talks to), [Kind](https://kind.sigs.k8s.io/), `kubectl` and Helm, at the minimum versions in the book's [Prerequisites](docs/book/12-deployment.md#prerequisites);
+- Docker, running (Docker Desktop, OrbStack or Colima on macOS, Docker Engine on Linux), [Kind](https://kind.sigs.k8s.io/), `kubectl` and Helm, at the minimum versions in the book's [Prerequisites](docs/book/12-deployment.md#prerequisites);
 - about 16 GB of RAM, with at least 10 GB of it available to Docker, on macOS or Linux (amd64 or arm64).
 
 ```bash
-# 1. The CLI (macOS or Linux), and a checkout of the same release for the make targets
-brew install bmscomp/tap/kates
-git clone https://github.com/bmscomp/kates && cd kates
-git checkout "$(git describe --tags --abbrev=0 --match 'v*')"
+# 1. The tools and the CLI, with Homebrew on macOS or Linux (the kates formula also installs cosign)
+brew install kind kubectl helm bmscomp/tap/kates
 
-# 2. A three-zone Kind cluster named panda, and the release's native backend image loaded into it
-make cluster
-make kates-native
-
-# 3. The stack: a wizard on a terminal; --dry-run prints the plan and installs nothing
+# 2. The stack: with no cluster reachable, deploy offers to create panda, a three-zone Kind cluster;
+#    --dry-run prints the plan and installs nothing
 kates deploy
 
-# 4. Port-forwards in the background; a CLI context named ports, with the API URL and key, becomes current
+# 3. Port-forwards in the background; a CLI context named ports, with the API URL and key, becomes current
 kates ports
 
-# 5. A first load test
+# 4. A first load test
 kates health
 kates test create --type LOAD --records 100000 --wait
 ```
+
+Without Homebrew on Linux, install Docker Engine, Kind, kubectl and Helm from their own install pages, then the CLI with the release installer, which checks the download against the release's `checksums.txt` (`INSTALL_DIR` changes where it goes, `/usr/local/bin` by default):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bmscomp/kates/main/scripts/install-kates.sh | bash
+```
+
+Or download `kates-<os>-<arch>.tar.gz` from the [latest release](https://github.com/bmscomp/kates/releases/latest): it holds a single `kates` binary. Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) too, so `kates deploy` can check the signatures of the charts it pulls.
 
 Run a CI quality gate against a minimum grade:
 
@@ -122,11 +124,11 @@ kates gate --min-grade C --records 100000
 <details>
 <summary><strong>Notes on releases, cluster contexts, images and API keys</strong></summary>
 
-- **Release or `main`.** Homebrew, the release tarballs and `make kates-native` all give the latest release, so step 1 checks out that release's charts to match. Without Homebrew, download `kates-<os>-<arch>.tar.gz` from the [latest release](https://github.com/bmscomp/kates/releases/latest); it holds a single `kates` binary. The Homebrew `kates` installs the charts its release published, the same versions as the tag you check out; a `kates` built from source installs the checkout's charts. To run `main` instead, skip the `git checkout` and build both halves from the checkout: `make cli-install` for the CLI and `make kates-image-native-local` for the Kates API image (see [Building from source](#building-from-source)).
-- **Which cluster.** `kates deploy` installs into kubectl's current context. `make cluster` switches that to `kind-panda` only when it creates the cluster, so check `kubectl config current-context` and run `kubectl config use-context kind-panda` if needed. Before deploying, `kates deploy` probes every context in your kubeconfig: with none reachable it offers to create the Kind cluster, and with several it asks which one, but it does not switch to the one you pick. `-y` never prompts, so it fails where it would have asked.
-- **The backend image.** On Kind, `kates deploy` runs a local native image, `kates:native-local` if present and otherwise `kates:native`, and never pulls one. Without either, the deploy stops at the backend step, after Kafka and monitoring are installed. `make kates-native` pulls the published image of the release that `charts/kates/Chart.yaml` names, and compiles one only if the pull fails; it keeps a `kates:native` already on the machine, so run `docker rmi kates:native` first when you change releases. `make kates-image-native-local` compiles your working tree instead (several minutes, about 8 GB of Docker memory). Both load the image into `panda`, so create the cluster first.
+- **Release charts.** A released `kates`, from Homebrew, the installer or a tarball, installs the charts its release published to `oci://ghcr.io/bmscomp/charts`, at the versions of its tag, and checks their signatures. `brew upgrade bmscomp/tap/kates` moves to a newer release. To run `main` or a change of your own, build from a checkout instead (see [Building from source](#building-from-source)).
+- **Which cluster.** `kates deploy` installs into kubectl's current context. Before deploying, it probes every context in your kubeconfig: with none reachable it offers to create the Kind cluster `panda`, and with several it asks which one. The cluster it deploys to becomes kubectl's current context, and it prints the command that switches back. `-y` never prompts, so it fails where it would have asked.
+- **The backend image.** On Kind, `kates deploy` runs a local native image when one is in Docker or on the nodes, `kates:native-local` and then `kates:native`, which a source build leaves there. Without one, the nodes pull the published native image of the release.
 - **The API key.** Every `/api` call except `/api/health` needs the key from Secret `kates-api-key` in namespace `kates` (`kates-stack` with `--topology single`). `kates deploy` writes it into the active CLI context unless that context already holds a key kates did not put there, and `kates ports` into a context of its own, `ports`; a context you create yourself needs `--api-key`. Because `/api/health` is public, a green `kates health` does not prove the key works; `kates test list` does.
-- **`make all`** is an interactive wrapper: it creates the Kind cluster if no cluster is reachable, asks for a topology, runs `kates deploy` and then the `make ports` script, which uses the second port map below. With the single-namespace topology that script finds nothing to forward, so run `kates ports` afterwards. It uses the `kates` on your `PATH` and does not fetch the backend image, so do step 1 and `make cluster && make kates-native` first.
+- **`make all`**, in a checkout, is an interactive wrapper for contributors: it creates the Kind cluster if no cluster is reachable, asks for a topology, runs `kates deploy` with the checkout's charts and then the `make ports` script, which uses the second port map below.
 
 </details>
 
@@ -172,8 +174,8 @@ Kafka UI can only read: its Kafka user has Describe and Read ACLs, so the broker
 ### Tear down
 
 ```bash
-kates clean --force   # uninstall the stack and keep the cluster; without --force it asks first
-make destroy          # delete the Kind cluster panda (FORCE=1 skips the prompt)
+kates clean --force              # uninstall the stack and keep the cluster; without --force it asks first
+kind delete cluster --name panda # delete the Kind cluster panda
 ```
 
 `kates clean` works on kubectl's current context and names it before asking. It removes the Strimzi, Litmus, Prometheus Operator, cert-manager and Kyverno CRDs, and the cert-manager, Kyverno and Strimzi operators, unless objects of their kinds exist outside the namespaces it deletes; it keeps a namespace that also holds a Helm release it does not install. It lists what it keeps and why. Once you confirm, it stops the `kubectl port-forward` processes into the namespaces it deletes.
@@ -302,7 +304,7 @@ A published version is never pushed again, so its digest does not change.
 
 ## Building from source
 
-You need Go and a JDK at the versions in the [version matrix](docs/book/appendix-d-versions.md), plus Docker for images and integration tests. Under the default `GOTOOLCHAIN=auto`, Go downloads the toolchain that `cli/go.mod` names, and `./mvnw` downloads Maven.
+Build from source to work on Kates itself: to change the code, debug it or contribute. To use Kates, install the released CLI as the [quick start](#multi-zone-kubernetes-lab-kind) does. You need Go and a JDK at the versions in the [version matrix](docs/book/appendix-d-versions.md), plus Docker for images and integration tests. Under the default `GOTOOLCHAIN=auto`, Go downloads the toolchain that `cli/go.mod` names, and `./mvnw` downloads Maven.
 
 ```bash
 make cli-install               # Build the CLI with version info; installs to /usr/local/bin (CLI_INSTALL_DIR to change)

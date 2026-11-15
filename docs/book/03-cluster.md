@@ -320,7 +320,7 @@ The table gives the address and credentials of each service you open from your m
 | [Kafka UI](appendix-a-glossary.md#gl-kafka-ui) | http://localhost:30081 | none |
 | Kates API | http://localhost:30083 | [API key](appendix-a-glossary.md#gl-api-key) from the `kates-api-key` [Secret](appendix-a-glossary.md#gl-secret) |
 
-The `localhost` addresses are the local ends of the port-forwards that `make ports` starts in the background; `panda` does not publish its NodePorts on the host, so nothing answers on them until it runs. The [Quick Start](01-introduction.md#quick-start) in Introduction sets up the port-forward and a [CLI context](appendix-a-glossary.md#gl-cli-context) carrying the API key.
+The `localhost` addresses are the local ends of the port-forwards that `make ports` starts in the background from a checkout; `panda` does not publish its NodePorts on the host, so nothing answers on them until it runs. `kates ports`, which the [Quick Start](01-introduction.md#quick-start) in Introduction runs, forwards the Kates API to `localhost:8080` and Grafana to `localhost:3000` instead, and makes current a [CLI context](appendix-a-glossary.md#gl-cli-context) carrying the API key.
 
 ::: {.callout-important title="make ports looks only in the kafka namespace"}
 `make ports` looks for Grafana, and for Prometheus, which it forwards to `localhost:30090`, only in the `kafka` namespace, where `make monitoring` installs them. `kates deploy`, and so `make all`, installs the monitoring stack into the `monitoring` namespace, where `make ports` skips both with a "not deployed in namespace 'kafka'" line. On that install, run `MONITORING_NS=monitoring make ports` instead, or `kates ports`, which forwards Grafana to `localhost:3000` and Prometheus to `localhost:30090`.
