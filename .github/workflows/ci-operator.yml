@@ -207,7 +207,7 @@ jobs:
         run: |
           kubectl get pods -A
           kubectl -n kates logs deploy/kates -c kates --tail=50 || true
-          kubectl -n kates-operator logs deploy/kates-operator --tail=50 || true
+          kubectl -n kates-operator logs -l app.kubernetes.io/name=kates-operator --prefix --tail=50 || true
 
   gate:
     name: Gate · Operator

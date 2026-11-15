@@ -36,6 +36,19 @@ spec:
       {{- with .Values.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
+      {{- else }}
+      {{- if gt (int .Values.replicas) 1 }}
+      # Two on one node die with it, and the Lease waits out its node's loss.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "kates-operator.selectorLabels" . | nindent 20 }}
+      {{- end }}
       {{- end }}
       containers:
         - name: operator

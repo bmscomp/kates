@@ -298,4 +298,4 @@ The NetworkPolicy allows egress on 8080, 443 and 6443. A Kates URL on any other 
 
 Metrics are on `:8080/metrics` under `kates_operator_`, and `monitoring.enabled` renders a PodMonitor. `/readyz` fails on an unreachable API server or a stale served CRD, and it reports the Lease and any refused Kafka namespace in its body without failing on them.
 
-One pod holds the Lease `kates-operator` in the release namespace. `replicas: 2` only shortens the gap after a crash, to between 5 and 15 seconds.
+One pod holds the Lease `kates-operator` in the release namespace. The chart runs two, on different nodes where it can (unless `affinity` is set), so the second takes the Lease over within 5 to 15 seconds when the first or its node is lost. With `replicas: 1`, a lost node holds everything until a new pod is scheduled and started.
