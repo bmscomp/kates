@@ -97,6 +97,52 @@ class QuorumMemberTest {
     }
 
     @Test
+    void aClosedServerSaysSo() throws Exception {
+        TestPki pki = new TestPki(tmp.resolve("pki"));
+        List<String> peers = peers(1);
+        QuorumMember member = QuorumMember.start(settings(peers, 0, certificates(pki, 1)[0]));
+        started.add(member);
+        assertTrue(member.serving(), "a started member serves");
+
+        member.closeServer();
+
+        assertEquals(org.apache.ratis.util.LifeCycle.State.CLOSED, member.state());
+        assertFalse(member.serving(), "a member whose server closed does not serve");
+    }
+
+    @Test
+    void aMemberWhoseServerClosesRejoinsAsAnotherTerm() throws Exception {
+        TestPki pki = new TestPki(tmp.resolve("pki"));
+        List<String> peers = peers(3);
+        Path[][] files = certificates(pki, 3);
+        for (int i = 0; i < 3; i++) {
+            started.add(QuorumMember.start(settings(peers, i, files[i])));
+        }
+        QuorumMember first = await(() -> soleLeader(started));
+        long term = first.term();
+        long applied = first.appliedIndex();
+        for (QuorumMember member : started) {
+            await(() -> member.appliedIndex() >= applied ? member : null);
+        }
+
+        // As Ratis does past raft.server.close.threshold, then a new server on the same disk.
+        first.closeServer();
+        int index = Integer.parseInt(first.memberId().substring(1));
+        QuorumMember again = QuorumMember.start(settings(peers, index, files[index]));
+        started.remove(first);
+        first.close();
+        started.add(again);
+
+        QuorumMember leader = await(() -> {
+            QuorumMember sole = soleLeader(started);
+            return sole != null && sole.term() > term ? sole : null;
+        });
+        assertTrue(leader.term() > term, "a later term leads");
+        assertTrue(again.serving(), "the restarted member serves");
+        await(() -> leader.memberId().equals(again.leaderId()) ? again : null);
+    }
+
+    @Test
     void aMemberWithAnotherCasCertificateCannotJoin() throws Exception {
         TestPki pki = new TestPki(tmp.resolve("pki"));
         TestPki other = new TestPki(tmp.resolve("other"));

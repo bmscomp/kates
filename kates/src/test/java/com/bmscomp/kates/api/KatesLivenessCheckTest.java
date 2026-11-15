@@ -3,12 +3,17 @@ package com.bmscomp.kates.api;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Optional;
+
 import org.eclipse.microprofile.health.HealthCheckResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import com.bmscomp.kates.engine.TestOrchestrator;
+import com.bmscomp.kates.quorum.Quorum;
 
 /**
  * Liveness decides whether the kubelet KILLS the pod, so it fails only on
@@ -19,6 +24,7 @@ class KatesLivenessCheckTest {
 
     private KatesLivenessCheck check;
     private TestOrchestrator orchestrator;
+    private Quorum quorum;
 
     @BeforeEach
     void setUp() {
@@ -27,6 +33,36 @@ class KatesLivenessCheckTest {
         check.orchestrator = orchestrator;
         when(orchestrator.activeTestCount()).thenReturn(2);
         when(orchestrator.maxConcurrentTests()).thenReturn(3);
+        quorum = mock(Quorum.class);
+        check.quorum = quorum;
+        when(quorum.notServingSince()).thenReturn(Optional.empty());
+        check.livenessAfter = Duration.ofSeconds(30);
+        check.minFreeHeapMb = 1;
+    }
+
+    @Test
+    @DisplayName("a quorum member whose Ratis server stays closed is restarted by the kubelet")
+    void downWhenTheQuorumServerStaysClosed() {
+        when(quorum.notServingSince()).thenReturn(Optional.of(Instant.now().minusSeconds(31)));
+
+        HealthCheckResponse response = check.call();
+
+        assertEquals(HealthCheckResponse.Status.DOWN, response.getStatus());
+        assertTrue(((Number) response.getData().orElseThrow().get("quorumNotServingSec")).longValue() >= 31);
+    }
+
+    @Test
+    @DisplayName("alive while the member is starting its server again")
+    void upWhileTheServerIsBeingRestarted() {
+        when(quorum.notServingSince()).thenReturn(Optional.of(Instant.now().minusSeconds(5)));
+
+        assertEquals(HealthCheckResponse.Status.UP, check.call().getStatus());
+    }
+
+    @Test
+    @DisplayName("alive with no quorum")
+    void upWithNoQuorum() {
+        assertEquals(HealthCheckResponse.Status.UP, check.call().getStatus());
     }
 
     @Test

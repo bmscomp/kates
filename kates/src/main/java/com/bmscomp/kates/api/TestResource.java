@@ -180,6 +180,9 @@ public class TestResource {
                     || failure instanceof com.bmscomp.kates.engine.DrainingException) {
                 answer.header("Retry-After", RETRY_AFTER_SECONDS);
             }
+            if (GlobalExceptionMapper.isDatabaseUnavailable(failure)) {
+                answer.header("Retry-After", GlobalExceptionMapper.DATABASE_RETRY_AFTER);
+            }
             return answer.build();
         }
         TestRun run = result.asSuccess().orElseThrow();
@@ -225,6 +228,10 @@ public class TestResource {
         }
         if (failure instanceof com.bmscomp.kates.engine.DrainingException) {
             return ApiError.of(503, "Service Unavailable", failure.getMessage());
+        }
+        if (GlobalExceptionMapper.isDatabaseUnavailable(failure)) {
+            LOG.warnf("A test run did not start: its database is unreachable: %s", failure);
+            return ApiError.of(503, "Service Unavailable", GlobalExceptionMapper.DATABASE_UNAVAILABLE);
         }
         if (failure instanceof com.bmscomp.kates.engine.InvalidTestSpecException invalid) {
             return ApiError.validationFailed(invalid.getMessage(), invalid.getFieldErrors());

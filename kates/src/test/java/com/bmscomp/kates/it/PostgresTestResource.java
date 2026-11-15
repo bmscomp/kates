@@ -9,6 +9,12 @@ import org.testcontainers.containers.PostgreSQLContainer;
 public class PostgresTestResource implements QuarkusTestResourceLifecycleManager {
 
     private PostgreSQLContainer<?> postgres;
+    private static volatile PostgreSQLContainer<?> current;
+
+    /** The container of the class running now, for a test that pauses it. */
+    static PostgreSQLContainer<?> container() {
+        return current;
+    }
 
     @Override
     public Map<String, String> start() {
@@ -17,6 +23,7 @@ public class PostgresTestResource implements QuarkusTestResourceLifecycleManager
                 .withUsername("kates")
                 .withPassword("kates");
         postgres.start();
+        current = postgres;
         return Map.of(
                 "quarkus.datasource.jdbc.url", postgres.getJdbcUrl(),
                 "quarkus.datasource.username", postgres.getUsername(),

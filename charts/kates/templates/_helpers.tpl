@@ -65,8 +65,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if .Values.postgresql.enabled -}}
 jdbc:postgresql://{{ include "kates.postgresql.fullname" . }}.{{ .Release.Namespace }}.svc:5432/{{ .Values.postgresql.auth.database }}
 {{- else if .Values.cnpg.enabled -}}
-{{- /* Timeouts: a connection to a dead node otherwise hangs on TCP for minutes after a failover. */ -}}
-jdbc:postgresql://{{ include "kates.dbHost" . }}:5432/{{ .Values.externalDatabase.database }}?socketTimeout=60&tcpKeepAlive=true&connectTimeout=5
+{{- /* Timeouts: a connection to a dead node otherwise hangs on TCP for minutes after a failover.
+     socketTimeout matches the backend's own (application.properties), which a URL parameter overrides. */ -}}
+jdbc:postgresql://{{ include "kates.dbHost" . }}:5432/{{ .Values.externalDatabase.database }}?socketTimeout=30&tcpKeepAlive=true&connectTimeout=5
 {{- else -}}
 jdbc:postgresql://{{ .Values.externalDatabase.host }}:{{ .Values.externalDatabase.port | default 5432 }}/{{ .Values.externalDatabase.database }}
 {{- end -}}
