@@ -46,6 +46,9 @@ public class DisruptionScheduleResource {
     @Inject
     ObjectMapper objectMapper;
 
+    @Inject
+    com.bmscomp.kates.schedule.ScheduleFirings firings;
+
     @GET
     @Operation(summary = "List disruption schedules")
     public Response listSchedules(
@@ -154,6 +157,8 @@ public class DisruptionScheduleResource {
                 return badCron.get();
             }
         }
+        boolean passOver = (request.enabled == Boolean.TRUE && !entity.isEnabled())
+                || (request.cronExpression != null && !request.cronExpression.equals(entity.getCronExpression()));
         if (request.name != null) entity.setName(request.name);
         if (request.cronExpression != null) entity.setCronExpression(request.cronExpression);
         if (request.enabled != null) entity.setEnabled(request.enabled);
@@ -168,6 +173,10 @@ public class DisruptionScheduleResource {
             }
         }
         em.merge(entity);
+        if (passOver) {
+            // Turning a schedule on or re-timing it passes over the due times before now.
+            firings.claim(com.bmscomp.kates.schedule.ScheduleFirings.Kind.DISRUPTIONS, id, java.time.Instant.now());
+        }
         return Response.ok(entity).build();
     }
 

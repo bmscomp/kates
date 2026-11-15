@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
@@ -238,7 +240,11 @@ class DisruptionReportPersistenceTest {
                 .extract()
                 .path("id");
         try {
-            scheduler.evaluateSchedules();
+            // Two members' ticks after the next minute: the due time runs once.
+            java.time.Instant late = java.time.Instant.now().plusSeconds(61);
+            scheduler.evaluate(late);
+            scheduler.evaluate(late.plusSeconds(10));
+            verify(orchestrator, times(1)).execute(any(), any());
 
             String runId = given().when()
                     .get("/api/disruptions/schedules")

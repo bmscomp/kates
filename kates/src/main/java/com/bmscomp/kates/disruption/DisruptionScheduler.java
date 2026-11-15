@@ -1,8 +1,6 @@
 package com.bmscomp.kates.disruption;
 
 import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.UUID;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -13,8 +11,6 @@ import jakarta.transaction.Transactional;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.scheduler.Scheduled;
 import org.jboss.logging.Logger;
-
-import com.bmscomp.kates.schedule.TestScheduler;
 
 /**
  * Cron-based scheduler for recurring disruption tests.
@@ -48,39 +44,41 @@ public class DisruptionScheduler {
     ObjectMapper objectMapper;
 
     @jakarta.inject.Inject
-    com.bmscomp.kates.service.SchedulerLeaseService leases;
+    com.bmscomp.kates.schedule.ScheduleFirings firings;
 
     @jakarta.inject.Inject
     com.bmscomp.kates.quorum.Quorum quorum;
 
-    @Scheduled(every = "60s", identity = "kates-disruption-schedule-evaluator")
+    @Scheduled(every = "10s", identity = "kates-disruption-schedule-evaluator")
     void evaluateSchedules() {
-        // A draining instance fires nothing, and leaves the lease to one that may; so does a member
-        // that does not lead its quorum.
+        evaluate(Instant.now());
+    }
+
+    /**
+     * One tick at {@code now}; package-private, so a test ticks at the time it
+     * needs. Each due time runs once, claimed as TestScheduler claims a test's.
+     */
+    void evaluate(Instant now) {
+        // A draining instance fires nothing; nor does a member that does not lead its quorum.
         if (concurrencyGuard.isDraining() || !quorum.acceptsWrites()) {
-            return;
-        }
-        // Only the lease holder may trigger disruptions — with replicas > 1
-        // each schedule would otherwise inject faults once per replica.
-        if (!leases.tryAcquire("disruption-scheduler", java.time.Duration.ofSeconds(55))) {
             return;
         }
         List<DisruptionScheduleEntity> schedules = em.createQuery(
                         "SELECT s FROM DisruptionScheduleEntity s WHERE s.enabled = true",
                         DisruptionScheduleEntity.class)
                 .getResultList();
-
-        if (schedules.isEmpty()) return;
-
-        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
         LOG.debugf("Evaluating %d disruption schedules at %s", schedules.size(), now);
 
         for (DisruptionScheduleEntity schedule : schedules) {
             try {
-                if (TestScheduler.matchesCron(schedule.getCronExpression(), now)) {
-                    LOG.info("Disruption schedule '" + schedule.getName() + "' triggered at " + now);
-                    executeSchedule(schedule);
-                }
+                Instant since = schedule.getLastDue() != null ? schedule.getLastDue() : schedule.getCreatedAt();
+                com.bmscomp.kates.schedule.DueTimes.toFire(schedule.getCronExpression(), since, now)
+                        .filter(due -> firings.claim(
+                                com.bmscomp.kates.schedule.ScheduleFirings.Kind.DISRUPTIONS, schedule.getId(), due))
+                        .ifPresent(due -> {
+                            LOG.info("Disruption schedule '" + schedule.getName() + "' triggered for " + due);
+                            executeSchedule(schedule);
+                        });
             } catch (Exception e) {
                 LOG.warn("Failed to evaluate disruption schedule '" + schedule.getName() + "'", e);
             }
