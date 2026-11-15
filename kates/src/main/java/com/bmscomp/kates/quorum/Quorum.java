@@ -158,6 +158,10 @@ public class Quorum {
         LOG.warnf(
                 "quorum member %s: Ratis server %s, starting it again from its disk",
                 current.memberId(), current.state());
+        // Ratis closes a paused server without telling its state machine the lead changed.
+        if (recoveredTerm >= 0) {
+            lostLead(recoveredTerm);
+        }
         try {
             current.close();
         } catch (IOException | RuntimeException e) {
@@ -205,14 +209,16 @@ public class Quorum {
     }
 
     /**
-     * Throws unless this member may write now, as {@link #acceptsWrites()} decides: called right
-     * before a fault goes into Kubernetes, so a member that stopped leading since its plan started
-     * injects nothing.
+     * Throws unless this member may write now, as {@link #acceptsWrites()} decides, and returns the
+     * term it confirmed: called right before a fault goes into Kubernetes, so a member that stopped
+     * leading since its plan started injects nothing, and what it writes carries that term, not one
+     * read later.
      */
-    public void requireWrites() {
+    public long requireWrites() {
         if (!acceptsWrites()) {
             throw new com.bmscomp.kates.engine.NotLeaderException(leaderId());
         }
+        return term();
     }
 
     /** The leader this member knows of, or null with no quorum or during an election. */

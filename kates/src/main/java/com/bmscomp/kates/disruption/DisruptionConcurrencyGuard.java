@@ -85,7 +85,8 @@ public class DisruptionConcurrencyGuard {
      */
     public void release(String target, String token) {
         Long since = acquiredAt.remove(token);
-        if (since != null && token.equals(activeByTarget.get(target))) {
+        // A holder that no longer leads gives nothing back: the next leader restores by term.
+        if (since != null && token.equals(activeByTarget.get(target)) && quorum.acceptsWrites()) {
             restoreScaleDownsSince(since);
         }
         activeByTarget.remove(target, token);

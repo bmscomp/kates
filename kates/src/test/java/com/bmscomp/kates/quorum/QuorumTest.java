@@ -168,9 +168,42 @@ class QuorumTest {
             quorum.key = Optional.of(files[1].toString());
             quorum.ca = Optional.of(files[2].toString());
             quorum.takeover = recorder(quorum, failing);
+            quorum.lost = lostRecorder(quorum);
             quorum.start(null);
             members.add(quorum);
         }
+    }
+
+    /** Each LeadershipLost any member fired. */
+    private final List<String> losses = new CopyOnWriteArrayList<>();
+
+    @SuppressWarnings("unchecked")
+    private Event<LeadershipLost> lostRecorder(Quorum quorum) {
+        Event<LeadershipLost> event = mock(Event.class);
+        doAnswer(invocation -> {
+                    losses.add(quorum.memberId() + "@" + invocation.<LeadershipLost>getArgument(0).term());
+                    return null;
+                })
+                .when(event)
+                .fire(any());
+        return event;
+    }
+
+    @Test
+    void aLeaderWhoseServerClosedSaysItLostTheLead() throws Exception {
+        start(1, new AtomicBoolean(false));
+        Quorum quorum = members.get(0);
+        soleWriter(members);
+        long term = quorum.term();
+
+        quorum.member().closeServer();
+        quorum.takeOver();
+
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (losses.isEmpty() && System.nanoTime() < deadline) {
+            TimeUnit.MILLISECONDS.sleep(50);
+        }
+        assertEquals(List.of("m0@" + term), losses, "its runs are stopped like any deposed leader's");
     }
 
     @SuppressWarnings("unchecked")

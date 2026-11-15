@@ -176,7 +176,7 @@ class LitmusChaosProviderTest {
         install("disk-fill");
         provider.resultPollIntervalMs = 20;
         com.bmscomp.kates.quorum.Quorum quorum = org.mockito.Mockito.mock(com.bmscomp.kates.quorum.Quorum.class);
-        when(quorum.term()).thenReturn(7L);
+        when(quorum.requireWrites()).thenReturn(7L);
         provider.quorum = quorum;
         FaultSpec spec = FaultSpec.builder("fill")
                 .targetBrokerId(2)

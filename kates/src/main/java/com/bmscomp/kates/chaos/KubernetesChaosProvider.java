@@ -108,8 +108,8 @@ public class KubernetesChaosProvider implements ChaosProvider {
      * bound. shortcut: a fault the live leader leaves after a crashed plan thread lives up to that
      * bound (2 h); upgrade to the plan's own bound if that is seen.
      */
-    Map<String, String> marks() {
-        return FaultMarks.of(quorum.term(), Instant.now().plusMillis(maxDurationMs));
+    Map<String, String> marks(long term) {
+        return FaultMarks.of(term, Instant.now().plusMillis(maxDurationMs));
     }
 
     @Override
@@ -132,13 +132,13 @@ public class KubernetesChaosProvider implements ChaosProvider {
      * error that said nothing about it, and a few faults per plan are no load
      * to shed from the API server.
      */
-    private void applyDisruption(FaultSpec spec, String engineName) throws Exception {
+    private void applyDisruption(FaultSpec spec, String engineName, Map<String, String> marks) throws Exception {
         switch (spec.disruptionType()) {
             case POD_KILL -> executePodKill(spec);
             case POD_DELETE -> executePodDelete(spec);
-            case NETWORK_PARTITION -> executeNetworkPartition(spec, engineName);
+            case NETWORK_PARTITION -> executeNetworkPartition(spec, engineName, marks);
             case ROLLING_RESTART -> executeRollingRestart(spec);
-            case SCALE_DOWN -> executeScaleDown(spec);
+            case SCALE_DOWN -> executeScaleDown(spec, marks);
             case LEADER_ELECTION -> executePodKill(spec);
             case CPU_STRESS -> executeCpuStress(spec, engineName);
             case IO_STRESS -> executeIoStress(spec, engineName);
@@ -174,10 +174,10 @@ public class KubernetesChaosProvider implements ChaosProvider {
                         }
                         // Confirmed after the delay, right before any write: a member that stopped
                         // leading since the plan started writes nothing (J4 F1).
-                        quorum.requireWrites();
+                        Map<String, String> marks = marks(quorum.requireWrites());
                         // The fault goes in from here, once its delay is over.
                         onInject.accept(startNanos);
-                        applyDisruption(spec, engineName);
+                        applyDisruption(spec, engineName, marks);
                         return ChaosOutcome.success(
                                 engineName, spec.experimentName(), start, Instant.now(), startNanos, null, null, null);
 
@@ -238,11 +238,12 @@ public class KubernetesChaosProvider implements ChaosProvider {
      * failed or the wait was interrupted: a NetworkPolicy left behind cuts the
      * pod off until rollback, which a failed fault does not get.
      */
-    private void executeNetworkPartition(FaultSpec spec, String engineName) throws InterruptedException {
+    private void executeNetworkPartition(FaultSpec spec, String engineName, Map<String, String> marks)
+            throws InterruptedException {
         Exception failure = null;
         try {
             for (String podName : PodTargets.resolve(client, spec)) {
-                isolatePod(spec, podName);
+                isolatePod(spec, podName, marks);
             }
             // The chaos limits refuse a partition without a duration; one that
             // gets here anyway is a blip.
@@ -281,7 +282,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
         }
     }
 
-    private void isolatePod(FaultSpec spec, String podName) {
+    private void isolatePod(FaultSpec spec, String podName, Map<String, String> marks) {
         String policyName = "kates-netpol-" + podName;
 
         LOG.info("NETWORK_PARTITION: applying deny NetworkPolicy for " + podName);
@@ -301,7 +302,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
                 .withName(policyName)
                 .withNamespace(spec.targetNamespace())
                 .addToLabels("managed-by", "kates")
-                .addToAnnotations(marks())
+                .addToAnnotations(marks)
                 .endMetadata()
                 .withNewSpec()
                 .withNewPodSelector()
@@ -463,7 +464,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
      * not run by Strimzi) is scaled down by one, but never below one replica.
      * Each records its original replica count for rollback.
      */
-    private void executeScaleDown(FaultSpec spec) throws InterruptedException {
+    private void executeScaleDown(FaultSpec spec, Map<String, String> marks) throws InterruptedException {
         ScaleDownTargets.Targets targets = ScaleDownTargets.resolve(client, spec);
         targets.skipped().forEach(reason -> LOG.info("SCALE_DOWN: skipping, " + reason));
         if (targets.isEmpty()) {
@@ -472,11 +473,11 @@ public class KubernetesChaosProvider implements ChaosProvider {
         }
 
         if (!targets.pools().isEmpty()) {
-            new NodePoolScaleDown(client, scalePollIntervalMs, marks()).run(spec, targets.pools());
+            new NodePoolScaleDown(client, scalePollIntervalMs, marks).run(spec, targets.pools());
         }
         int scaled = 0;
         for (String name : targets.statefulSets()) {
-            if (scaleDownStatefulSet(spec.targetNamespace(), name)) {
+            if (scaleDownStatefulSet(spec.targetNamespace(), name, marks)) {
                 scaled++;
             }
         }
@@ -486,7 +487,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
         }
     }
 
-    private boolean scaleDownStatefulSet(String namespace, String name) {
+    private boolean scaleDownStatefulSet(String namespace, String name, Map<String, String> marks) {
         StatefulSet ss = client.apps()
                 .statefulSets()
                 .inNamespace(namespace)
@@ -510,7 +511,6 @@ public class KubernetesChaosProvider implements ChaosProvider {
         boolean alreadySnapshotted = annotations != null && annotations.containsKey(ORIGINAL_REPLICAS_ANNOTATION);
         // The marks are written every time: a snapshot an earlier plan left carries an older term,
         // which the reconciler would take for a dead leader's fault and undo under this one.
-        Map<String, String> marks = marks();
         String scaledDownAt = String.valueOf(System.currentTimeMillis());
         client.apps()
                 .statefulSets()

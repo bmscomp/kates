@@ -999,7 +999,9 @@ public class KubernetesChaosProviderTest {
     private static com.bmscomp.kates.quorum.Quorum quorumAt(long term, boolean leads) {
         com.bmscomp.kates.quorum.Quorum quorum = org.mockito.Mockito.mock(com.bmscomp.kates.quorum.Quorum.class);
         org.mockito.Mockito.when(quorum.term()).thenReturn(term);
-        if (!leads) {
+        if (leads) {
+            org.mockito.Mockito.when(quorum.requireWrites()).thenReturn(term);
+        } else {
             org.mockito.Mockito.doThrow(new com.bmscomp.kates.engine.NotLeaderException("m1"))
                     .when(quorum)
                     .requireWrites();
@@ -1088,5 +1090,27 @@ public class KubernetesChaosProviderTest {
             TimeUnit.MILLISECONDS.sleep(100);
         }
         throw new AssertionError("not within 5 s");
+    }
+
+    @Test
+    void aFaultIsMarkedWithTheTermItWasConfirmedIn() throws Exception {
+        createZonedBrokers();
+        // Confirmed in term 7; by the time the object is built the member has heard of term 8.
+        provider.quorum = quorumAt(7, true);
+        org.mockito.Mockito.when(provider.quorum.term()).thenReturn(8L);
+        FaultSpec spec = FaultSpec.builder("split")
+                .targetPod("krafter-brokers-0")
+                .disruptionType(DisruptionType.NETWORK_PARTITION)
+                .chaosDurationSec(30)
+                .build();
+
+        provider.triggerFault(spec);
+        var policy = await(() -> client.network()
+                .networkPolicies()
+                .inNamespace("kafka")
+                .withName("kates-netpol-krafter-brokers-0")
+                .get());
+
+        assertMarked(policy.getMetadata().getAnnotations(), "7");
     }
 }

@@ -69,7 +69,6 @@ class TestOrchestratorQuorumTest {
         orchestrator.recoverPreviousLeaders(new LeadershipAcquired(4, Instant.now()));
 
         assertFailedWith(previous, "when the member running it stopped leading");
-        verify(engine.repository, never()).findByStatusAndMember(any(), anyString(), eq(true));
     }
 
     @Test
@@ -101,6 +100,22 @@ class TestOrchestratorQuorumTest {
         assertTrue(engine.backend.stopped.containsAll(InMemoryEngine.taskIds(first)), "first run's tasks stopped");
         assertTrue(engine.backend.stopped.containsAll(InMemoryEngine.taskIds(second)), "second run's tasks stopped");
         engine.assertEverySlotFree();
+    }
+
+    @Test
+    @DisplayName("a member that leads again fails its own runs it stopped when it lost the lead")
+    void aRegainedLeaderFailsItsOwnRunsItNoLongerRuns() {
+        String live = engine.startRunning();
+        String stopped = engine.storeEnded(TaskStatus.RUNNING);
+        when(engine.quorum.memberId()).thenReturn("kates-1");
+        when(engine.repository.findByStatusAndMember(any(), eq("kates-1"), eq(false))).thenReturn(List.of());
+        when(engine.repository.findByStatusAndMember(any(), eq("kates-1"), eq(true)))
+                .thenReturn(List.of(engine.rows.get(live), engine.rows.get(stopped)));
+
+        orchestrator.recoverPreviousLeaders();
+
+        assertFailedWith(stopped, "when the member running it stopped leading");
+        assertEquals(TaskStatus.RUNNING, engine.rows.get(live).getStatus(), "a run this member still runs is left");
     }
 
     private void assertFailedWith(String id, String reason) {

@@ -185,8 +185,10 @@ class DisruptionOrphanReconcilerTest {
                         .withNamespace(namespace)
                         .withLabels(Map.of("managed-by", "kates"))
                         .withAnnotations(Map.of(
-                                com.bmscomp.kates.chaos.FaultMarks.TERM, term,
-                                com.bmscomp.kates.chaos.FaultMarks.DEADLINE, Instant.now().plusSeconds(3600).toString()))
+                                com.bmscomp.kates.chaos.FaultMarks.TERM,
+                                term,
+                                com.bmscomp.kates.chaos.FaultMarks.DEADLINE,
+                                Instant.now().plusSeconds(3600).toString()))
                         .endMetadata()
                         .build())
                 .create();
@@ -221,7 +223,7 @@ class DisruptionOrphanReconcilerTest {
     }
 
     @Test
-    void anOlderTermsEngineGoesAndItsNodeIsUncordoned() {
+    void anOlderTermsEngineGoes() {
         client.nodes()
                 .resource(new io.fabric8.kubernetes.api.model.NodeBuilder()
                         .withNewMetadata()
@@ -259,8 +261,6 @@ class DisruptionOrphanReconcilerTest {
                         .inAnyNamespace()
                         .list()
                         .getItems());
-        assertTrue(!Boolean.TRUE.equals(client.nodes().withName("n1").get().getSpec().getUnschedulable()),
-                "the drained node is schedulable again");
     }
 
     @Test
@@ -307,12 +307,14 @@ class DisruptionOrphanReconcilerTest {
 
         reconciler.periodic();
         org.mockito.Mockito.verify(reconciler.repository, org.mockito.Mockito.never())
-                .findByStatusCreatedBefore(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+                .findByStatusCreatedBefore(
+                        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
 
         reconciler.periodic();
         assertNull(get("kafka", "kates-netpol-stuck"));
         org.mockito.Mockito.verify(reconciler.repository)
-                .findByStatusCreatedBefore(org.mockito.ArgumentMatchers.eq("RUNNING"), org.mockito.ArgumentMatchers.any());
+                .findByStatusCreatedBefore(
+                        org.mockito.ArgumentMatchers.eq("RUNNING"), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -336,6 +338,42 @@ class DisruptionOrphanReconcilerTest {
 
         reconciler.periodic();
 
-        assertNotNull(get("kafka", "kates-netpol-mine"), "the periodic pass of a lone instance judges by deadline only");
+        assertNotNull(
+                get("kafka", "kates-netpol-mine"), "the periodic pass of a lone instance judges by deadline only");
+    }
+
+    @Test
+    void aFailedListLeavesReportsRunning() {
+        // The Kubernetes API refuses the list: whether a partition is still in is unknown.
+        server.expect()
+                .get()
+                .withPath("/apis/networking.k8s.io/v1/networkpolicies?labelSelector=managed-by%3Dkates")
+                .andReturn(403, "forbidden")
+                .once();
+        DisruptionOrphanReconciler reconciler = leaderAt(4);
+
+        reconciler.periodic();
+
+        org.mockito.Mockito.verify(reconciler.repository, org.mockito.Mockito.never())
+                .findByStatusCreatedBefore(
+                        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void aPassRemovesFaultsBeforeAskingTheDatabase() {
+        marked("kafka", "kates-netpol-late", "3");
+        DisruptionOrphanReconciler reconciler = leaderAt(4);
+        reconciler.orchestrator = org.mockito.Mockito.mock(com.bmscomp.kates.engine.TestOrchestrator.class);
+        java.util.concurrent.atomic.AtomicBoolean goneFirst = new java.util.concurrent.atomic.AtomicBoolean();
+        org.mockito.Mockito.doAnswer(invocation -> {
+                    goneFirst.set(get("kafka", "kates-netpol-late") == null);
+                    return null;
+                })
+                .when(reconciler.orchestrator)
+                .recoverPreviousLeaders();
+
+        reconciler.periodic();
+
+        assertTrue(goneFirst.get(), "a database that hangs must not hold the partition");
     }
 }

@@ -177,6 +177,14 @@ public class TestOrchestrator {
                 repository.findByStatusAndMember(ORPHAN_STATUSES, quorum.memberId(), false),
                 "when the member running it stopped leading",
                 "takeover");
+        // Its own too, once it no longer runs them: it settled them when it lost the lead, and
+        // leads again (J4 review). A run it still runs has its handles.
+        recover(
+                repository.findByStatusAndMember(ORPHAN_STATUSES, quorum.memberId(), true).stream()
+                        .filter(run -> !activeHandles.containsKey(run.getId()))
+                        .toList(),
+                "when the member running it stopped leading",
+                "takeover");
     }
 
     /**

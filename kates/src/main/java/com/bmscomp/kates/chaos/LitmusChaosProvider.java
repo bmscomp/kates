@@ -125,9 +125,8 @@ public class LitmusChaosProvider implements ChaosProvider {
             String resultName = engineName + "-" + experimentName;
 
             // Confirmed right before the engine exists: a member that stopped leading writes nothing.
-            quorum.requireWrites();
-            engine.getMetadata()
-                    .setAnnotations(FaultMarks.of(quorum.term(), Instant.now().plusMillis(maxDurationMs)));
+            long term = quorum.requireWrites();
+            engine.getMetadata().setAnnotations(FaultMarks.of(term, Instant.now().plusMillis(maxDurationMs)));
 
             // Once the pods are picked, before the engine that injects the fault exists.
             onInject.accept(startNanos);

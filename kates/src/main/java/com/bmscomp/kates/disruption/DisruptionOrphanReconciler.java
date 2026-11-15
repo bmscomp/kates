@@ -11,7 +11,6 @@ import jakarta.inject.Inject;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.fabric8.kubernetes.api.model.NodeBuilder;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicy;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -140,18 +139,19 @@ public class DisruptionOrphanReconciler {
     /** One pass: with {@code startedAt}, also every Kates fault made before it, as at start or takeover. */
     private synchronized void reconcile(Instant startedAt) {
         undoFailed = false;
-        if (orchestrator != null) {
-            try {
-                // Retried here every pass: a takeover with PostgreSQL down did not get to it (J4 F6).
-                orchestrator.recoverPreviousLeaders();
-            } catch (RuntimeException e) {
-                LOG.debugf("The previous leader's runs are not recovered yet: %s", e.getMessage());
-            }
-        }
         try {
             int policies = reconcileNetworkPolicies(startedAt);
             int engines = reconcileChaosEngines(startedAt);
             ScaleDownSnapshots.Restored scaled = reconcileScaleDowns(startedAt);
+            if (orchestrator != null) {
+                try {
+                    // After the faults: a database that hangs must not hold a partition (J4 review).
+                    // Retried every pass, since a takeover with PostgreSQL down did not get to it.
+                    orchestrator.recoverPreviousLeaders();
+                } catch (RuntimeException e) {
+                    LOG.debugf("The previous leader's runs are not recovered yet: %s", e.getMessage());
+                }
+            }
             // A report says INTERRUPTED only once its faults are out (s08b reported it with one in).
             int reports = undoFailed ? 0 : markInterruptedReports(startedAt != null ? startedAt : since);
             if (policies + engines + scaled.total() + reports > 0) {
@@ -198,8 +198,8 @@ public class DisruptionOrphanReconciler {
     }
 
     /**
-     * Deletes the Kates ChaosEngines no live fault owns, in every namespace, and uncordons the node
-     * a node-drain engine named: Kates does not cordon, Litmus does, and nothing else would undo it.
+     * Deletes the Kates ChaosEngines no live fault owns, in every namespace, as Litmus cleanup does
+     * in-process. A node-drain's cordon is Litmus' to revert: Kates may not patch nodes.
      */
     int reconcileChaosEngines(Instant startedAt) {
         Long cutoff = startedAt == null ? null : cutoff(startedAt);
@@ -210,8 +210,11 @@ public class DisruptionOrphanReconciler {
                     .withLabel("managed-by", "kates")
                     .list()
                     .getItems();
-        } catch (Exception e) {
-            // No Litmus, or no rights on its engines: nothing Kates made to undo there.
+        } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
+            // 404: no Litmus, so no engine Kates made. Anything else: whether one is in is unknown.
+            if (e.getCode() != 404) {
+                undoFailed = true;
+            }
             LOG.debugf("Could not list ChaosEngines: %s", e.getMessage());
             return 0;
         }
@@ -228,17 +231,6 @@ public class DisruptionOrphanReconciler {
                         .inNamespace(namespace)
                         .withName(name)
                         .delete();
-                String node = drainedNode(engine);
-                if (node != null) {
-                    kubeClient.nodes()
-                            .withName(node)
-                            .edit(n -> new NodeBuilder(n)
-                                    .editOrNewSpec()
-                                    .withUnschedulable(false)
-                                    .endSpec()
-                                    .build());
-                    LOG.warnf("Orphan recovery: uncordoned node %s, drained by ChaosEngine %s/%s", node, namespace, name);
-                }
                 removed++;
             } catch (Exception e) {
                 undoFailed = true;
@@ -246,26 +238,6 @@ public class DisruptionOrphanReconciler {
             }
         }
         return removed;
-    }
-
-    /** The TARGET_NODE of a node-drain engine, or null. */
-    static String drainedNode(ChaosEngine engine) {
-        if (engine.getSpec() == null || engine.getSpec().experiments == null) {
-            return null;
-        }
-        for (ChaosEngineSpec.Experiment experiment : engine.getSpec().experiments) {
-            if ("node-drain".equals(experiment.name)
-                    && experiment.spec != null
-                    && experiment.spec.components != null
-                    && experiment.spec.components.env != null) {
-                for (ChaosEngineSpec.EnvVar env : experiment.spec.components.env) {
-                    if ("TARGET_NODE".equals(env.name) && env.value != null && !env.value.isBlank()) {
-                        return env.value;
-                    }
-                }
-            }
-        }
-        return null;
     }
 
     /**
@@ -290,6 +262,8 @@ public class DisruptionOrphanReconciler {
             // (dev, unit tests) is normal and must not dump a stack trace on
             // every boot.
             LOG.warnf("Could not reconcile orphaned NetworkPolicies: %s", e.getMessage());
+            // Whether a partition is still in is unknown: no report says INTERRUPTED on that.
+            undoFailed = true;
             return 0;
         }
         int removed = 0;
