@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use jiff::Timestamp;
 use k8s_openapi::api::apps::v1::StatefulSet;
-use k8s_openapi::api::core::v1::{Pod, Secret, Service, ServiceAccount};
+use k8s_openapi::api::core::v1::{PersistentVolumeClaim, Pod, Secret, Service, ServiceAccount};
 use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use k8s_openapi::api::rbac::v1::ClusterRoleBinding;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
@@ -448,6 +448,37 @@ async fn roll_quorum(
             now,
         );
     };
+    // A member given a new volume: its pod waits on the old claim until it goes, then the
+    // StatefulSet makes both again.
+    for member in members.iter().filter(|member| member.orphaned) {
+        if let Some(found) = pods.get(&member.pod) {
+            replace(ctx, &namespace, found).await?;
+        }
+    }
+    match quorum::lost(&members, now) {
+        quorum::Next::Done => {}
+        quorum::Next::Wait(why) => {
+            let conditions = &mut after.conditions;
+            status::set(
+                conditions,
+                "Ready",
+                "False",
+                "MemberLost",
+                &why,
+                generation,
+                now,
+            );
+            return Ok((drain, None));
+        }
+        quorum::Next::Replace(pod) => {
+            tracing::warn!(%pod, "its volume's node is gone: a new volume, then a new pod");
+            forget(ctx, &namespace, &quorum::claim(&pod)).await?;
+            if let Some(found) = pods.get(&pod) {
+                replace(ctx, &namespace, found).await?;
+            }
+            return Ok((drain, Some(pod)));
+        }
+    }
     match quorum::next(&members) {
         quorum::Next::Done => Ok((drain, None)),
         quorum::Next::Wait(why) => {
@@ -652,6 +683,16 @@ async fn replace(ctx: &Context, namespace: &str, pod: &Pod) -> Result<(), kube::
     match pods.delete(&pod.name_any(), &params).await {
         Ok(_) => Ok(()),
         Err(kube::Error::Api(response)) if matches!(response.code, 404 | 409) => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+/// Deletes a member's claim, and with it the term and vote it kept.
+async fn forget(ctx: &Context, namespace: &str, claim: &str) -> Result<(), kube::Error> {
+    let claims = Api::<PersistentVolumeClaim>::namespaced(ctx.client.clone(), namespace);
+    match claims.delete(claim, &DeleteParams::default()).await {
+        Ok(_) => Ok(()),
+        Err(kube::Error::Api(response)) if response.code == 404 => Ok(()),
         Err(error) => Err(error),
     }
 }
@@ -874,6 +915,12 @@ fn with_quorum(objects: &mut Objects, kates: &Kates) {
         claim["spec"]["storageClassName"] = json!(class);
     }
     objects.set["spec"]["volumeClaimTemplates"] = json!([claim]);
+    // One member a node where there are nodes enough: two on one node die with it, and so does
+    // the majority. Preferred, so a one-node cluster still runs a quorum.
+    let selector = objects.set["spec"]["selector"]["matchLabels"].clone();
+    objects.set["spec"]["template"]["spec"]["affinity"] = json!({"podAntiAffinity": {
+        "preferredDuringSchedulingIgnoredDuringExecution": [{"weight": 100, "podAffinityTerm": {
+            "topologyKey": "kubernetes.io/hostname", "labelSelector": {"matchLabels": selector}}}]}});
     // Together: a member that starts after the others elected has an empty log, and is no voter
     // until it catches up.
     objects.set["spec"]["podManagementPolicy"] = json!("Parallel");
@@ -1330,6 +1377,13 @@ mod tests {
         assert_eq!(
             set["volumeClaimTemplates"][0]["spec"]["resources"]["requests"]["storage"],
             "2Gi"
+        );
+        let spread = &set["template"]["spec"]["affinity"]["podAntiAffinity"]["preferredDuringSchedulingIgnoredDuringExecution"]
+            [0]["podAffinityTerm"];
+        assert_eq!(spread["topologyKey"], "kubernetes.io/hostname");
+        assert_eq!(
+            spread["labelSelector"]["matchLabels"],
+            set["selector"]["matchLabels"]
         );
         assert_eq!(
             objects.service["spec"]["selector"][quorum::ROLE],

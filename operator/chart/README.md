@@ -181,9 +181,24 @@ The members talk over mutual TLS on port 9300, each reached through a Service of
 
 A version change replaces one member at a time, followers first and the leader last. The next is replaced only once every member is ready, knows the leader and holds an entry of its log: a member with an empty log is no voter, so replacing another before then could leave the quorum without a majority. Under `mode: Drain` the leader is replaced once its drain ends. A `PodDisruptionBudget` lets a node drain take one member at a time. Deleting the resource deletes the members' volumes.
 
+The members prefer one node each, so a lost node takes one member, not the majority. This places new volumes only: a member whose node-local volume already shares a node with another member stays there until its volume is replaced. A member whose volume can only be on a node that is gone, as with `local-path` and other node-local storage, waits `Pending`. Two minutes later the operator deletes its claim and its pod, and the `StatefulSet` makes both again on another node. It does this one member at a time, and only while the others follow a leader and have caught up, because the new member starts with an empty log and does not vote until it catches up. Until then `Ready` is `False`, reason `MemberLost`. The same happens when a node holding a member is drained and stays unschedulable for two minutes. The member loses nothing it needs: the quorum replicates only who leads, and everything else is in PostgreSQL.
+
+With the majority lost (two of three members, or three of five), nothing is replaced, because there is no leader. The members' disks then hold nothing but terms and votes, so you can start the quorum over. Delete every member's claim, then their pods:
+
+```bash
+kubectl -n <namespace> delete pvc -l app.kubernetes.io/instance=<resource> --wait=false
+```
+
+```bash
+kubectl -n <namespace> delete pod -l app.kubernetes.io/instance=<resource>
+```
+
+The new quorum counts terms from the start again, so a fault the old one left is removed when its deadline passes, not straight away.
+
 What it doesn't do yet:
 
 - It doesn't scale a quorum: `replicas` is set when the resource is made.
+- It doesn't recover a quorum that lost its majority (see above).
 - No PostgreSQL Secret for the `INTEGRATION_CDC` test, and no `rbac.extraRules`: the Kates chart's `rbac.cdcSecretNamespaces` and `rbac.extraRules` have no counterpart yet.
 - It doesn't create PostgreSQL. A changed Secret is not noticed: delete the pod to pick it up.
 - Kafka over TLS with a truststore file isn't expressible yet. `spec.env` takes any other setting of the container, except the names `database`, `kafka` and `apiKeySecretRef` set.
