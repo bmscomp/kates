@@ -9,6 +9,10 @@ on:
     branches: [main, operator]
   pull_request:
     branches: [main]
+  # Nightly, the e2e also loses a node (operator/e2e-node-loss.sh).
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -40,6 +44,7 @@ jobs:
               - '.github/workflows/ci-operator.yml'
             e2e:
               - 'operator/**'
+              - 'kates/src/main/java/com/bmscomp/kates/quorum/**'
               - 'charts/kates-operator/**'
               - 'charts/kates/**'
               - 'charts/kafka-cluster/**'
@@ -126,9 +131,9 @@ jobs:
   e2e:
     name: E2E on Kind
     needs: changes
-    if: needs.changes.outputs.e2e == 'true'
+    if: needs.changes.outputs.e2e == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/load-versions
@@ -199,7 +204,9 @@ jobs:
       - name: A Kates resource becomes a backend that runs a test
         run: operator/e2e-kates.sh payments
 
-      - name: Three members keep a leader, recover its run, roll the leader last and fence a cut-off one
+      - name: Three members keep a leader, recover its run, roll the leader last, fence a cut-off one and hand over without PostgreSQL
+        env:
+          KATES_E2E_NODE_LOSS: ${{ github.event_name != 'pull_request' && github.event_name != 'push' && '1' || '' }}
         run: operator/e2e-quorum.sh payments
 
       - name: Show the stack
