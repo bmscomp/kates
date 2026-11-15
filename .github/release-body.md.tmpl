@@ -55,6 +55,17 @@ steps:
 # Homebrew (macOS & Linux)
 brew install bmscomp/tap/kates
 
+# Debian / Ubuntu
+curl -fsSLO https://github.com/bmscomp/kates/releases/download/__TAG__/kates-linux-$(dpkg --print-architecture).deb
+sudo apt install ./kates-linux-$(dpkg --print-architecture).deb
+
+# Fedora / RHEL
+sudo dnf install https://github.com/bmscomp/kates/releases/download/__TAG__/kates-linux-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').rpm
+
+# Alpine (the package is unsigned)
+curl -fsSLO https://github.com/bmscomp/kates/releases/download/__TAG__/kates-linux-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').apk
+apk add --allow-untrusted ./kates-linux-*.apk
+
 # Direct binary archive (__TAG__)
 curl -fsSL https://github.com/bmscomp/kates/releases/download/__TAG__/kates-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz | tar -xz
 ```

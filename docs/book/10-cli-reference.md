@@ -21,7 +21,7 @@ Example IDs, such as `3f8a2c1e`, have the eight hexadecimal characters the Kates
 
 ## Installation
 
-The CLI is one binary, released for macOS and Linux on amd64 and arm64. Install a release in one of three ways:
+The CLI is one binary, released for macOS and Linux on amd64 and arm64. Install a release in one of four ways:
 
 - With Homebrew, on macOS or Linux: `brew install bmscomp/tap/kates`, which also installs cosign. `brew upgrade bmscomp/tap/kates` moves to a newer release.
 - With the release installer, which downloads the archive for your platform, checks it against the release's `checksums.txt` and puts `kates` in `/usr/local/bin` (`INSTALL_DIR` changes it):
@@ -33,6 +33,17 @@ The CLI is one binary, released for macOS and Linux on amd64 and arm64. Install 
   ```
 
 - From the [GitHub Release](https://github.com/bmscomp/kates/releases/latest), by downloading `kates-<os>-<arch>.tar.gz` and putting the `kates` it holds on your `PATH`.
+- On Linux, as a package from the same release: `kates-linux-<arch>.deb`, `.rpm` or `.apk`, which puts `kates` in `/usr/bin` and lets the package manager remove it. The packages come from no apt or dnf repository, so `apt upgrade` does not see a new release: install it the same way.
+
+  ```bash
+  latest=https://github.com/bmscomp/kates/releases/latest/download
+  # Debian, Ubuntu
+  curl -fsSLO "${latest}/kates-linux-$(dpkg --print-architecture).deb"
+  sudo apt install ./kates-linux-*.deb
+  # Fedora, RHEL
+  sudo dnf install \
+    "${latest}/kates-linux-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').rpm"
+  ```
 
 Without Homebrew, install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) as well, so `kates deploy` can check the charts it pulls. To deploy the lab, the CLI also needs Docker, Kind, kubectl and Helm: [Prerequisites](12-deployment.md#prerequisites) in the Deployment Guide lists them.
 
