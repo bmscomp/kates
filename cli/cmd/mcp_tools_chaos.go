@@ -280,7 +280,7 @@ var mcpCaveatsChaos = []mcpCaveat{
 				"CompletableFuture.delayedExecutor(spec.delayBeforeSec(), TimeUnit.SECONDS, executor.get());",
 				"long startNanos = System.nanoTime();", "buildChaosEngine(spec, engineName, experimentName)",
 				"onInject.accept(startNanos);", ".resource(engine)"),
-			mcpAnchoredRef(mcpJava+"chaos/KubernetesChaosProvider.java:170-182",
+			mcpAnchoredRef(mcpJava+"chaos/KubernetesChaosProvider.java:178-190",
 				"Thread.sleep(spec.delayBeforeSec() * 1000L);", "onInject.accept(startNanos);",
 				"applyDisruption(spec, engineName, marks);"),
 			mcpAnchoredRef(mcpJava+"chaos/PodTargets.java:58,69-75",
@@ -316,7 +316,7 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"starts while another runs a plan marks that plan's report too, until the plan ends and stores its " +
 			"outcome.",
 		Refs: []string{
-			mcpJava + "disruption/DisruptionOrphanReconciler.java:71-75,80-109,116-166,334-368",
+			mcpJava + "disruption/DisruptionOrphanReconciler.java:71-75,80-109,116-168,387-421",
 			mcpJava + "disruption/DisruptionReportRepository.java:35-60,93-102",
 			mcpJava + "disruption/DisruptionPersistence.java:26-37",
 			mcpJava + "disruption/DisruptionLauncher.java:114-121,129-144",

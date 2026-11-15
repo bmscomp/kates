@@ -3,8 +3,10 @@ package com.bmscomp.kates.chaos;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.LongConsumer;
@@ -14,9 +16,12 @@ import jakarta.inject.Named;
 
 import io.fabric8.kubernetes.api.model.EphemeralContainer;
 import io.fabric8.kubernetes.api.model.EphemeralContainerBuilder;
+import io.fabric8.kubernetes.api.model.Node;
+import io.fabric8.kubernetes.api.model.NodeBuilder;
 import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
+import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.*;
@@ -144,6 +149,9 @@ public class KubernetesChaosProvider implements ChaosProvider {
             case LEADER_ELECTION -> executePodKill(spec);
             case CPU_STRESS -> executeCpuStress(spec, engineName);
             case IO_STRESS -> executeIoStress(spec, engineName);
+            case MEMORY_STRESS -> executeMemoryStress(spec, engineName);
+            case DISK_FILL -> executeDiskFill(spec, engineName);
+            case NODE_DRAIN -> executeNodeDrain(spec, marks);
             default ->
                 throw new UnsupportedOperationException(
                         "DisruptionType " + spec.disruptionType() + " not supported by kubernetes provider");
@@ -569,6 +577,344 @@ public class KubernetesChaosProvider implements ChaosProvider {
     }
 
     /**
+     * As {@link #executeCpuStress}, with one worker that holds {@code memoryMb}.
+     * The container is the pod's, not the broker container's, so it presses on
+     * the pod's and the node's memory, not the broker container's own limit.
+     */
+    private void executeMemoryStress(FaultSpec spec, String engineName) throws InterruptedException {
+        for (String podName : PodTargets.resolve(client, spec)) {
+            LOG.info("MEMORY_STRESS: injecting stress ephemeral container into " + podName);
+            injectEphemeralContainer(
+                    spec.targetNamespace(),
+                    podName,
+                    stressContainerName("chaos-memory-stress", engineName),
+                    stressImage,
+                    "stress",
+                    "--vm",
+                    "1",
+                    "--vm-bytes",
+                    spec.memoryMb() + "M",
+                    "--vm-keep",
+                    "--timeout",
+                    spec.chaosDurationSec() + "s");
+        }
+        Thread.sleep(Math.max(0, spec.chaosDurationSec()) * 1000L);
+    }
+
+    /** Where the DISK_FILL container mounts the broker's data volume. */
+    static final String FILL_MOUNT = "/kates-fill";
+
+    /**
+     * Fills each target pod's data volume to {@code fillPercentage} for
+     * {@code chaosDurationSec}, from an ephemeral container that mounts it and
+     * writes one file, as the broker's own user, into the first directory there
+     * it may write: the volume's root, or the broker's log directory, where
+     * Kafka ignores a plain file. The file goes when the container exits,
+     * at the end of the duration or when the pod stops; a pod killed outright
+     * leaves it, named kates-disk-fill-*, on the volume.
+     */
+    private void executeDiskFill(FaultSpec spec, String engineName) throws InterruptedException {
+        String id = engineName.substring(engineName.lastIndexOf('-') + 1);
+        String containerName = "chaos-disk-fill-" + id;
+        List<String> pods = PodTargets.resolve(client, spec);
+        for (String podName : pods) {
+            Pod pod = client.pods()
+                    .inNamespace(spec.targetNamespace())
+                    .withName(podName)
+                    .get();
+            if (pod == null) {
+                throw new IllegalStateException("Pod not found: " + podName);
+            }
+            String volume = dataVolume(pod);
+            LOG.info("DISK_FILL: filling volume " + volume + " of " + podName + " to " + spec.fillPercentage() + "%");
+            injectEphemeralContainer(
+                    spec.targetNamespace(),
+                    podName,
+                    containerName,
+                    stressImage,
+                    new io.fabric8.kubernetes.api.model.VolumeMountBuilder()
+                            .withName(volume)
+                            .withMountPath(FILL_MOUNT)
+                            .build(),
+                    "sh",
+                    "-c",
+                    fillScript(spec.fillPercentage(), spec.chaosDurationSec(), id));
+        }
+        Thread.sleep(Math.max(0, spec.chaosDurationSec()) * 1000L);
+        for (String podName : pods) {
+            Integer exit = ephemeralExitCode(spec.targetNamespace(), podName, containerName);
+            if (exit != null && exit != 0) {
+                throw new IllegalStateException("DISK_FILL: the fill container in " + podName + " exited " + exit
+                        + ", so the volume was not filled; kubectl logs " + podName + " -c " + containerName
+                        + " says why");
+            }
+        }
+    }
+
+    /**
+     * The shell the DISK_FILL container runs (busybox sh): it writes up to
+     * {@code percent} of the volume, holds it until {@code durationSec} has
+     * passed since it started, and removes the file on exit or SIGTERM. dd and
+     * sleep run in the background, waited on, because sh runs a trap only once
+     * a foreground command ends: a SIGTERM during a long dd otherwise came to
+     * nothing, the kubelet killed the container, and the file stayed.
+     */
+    static String fillScript(int percent, int durationSec, String id) {
+        return "end=$(($(date +%s)+" + durationSec + ")); d=; for c in " + FILL_MOUNT + " " + FILL_MOUNT + "/*/; do"
+                + " if [ -d \"$c\" ] && [ -w \"$c\" ]; then d=$c; break; fi; done;"
+                + " [ -n \"$d\" ] || { echo 'no directory on the volume this user may write' >&2; exit 1; };"
+                + " f=${d%/}/kates-disk-fill-" + id + "; p=;"
+                + " trap '[ -n \"$p\" ] && kill $p 2>/dev/null; rm -f \"$f\"' EXIT; trap 'exit 0' TERM INT;"
+                + " set -- $(df -Pk " + FILL_MOUNT + " | tail -n 1); want=$((($2*" + percent + "/100-$3)/1024));"
+                + " if [ \"$want\" -gt 0 ]; then dd if=/dev/zero of=\"$f\" bs=1048576 count=\"$want\" 2>/dev/null &"
+                + " p=$!; wait $p; p=; fi; left=$((end-$(date +%s)));"
+                + " if [ \"$left\" -gt 0 ]; then sleep \"$left\" & p=$!; wait $p; p=; fi; exit 0";
+    }
+
+    /**
+     * The volume DISK_FILL fills: the first one the pod's first container
+     * mounts that a PersistentVolumeClaim backs, else the first it mounts
+     * named data*, as Strimzi names a broker's (data-0 for JBOD and
+     * ephemeral storage).
+     *
+     * @throws IllegalStateException when the pod has neither
+     */
+    static String dataVolume(Pod pod) {
+        var mounted = pod.getSpec().getContainers().getFirst().getVolumeMounts().stream()
+                .map(VolumeMount::getName)
+                .toList();
+        var volumes = pod.getSpec().getVolumes().stream()
+                .filter(v -> mounted.contains(v.getName()))
+                .toList();
+        return volumes.stream()
+                .filter(v -> v.getPersistentVolumeClaim() != null)
+                .findFirst()
+                .or(() -> volumes.stream()
+                        .filter(v -> v.getName().startsWith("data"))
+                        .findFirst())
+                .map(io.fabric8.kubernetes.api.model.Volume::getName)
+                .orElseThrow(() -> new IllegalStateException(
+                        "DISK_FILL: pod " + pod.getMetadata().getName()
+                                + " mounts no PersistentVolumeClaim and no volume named data*, so there is no data volume"
+                                + " to fill"));
+    }
+
+    /** The exit code of a terminated ephemeral container, or null while it runs or when it can't be read. */
+    private Integer ephemeralExitCode(String namespace, String podName, String containerName) {
+        try {
+            Pod pod = client.pods().inNamespace(namespace).withName(podName).get();
+            if (pod == null || pod.getStatus() == null || pod.getStatus().getEphemeralContainerStatuses() == null) {
+                return null;
+            }
+            return pod.getStatus().getEphemeralContainerStatuses().stream()
+                    .filter(s -> containerName.equals(s.getName()))
+                    .map(s -> s.getState() != null && s.getState().getTerminated() != null
+                            ? s.getState().getTerminated().getExitCode()
+                            : null)
+                    .filter(Objects::nonNull)
+                    .findFirst()
+                    .orElse(null);
+        } catch (KubernetesClientException e) {
+            LOG.debug("DISK_FILL: could not read " + podName + "'s containers", e);
+            return null;
+        }
+    }
+
+    /** Label on a node a NODE_DRAIN cordoned, which orphan recovery looks for. */
+    public static final String CORDONED_LABEL = "kates.io/cordoned";
+
+    /** Epoch millis of the cordon, which orphan recovery compares with its start. */
+    public static final String CORDONED_AT_ANNOTATION = "kates.io/cordoned-at";
+
+    /** How often NODE_DRAIN tries again to evict the pods a PodDisruptionBudget held back. */
+    long drainPollIntervalMs = 5_000;
+
+    /** The node the Kates API runs on, which a drain never takes; null in tests. */
+    @Inject
+    KatesNode katesNode;
+
+    /**
+     * Drains a node as kubectl drain does, for {@code chaosDurationSec}: cordons
+     * it, evicts its pods through the Eviction API, which honours their
+     * PodDisruptionBudgets, and tries again every few seconds for those a
+     * budget holds back; then uncordons it, whatever happened, as the partition
+     * removes its policy. DaemonSet and static pods stay. The node is picked
+     * as on litmus-crd ({@link DrainTargets}), never the Kates API's. A node
+     * already cordoned is refused: uncordoning it at the end would undo
+     * someone else's cordon.
+     *
+     * @throws IllegalStateException when a pod was still not evicted when the
+     *     duration ended; the node is uncordoned all the same
+     */
+    private void executeNodeDrain(FaultSpec spec, Map<String, String> marks) throws InterruptedException {
+        Optional<String> kates = katesNode != null ? katesNode.name() : Optional.empty();
+        String node = DrainTargets.node(client, spec, kates);
+        Node current = client.nodes().withName(node).get();
+        if (current == null) {
+            throw new IllegalStateException("NODE_DRAIN: node " + node + " was not found");
+        }
+        if (current.getSpec() != null && Boolean.TRUE.equals(current.getSpec().getUnschedulable())) {
+            throw new IllegalStateException("NODE_DRAIN: node " + node + " is already cordoned, and Kates leaves a"
+                    + " cordon it did not make alone");
+        }
+        long deadline = System.nanoTime() + Math.max(0, spec.chaosDurationSec()) * 1_000_000_000L;
+        LOG.info("NODE_DRAIN: cordoning " + node);
+        client.nodes()
+                .withName(node)
+                .edit(n -> new NodeBuilder(n)
+                        .editMetadata()
+                        .addToLabels(CORDONED_LABEL, "true")
+                        .addToAnnotations(marks)
+                        .addToAnnotations(CORDONED_AT_ANNOTATION, String.valueOf(System.currentTimeMillis()))
+                        .endMetadata()
+                        .editOrNewSpec()
+                        .withUnschedulable(true)
+                        .endSpec()
+                        .build());
+        Exception failure = null;
+        try {
+            Set<String> pending = evictAll(node, deadline);
+            long remainingMs = (deadline - System.nanoTime()) / 1_000_000L;
+            if (remainingMs > 0) {
+                Thread.sleep(remainingMs);
+            }
+            if (!pending.isEmpty()) {
+                throw new IllegalStateException("NODE_DRAIN: " + pending.size() + " pod(s) on " + node
+                        + " were not evicted within chaosDurationSec=" + spec.chaosDurationSec() + "s: " + pending
+                        + ". A PodDisruptionBudget refused their eviction");
+            }
+        } catch (RuntimeException | InterruptedException e) {
+            failure = e;
+            throw e;
+        } finally {
+            removeCordon(node, failure);
+        }
+    }
+
+    /**
+     * Evicts every pod on {@code node} a drain evicts, trying again those a
+     * PodDisruptionBudget holds back until {@code deadline}; the namespace/name
+     * of those still not evicted then.
+     */
+    private Set<String> evictAll(String node, long deadline) throws InterruptedException {
+        Map<String, Pod> pending = new LinkedHashMap<>();
+        // The field selector spares the API server; the filter is what decides.
+        for (Pod pod : client.pods()
+                .inAnyNamespace()
+                .withField("spec.nodeName", node)
+                .list()
+                .getItems()) {
+            if (node.equals(pod.getSpec().getNodeName()) && isEvictable(pod)) {
+                pending.put(
+                        pod.getMetadata().getNamespace() + "/"
+                                + pod.getMetadata().getName(),
+                        pod);
+            }
+        }
+        LOG.info("NODE_DRAIN: evicting " + pending.keySet() + " from " + node);
+        while (true) {
+            pending.values().removeIf(this::evict);
+            long remainingMs = (deadline - System.nanoTime()) / 1_000_000L;
+            if (pending.isEmpty() || remainingMs <= 0) {
+                return pending.keySet();
+            }
+            Thread.sleep(Math.min(drainPollIntervalMs, remainingMs));
+        }
+    }
+
+    /** As kubectl drain: not a DaemonSet's pod, a static pod, one already going, or one that has ended. */
+    static boolean isEvictable(Pod pod) {
+        var meta = pod.getMetadata();
+        if (meta.getDeletionTimestamp() != null
+                || (meta.getAnnotations() != null
+                        && meta.getAnnotations().containsKey("kubernetes.io/config.mirror"))) {
+            return false;
+        }
+        if (meta.getOwnerReferences() != null
+                && meta.getOwnerReferences().stream().anyMatch(o -> "DaemonSet".equals(o.getKind()))) {
+            return false;
+        }
+        String phase = pod.getStatus() != null ? pod.getStatus().getPhase() : null;
+        return !"Succeeded".equals(phase) && !"Failed".equals(phase);
+    }
+
+    /** Whether the pod is evicted or gone; false while a PodDisruptionBudget holds it back. */
+    private boolean evict(Pod pod) {
+        String namespace = pod.getMetadata().getNamespace();
+        String name = pod.getMetadata().getName();
+        try {
+            boolean evicted =
+                    client.pods().inNamespace(namespace).withName(name).evict();
+            if (evicted) {
+                LOG.info("NODE_DRAIN: evicted " + namespace + "/" + name);
+            }
+            return evicted;
+        } catch (KubernetesClientException e) {
+            if (e.getCode() == 404) {
+                return true;
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Uncordons the node, trying three times: a node left cordoned takes no new
+     * pod until someone uncordons it. When that fails, the fault fails saying
+     * how, with its own failure, if any, suppressed; orphan recovery uncordons
+     * it once its deadline has passed.
+     */
+    private void removeCordon(String node, Exception failure) {
+        KubernetesClientException last = null;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                uncordon(client, node);
+                LOG.info("NODE_DRAIN: uncordoned " + node);
+                return;
+            } catch (KubernetesClientException e) {
+                last = e;
+                if (attempt == 2) {
+                    break;
+                }
+                try {
+                    Thread.sleep(2_000);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+        IllegalStateException notRemoved = new IllegalStateException(
+                "NODE_DRAIN: could not uncordon node " + node
+                        + ", so it takes no new pod. Uncordon it with kubectl uncordon " + node + ". "
+                        + (last != null ? last.getMessage() : "interrupted"),
+                last);
+        if (failure != null) {
+            notRemoved.addSuppressed(failure);
+        }
+        if (failure instanceof InterruptedException) {
+            Thread.currentThread().interrupt();
+        }
+        throw notRemoved;
+    }
+
+    /** Uncordons a node a NODE_DRAIN cordoned and takes Kates's marks off it; also orphan recovery's undo. */
+    public static void uncordon(KubernetesClient client, String node) {
+        client.nodes()
+                .withName(node)
+                .edit(n -> new NodeBuilder(n)
+                        .editMetadata()
+                        .removeFromLabels(CORDONED_LABEL)
+                        .removeFromAnnotations(CORDONED_AT_ANNOTATION)
+                        .removeFromAnnotations(FaultMarks.TERM)
+                        .removeFromAnnotations(FaultMarks.DEADLINE)
+                        .endMetadata()
+                        .editOrNewSpec()
+                        .withUnschedulable(null)
+                        .endSpec()
+                        .build());
+    }
+
+    /**
      * An ephemeral container is never removed, and a pod refuses a second one
      * of the same name, so each fault names its own: the prefix and the engine
      * id's timestamp. Not the whole engine id, whose experiment name is free
@@ -592,6 +938,16 @@ public class KubernetesChaosProvider implements ChaosProvider {
 
     private void injectEphemeralContainer(
             String namespace, String podName, String containerName, String image, String... command) {
+        injectEphemeralContainer(namespace, podName, containerName, image, null, command);
+    }
+
+    private void injectEphemeralContainer(
+            String namespace,
+            String podName,
+            String containerName,
+            String image,
+            VolumeMount mount,
+            String... command) {
         var podResource = client.pods().inNamespace(namespace).withName(podName);
         var pod = podResource.get();
         if (pod == null) {
@@ -624,6 +980,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
                 .withName(containerName)
                 .withImage(image)
                 .withCommand(command)
+                .withVolumeMounts(mount == null ? List.of() : List.of(mount))
                 .withNewSecurityContext()
                 .withRunAsNonRoot(true)
                 .withRunAsUser(uid == null ? 65534L : uid)

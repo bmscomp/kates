@@ -362,9 +362,10 @@ public class ResilienceResource {
         }
         // A scenario can't name the node to drain, and Kates sets no
         // TARGET_NODE itself: Litmus node-drain, given none, drains the node
-        // of a random pod in any namespace, and the kubernetes provider has no
-        // NODE_DRAIN. The scenario stays listed, and is refused until Kates
-        // can aim a drain at a broker's node.
+        // of a random pod in any namespace, and on the kubernetes provider an
+        // untargeted drain takes a random pod's node. The scenario stays
+        // listed, and is refused until Kates can aim a drain at a broker's
+        // node.
         if (scenario.disruptionType() == com.bmscomp.kates.chaos.DisruptionType.NODE_DRAIN) {
             return Response.status(400)
                     .entity(ApiError.of(

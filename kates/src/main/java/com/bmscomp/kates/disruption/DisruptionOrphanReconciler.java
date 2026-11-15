@@ -142,6 +142,7 @@ public class DisruptionOrphanReconciler {
             int policies = reconcileNetworkPolicies(startedAt);
             int engines = reconcileChaosEngines(startedAt);
             ScaleDownSnapshots.Restored scaled = reconcileScaleDowns(startedAt);
+            int cordons = reconcileCordons(startedAt);
             if (orchestrator != null) {
                 try {
                     // After the faults: a database that hangs must not hold a partition (J4 review).
@@ -153,11 +154,12 @@ public class DisruptionOrphanReconciler {
             }
             // A report says INTERRUPTED only once its faults are out (s08b reported it with one in).
             int reports = undoFailed ? 0 : markInterruptedReports(startedAt != null ? startedAt : since);
-            if (policies + engines + scaled.total() + reports > 0) {
+            if (policies + engines + scaled.total() + cordons + reports > 0) {
                 LOG.warnf(
                         "Orphan recovery: removed %d NetworkPolicy(ies) and %d ChaosEngine(s), restored %d"
-                                + " KafkaNodePool(s) and %d StatefulSet(s), marked %d report(s) INTERRUPTED",
-                        policies, engines, scaled.nodePools(), scaled.statefulSets(), reports);
+                                + " KafkaNodePool(s) and %d StatefulSet(s), uncordoned %d node(s), marked %d"
+                                + " report(s) INTERRUPTED",
+                        policies, engines, scaled.nodePools(), scaled.statefulSets(), cordons, reports);
             }
         } catch (Exception e) {
             // Never block startup on cleanup — the API must come up either way.
@@ -198,7 +200,8 @@ public class DisruptionOrphanReconciler {
 
     /**
      * Deletes the Kates ChaosEngines no live fault owns, in every namespace, as Litmus cleanup does
-     * in-process. A node-drain's cordon is Litmus' to revert: Kates may not patch nodes.
+     * in-process. Litmus node-drain's cordon is Litmus' to revert; {@link #reconcileCordons} undoes the
+     * kubernetes provider's.
      */
     int reconcileChaosEngines(Instant startedAt) {
         Long cutoff = startedAt == null ? null : cutoff(startedAt);
@@ -306,6 +309,56 @@ public class DisruptionOrphanReconciler {
                 kubeClient,
                 kafkaNamespace,
                 meta -> isStray(meta, null, now) || (cutoff != null && isScaleDownOlderThan(meta, cutoff)));
+    }
+
+    /**
+     * Uncordons the nodes a kubernetes-provider NODE_DRAIN cordoned and no
+     * live fault owns: past their deadline, of an older term, or, at start or
+     * takeover, cordoned before it. Judged by the cordon's own time, not the
+     * node's age.
+     */
+    int reconcileCordons(Instant startedAt) {
+        Long cutoff = startedAt == null ? null : cutoff(startedAt);
+        Instant now = Instant.now();
+        List<io.fabric8.kubernetes.api.model.Node> nodes;
+        try {
+            nodes = kubeClient
+                    .nodes()
+                    .withLabel(KubernetesChaosProvider.CORDONED_LABEL)
+                    .list()
+                    .getItems();
+        } catch (Exception e) {
+            LOG.debugf("Could not list the nodes Kates cordoned: %s", e.getMessage());
+            undoFailed = true;
+            return 0;
+        }
+        int uncordoned = 0;
+        for (var node : nodes) {
+            ObjectMeta meta = node.getMetadata();
+            if (!isStray(meta, null, now) && !(cutoff != null && isCordonedBefore(meta, cutoff))) {
+                continue;
+            }
+            try {
+                KubernetesChaosProvider.uncordon(kubeClient, meta.getName());
+                LOG.warnf("Orphan recovery: uncordoned node %s, which a NODE_DRAIN left cordoned", meta.getName());
+                uncordoned++;
+            } catch (Exception e) {
+                undoFailed = true;
+                LOG.warnf("Could not uncordon node %s: %s", meta.getName(), e.getMessage());
+            }
+        }
+        return uncordoned;
+    }
+
+    private static boolean isCordonedBefore(ObjectMeta meta, long cutoff) {
+        String stamp = meta.getAnnotations() != null
+                ? meta.getAnnotations().get(KubernetesChaosProvider.CORDONED_AT_ANNOTATION)
+                : null;
+        try {
+            return stamp != null && Long.parseLong(stamp) < cutoff;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     private long cutoff(Instant startedAt) {

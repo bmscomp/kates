@@ -1037,7 +1037,7 @@ class DisruptionSafetyGuardTest {
                 List.of("Plan would affect 2 brokers but maxAffectedBrokers=1"),
                 guard.validatePlan(plan(1, byLabel, kill(0))).errors());
         assertEquals(
-                List.of("NODE_DRAIN drains a node Litmus picks by envOverrides.NODE_LABEL 'drainable=true'; the count"
+                List.of("NODE_DRAIN drains a node envOverrides.NODE_LABEL 'drainable=true' matches; the count"
                         + " takes the worst case, node gamma, which runs 1 broker"),
                 guard.dryRun(plan(-1, byLabel)).steps().getFirst().warnings());
     }

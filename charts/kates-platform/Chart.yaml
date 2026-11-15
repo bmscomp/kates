@@ -3,8 +3,8 @@ name: kates-platform
 description: Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure
 icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/assets/charts/kates-platform.svg
 type: application
-# Patch: the umbrella packs kates 0.19.5 (the CNPG JDBC URL's 30 s socket timeout).
-version: 0.9.5
+# Minor: the umbrella packs kates 0.20.0 (rbac.directChaos grants what NODE_DRAIN needs).
+version: 0.10.0
 appVersion: "1.0.0"
 keywords:
   - kafka
@@ -41,6 +41,8 @@ dependencies:
     condition: connect-cluster.enabled
 annotations:
   artifacthub.io/changes: |
+    - kind: changed
+      description: "Packs kates 0.20.0: rbac.directChaos also grants patch on nodes and create on pods/eviction, for NODE_DRAIN on the kubernetes chaos provider. The default role is unchanged."
     - kind: changed
       description: "Packs kates 0.19.5: with cnpg.enabled, the JDBC URL's socketTimeout is 30 s, the backend's own. Templates are otherwise unchanged."
     - kind: changed

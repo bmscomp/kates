@@ -81,11 +81,11 @@ The table compares the four values. A stock install uses `litmus-crd`, the first
 | Provider | Needs | Fault types it runs |
 |-----------|----------------|-------------------------------------------|
 | `litmus-crd` | LitmusChaos, with each type's experiment installed | Every type through a Litmus experiment, except `POD_DELETE`, `NETWORK_PARTITION`, `ROLLING_RESTART` and `SCALE_DOWN`, which use the Kubernetes API |
-| `kubernetes` | Nothing beyond Kates | `POD_KILL`, `POD_DELETE`, `LEADER_ELECTION`, `NETWORK_PARTITION`, `CPU_STRESS`, `IO_STRESS`, `ROLLING_RESTART`, `SCALE_DOWN` |
+| `kubernetes` | Nothing beyond Kates | `POD_KILL`, `POD_DELETE`, `LEADER_ELECTION`, `NETWORK_PARTITION`, `CPU_STRESS`, `MEMORY_STRESS`, `IO_STRESS`, `DISK_FILL`, `NODE_DRAIN`, `ROLLING_RESTART`, `SCALE_DOWN` |
 | `hybrid` | Nothing: it uses LitmusChaos when the Litmus [CRDs](appendix-a-glossary.md#gl-crd) exist | Those of the provider it picks |
 | `noop` | Nothing | None: every fault comes back `Skipped` |
 
-So `NETWORK_LATENCY`, `MEMORY_STRESS`, `DNS_ERROR`, `DISK_FILL` and `NODE_DRAIN` need LitmusChaos, and [The Hybrid Provider](#the-hybrid-provider) shows how `hybrid` picks.
+So only `NETWORK_LATENCY` and `DNS_ERROR` need LitmusChaos, and [The Hybrid Provider](#the-hybrid-provider) shows how `hybrid` picks.
 
 On a stock install you already have LitmusChaos: `kates deploy`, and so `make all`, installs the `kates-chaos` chart unless you pass `--with-chaos=false`. The chart installs nine experiments in its target namespaces, `kafka` by default: `pod-delete`, `pod-cpu-hog`, `pod-memory-hog`, `pod-network-partition`, `pod-io-stress`, `pod-dns-error`, `disk-fill`, `pod-network-latency` and `node-drain`; Kates doesn't use `pod-network-partition`. A step whose experiment isn't installed in the target namespace fails at once, with the missing experiment named, before any ChaosEngine exists.
 
@@ -93,7 +93,7 @@ When Kates picks the provider, it checks that the provider can work, and falls b
 
 Kates picks the provider once per Kates API process and keeps it until the pod restarts. After you install LitmusChaos, change the provider or clear a fallback, restart the Kates API Deployment; on the lab that's `kubectl rollout restart deploy/kates -n kates`.
 
-To switch providers, set `KATES_CHAOS_PROVIDER` through the `kates` chart's `extraEnv`. The direct Kubernetes provider makes its own writes, so it also needs `rbac.directChaos` for `CPU_STRESS`, `IO_STRESS` and the `SCALE_DOWN` of a StatefulSet:
+To switch providers, set `KATES_CHAOS_PROVIDER` through the `kates` chart's `extraEnv`. The direct Kubernetes provider makes its own writes, so it also needs `rbac.directChaos` for `CPU_STRESS`, `MEMORY_STRESS`, `IO_STRESS`, `DISK_FILL`, `NODE_DRAIN` and the `SCALE_DOWN` of a StatefulSet:
 
 ```yaml
 extraEnv:
@@ -103,7 +103,7 @@ rbac:
   directChaos: true
 ```
 
-Leave `rbac.directChaos` off with `litmus-crd`. Litmus runs its experiments as its own `litmus-admin` service account, and the extra rules are cluster-wide: they let Kates scale any StatefulSet and start a container in any pod.
+Leave `rbac.directChaos` off with `litmus-crd`. Litmus runs its experiments as its own `litmus-admin` service account, and the extra rules are cluster-wide: they let Kates scale any StatefulSet, start a container in any pod and drain any node.
 
 Kates doesn't check a type against the provider before the fault. `kates disruption types` lists every type whatever the provider, and neither the safety guard nor the dry run looks, so an unsupported type fails only when its step reaches the fault. On `kubernetes`, the step's `Failure` line in `kates disruption status` reads `DisruptionType <TYPE> not supported by kubernetes provider`. On `litmus-crd`, Kates creates the ChaosEngine even when its experiment isn't installed, and waits up to `chaosDurationSec` plus two minutes for a result.
 
@@ -111,7 +111,7 @@ Each Litmus fault leaves a ChaosEngine named `kates-<experimentName>-<timestamp>
 
 ### The `kubernetes` Provider {#direct-kubernetes-api}
 
-The `kubernetes` provider implements these disruptions against the Kubernetes API directly. It needs no extra tooling, but `CPU_STRESS`, `IO_STRESS` and the `SCALE_DOWN` of a StatefulSet need `rbac.directChaos=true` on the `kates` chart:
+The `kubernetes` provider implements these disruptions against the Kubernetes API directly. It needs no extra tooling, but `CPU_STRESS`, `MEMORY_STRESS`, `IO_STRESS`, `DISK_FILL`, `NODE_DRAIN` and the `SCALE_DOWN` of a StatefulSet need `rbac.directChaos=true` on the `kates` chart:
 
 | Type | Implementation | Effect |
 |------|---------------|--------|
@@ -122,13 +122,20 @@ The `kubernetes` provider implements these disruptions against the Kubernetes AP
 | `SCALE_DOWN` | Lower each selected [KafkaNodePool](appendix-a-glossary.md#gl-kafkanodepool)'s `spec.replicas` by one and wait for the operator to remove a broker; see [Scaling Down a Node Pool](#scaling-down-a-node-pool) | One broker fewer per node pool, until rollback or the end of the run puts it back |
 | `NETWORK_PARTITION` | Create a [NetworkPolicy](appendix-a-glossary.md#gl-networkpolicy) with no allow rules that selects the target pod | Adds a NetworkPolicy with no allow rules to the pod, removed after `chaosDurationSec` |
 | `CPU_STRESS` | A non-root stress ephemeral container, `chaos.stressImage`, injected into the pod | Saturates CPU on the broker pod |
+| `MEMORY_STRESS` | The same container, holding `memoryMb` | Presses on the memory of the broker pod and its node |
 | `IO_STRESS` | The same container, with I/O workers | Injects disk I/O pressure on broker storage |
+| `DISK_FILL` | An ephemeral container that mounts the pod's data volume and writes one file, as the broker's user, until the volume is `fillPercentage` full | Fills the broker's log volume, removed after `chaosDurationSec` |
+| `NODE_DRAIN` | Cordon the node, evict its pods through the Eviction API, uncordon it after `chaosDurationSec` | Every pod on the node moves or waits, as in a node or [zone](appendix-a-glossary.md#gl-zone) failure |
+
+Three of these don't do what their Litmus experiments do. A stress container is the pod's, not the broker container's, so `MEMORY_STRESS` and `CPU_STRESS` press on the pod and its node, not on the broker container's own limits as `pod-memory-hog` and `pod-cpu-hog` do. `DISK_FILL` fills the volume that holds the broker's logs: the first `PersistentVolumeClaim` the broker container mounts, or else its first volume named `data*`, as Strimzi names them. Litmus `disk-fill` fills the pod's ephemeral storage instead. The file is named `kates-disk-fill-*`, goes in the volume's root or, when the broker's user can't write there, in the broker's log directory, and is removed when the duration ends or the pod stops. A broker pod killed outright, without SIGTERM, leaves it on the volume. A container that can write nowhere on the volume fails the step.
+
+`NODE_DRAIN` evicts every pod on the node in every namespace, as `kubectl drain` does, except DaemonSet and static pods. An eviction a PodDisruptionBudget refuses is tried again every five seconds. A pod still not evicted when `chaosDurationSec` ends fails the step, and the node is uncordoned all the same. Kates refuses a node already cordoned, because uncordoning it at the end would undo someone else's cordon. It labels the node it cordons `kates.io/cordoned`, and when the Kates API restarts mid-drain, orphan recovery uncordons it.
 
 The provider injects each fault once, and doesn't try it again when a call fails. The API server may have carried out the call and lost only its answer. A second try would then act on what the first changed: it would kill another pod picked at random, or scale a StatefulSet down from the count the first try left. The step fails instead. A partition that fails or is interrupted removes its NetworkPolicies all the same, as at the end of its duration, and a failed node pool scale-down gives the pools their replicas back. Removing a partition is the one call the provider retries, up to three more times, because doing it again removes nothing more.
 
 ### The `litmus-crd` Provider {#litmuschaos-integration}
 
-On the default `litmus-crd` provider, Kates maps every disruption type but four to a Litmus experiment (for example, `POD_KILL` and `LEADER_ELECTION` both map to `pod-delete`). Four types never go through Litmus. `NETWORK_PARTITION` doesn't, because `pod-network-partition` ignores the pods Kates picks and fails without an `appinfo` label, which Kates can't give it for one pod. `ROLLING_RESTART` doesn't, because no Litmus experiment does a rolling restart. `SCALE_DOWN` doesn't, because `pod-delete` kills a broker that its [StrimziPodSet](appendix-a-glossary.md#gl-strimzipodset) brings straight back. And `POD_DELETE` doesn't, because `pod-delete` never deletes a pod with `gracePeriodSec`. It deletes the pod at once with the `FORCE=true` that pods of a StrimziPodSet need, and with the pod's own grace period otherwise. The `litmus-crd` provider hands all four to the `kubernetes` provider, so they run the same way on both. Five types are only available through Litmus:
+On the default `litmus-crd` provider, Kates maps every disruption type but four to a Litmus experiment (for example, `POD_KILL` and `LEADER_ELECTION` both map to `pod-delete`). Four types never go through Litmus. `NETWORK_PARTITION` doesn't, because `pod-network-partition` ignores the pods Kates picks and fails without an `appinfo` label, which Kates can't give it for one pod. `ROLLING_RESTART` doesn't, because no Litmus experiment does a rolling restart. `SCALE_DOWN` doesn't, because `pod-delete` kills a broker that its [StrimziPodSet](appendix-a-glossary.md#gl-strimzipodset) brings straight back. And `POD_DELETE` doesn't, because `pod-delete` never deletes a pod with `gracePeriodSec`. It deletes the pod at once with the `FORCE=true` that pods of a StrimziPodSet need, and with the pod's own grace period otherwise. The `litmus-crd` provider hands all four to the `kubernetes` provider, so they run the same way on both. Five types run as these Litmus experiments. `NETWORK_LATENCY` and `DNS_ERROR` run nowhere else. `MEMORY_STRESS`, `DISK_FILL` and `NODE_DRAIN` also run on `kubernetes`, which does them differently, as [The `kubernetes` Provider](#direct-kubernetes-api) says:
 
 | Type | Litmus Experiment | Effect |
 |------|-------------------|--------|
@@ -147,12 +154,12 @@ The diagram shows the one decision the hybrid provider makes, and when it makes 
 ```mermaid
 %%| label: fig-practice-hybrid-provider
 %%| fig-cap: "With `kates.chaos.provider=hybrid`, Kates looks for the LitmusChaos CRDs once, and sends every fault to the provider it picked."
-%%| fig-alt: "Flowchart. A fault from the Kates API goes to the hybrid provider, which asks once whether the Litmus CRDs are installed. If Litmus is detected, it uses the litmus-crd provider, which runs Litmus experiments through the LitmusChaos CRDs and hands POD_DELETE, ROLLING_RESTART and SCALE_DOWN to the kubernetes provider. If Litmus is not found, it uses the kubernetes provider, which calls the Kubernetes API directly for the eight types it implements."
+%%| fig-alt: "Flowchart. A fault from the Kates API goes to the hybrid provider, which asks once whether the Litmus CRDs are installed. If Litmus is detected, it uses the litmus-crd provider, which runs Litmus experiments through the LitmusChaos CRDs and hands POD_DELETE, ROLLING_RESTART and SCALE_DOWN to the kubernetes provider. If Litmus is not found, it uses the kubernetes provider, which calls the Kubernetes API directly for the eleven types it implements."
 graph TD
     DO[Kates API<br/>a fault to inject] --> HCP[hybrid<br/>once: are Litmus CRDs installed?]
 
     HCP -->|Litmus detected| LCP[litmus-crd<br/>Litmus experiments]
-    HCP -->|Litmus not found| KCP[kubernetes<br/>eight types, directly]
+    HCP -->|Litmus not found| KCP[kubernetes<br/>eleven types, directly]
 
     LCP --> LIT[LitmusChaos CRDs]
     LCP -->|POD_DELETE,<br/>ROLLING_RESTART,<br/>SCALE_DOWN| KCP
@@ -182,7 +189,7 @@ A pod-level fault hits one pod unless told otherwise. The first of these that ap
 
 Both chaos providers resolve the pods the same way: `kubernetes` applies the fault to each of them, and `litmus-crd` passes them to the experiment as a comma-separated `TARGET_PODS` list. A selector that matches no pod fails the step with `No pods found matching label selector` instead of doing nothing.
 
-A `NODE_DRAIN` drains the node that runs the pod these rules pick. On `litmus-crd`, Kates passes that node to the `node-drain` experiment as `TARGET_NODE`, with no `TARGET_PODS`; the `kubernetes` provider doesn't run `NODE_DRAIN`. The experiment drains one node, so with `targetAll` every pod the selector matches has to run on the same node. On the [`panda`](appendix-a-glossary.md#gl-panda) [Kind](appendix-a-glossary.md#gl-kind) cluster, a zone's broker pods all run on the node named after the zone. The step fails without draining anything when the pods run on more than one node, when the pod is gone, or when it isn't on a node yet.
+A `NODE_DRAIN` drains the node that runs the pod these rules pick. On `litmus-crd`, Kates passes that node to the `node-drain` experiment as `TARGET_NODE`, with no `TARGET_PODS`; the `kubernetes` provider drains that node itself. The experiment drains one node, so with `targetAll` every pod the selector matches has to run on the same node. On the [`panda`](appendix-a-glossary.md#gl-panda) [Kind](appendix-a-glossary.md#gl-kind) cluster, a zone's broker pods all run on the node named after the zone. The step fails without draining anything when the pods run on more than one node, when the pod is gone, or when it isn't on a node yet.
 
 To drain a node you choose, name it in `envOverrides.TARGET_NODE`, or give `envOverrides.NODE_LABEL` for Litmus to pick a node with that label. Kates then picks no node itself. The drain evicts every pod on the node, not only the one picked, in every namespace, so the other Kafka pods there go down with it.
 
@@ -407,7 +414,7 @@ steps:
 
 ### storage-pressure
 
-Fills broker disk to 90% with the LitmusChaos `disk-fill` experiment, to observe the cluster under storage pressure. The `kubernetes` chaos provider can't run `DISK_FILL`, so the playbook needs `litmus-crd` (or `hybrid`) and the `disk-fill` experiment the `kates-chaos` chart installs.
+Fills broker disk to 90%, to observe the cluster under storage pressure. On `litmus-crd` it runs the `disk-fill` experiment the `kates-chaos` chart installs. On `kubernetes` it fills each target broker's data volume itself, and needs `rbac.directChaos`.
 
 ```yaml
 name: storage-pressure
@@ -566,7 +573,7 @@ The count covers the whole plan, not one step at a time: Kates adds up the disti
 
 The label matches the KRaft controllers as well, so Kates counts as brokers only the pods Strimzi labels `strimzi.io/broker-role=true`: a node with both roles is a broker, and a dedicated controller is not. On the default cluster, with brokers 0–2 and controllers 3–5, a plan that takes down all three brokers is refused. A pod without the role label, such as Kafka not run by Strimzi, counts as a broker.
 
-A step's affected brokers are the broker pods its fault hits, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A `ROLLING_RESTART` step also counts as one, because the Cluster Operator takes its brokers down one at a time. A `SCALE_DOWN` step counts the broker each node pool it selects loses. A step in the Kates API's namespace counts none, but a pod named with `targetPod` counts as a broker wherever it runs, unless it's a dedicated KRaft controller. A `NODE_DRAIN` step counts every broker on the node it drains, whatever namespace its pod is in. For a random pick, that's the node among the candidates' that runs the most brokers, and the same goes for a node Litmus picks by `envOverrides.NODE_LABEL`. Both leave out the node the Kates API runs on, which no drain takes, and a step that could drain only that node is refused. The dry run lists every pod a step hits, controllers included, and warns when a step would hit none of the Kafka pods or when `targetBrokerId` names no broker. For a `NODE_DRAIN`, it lists every Kafka pod on the node and names the node.
+A step's affected brokers are the broker pods its fault hits, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A `ROLLING_RESTART` step also counts as one, because the Cluster Operator takes its brokers down one at a time. A `SCALE_DOWN` step counts the broker each node pool it selects loses. A step in the Kates API's namespace counts none, but a pod named with `targetPod` counts as a broker wherever it runs, unless it's a dedicated KRaft controller. A `NODE_DRAIN` step counts every broker on the node it drains, whatever namespace its pod is in. For a random pick, that's the node among the candidates' that runs the most brokers, and the same goes for a node picked among those `envOverrides.NODE_LABEL` matches. Both leave out the node the Kates API runs on, which no drain takes, and a step that could drain only that node is refused. The dry run lists every pod a step hits, controllers included, and warns when a step would hit none of the Kafka pods or when `targetBrokerId` names no broker. For a `NODE_DRAIN`, it lists every Kafka pod on the node and names the node.
 
 Kates runs the plan anyway, with a warning in `validationWarnings`, in three cases:
 
@@ -610,7 +617,7 @@ Four rules go beyond the table. Each applies to some faults only, and the last c
 
 The other types may set a `chaosDurationSec` of `0`, because a deleted pod comes back by itself, and a `ROLLING_RESTART` or `SCALE_DOWN` with `0` doesn't wait. A `cmdProbe` is the type a probe without one gets. A resilience run's top-level `probes` may hold one, since Kates runs those in a broker pod, and Kates sends Litmus no probe at all.
 
-The duration ceiling matters most on `kubernetes`, where a CPU or IO stress runs in an ephemeral container that Kubernetes can't remove: its duration is all that stops it. A `ROLLING_RESTART`'s `chaosDurationSec` is its wait for the Cluster Operator to roll every pod, so on a cluster whose roll takes over an hour, raise `kates.chaos.limits.max-duration-sec`.
+The duration ceiling matters most on `kubernetes`, where a stress or a disk fill runs in an ephemeral container that Kubernetes can't remove: its duration is all that stops it. A `ROLLING_RESTART`'s `chaosDurationSec` is its wait for the Cluster Operator to roll every pod, so on a cluster whose roll takes over an hour, raise `kates.chaos.limits.max-duration-sec`.
 
 The same ceiling bounds the waits around a fault, each from 0: a plan step's `steadyStateSec` and `observationWindowSec`, a compound run's `timeoutSec` and `delayBetweenSec`, and a resilience run's `steadyStateSec`, `maxRecoveryWaitSec` and each top-level probe's `timeoutSec`. Kates holds the disruption lease through every one of them and nothing ends one early, so an `observationWindowSec` of `300000`, a typo for `300`, would keep every other disruption out for three and a half days.
 
@@ -629,7 +636,7 @@ What rollback does depends on the fault. The table lists what it undoes, and wha
 |-------|--------------------|-------------------------------|
 | `NETWORK_PARTITION` | Deletes every NetworkPolicy labeled `managed-by=kates` in the step's namespace, the label Kates puts on its policies | Kates deletes its policies when `chaosDurationSec` ends, or as soon as the partition fails |
 | `SCALE_DOWN` | Gives every KafkaNodePool and StatefulSet in the step's namespace that carries `kates.io/original-replicas` its replicas back | The end of the run: when a plan, compound run or resilience run ends, Kates gives back every replica a `SCALE_DOWN` of that run took, before another disruption may start. Orphan recovery does it when the Kates API restarts mid-run |
-| Every other type | Nothing, although the step report still says it rolled back | The StrimziPodSet recreates a deleted pod; a stress container on `kubernetes` stops after `chaosDurationSec`; Litmus gets `chaosDurationSec` as its duration |
+| Every other type | Nothing, although the step report still says it rolled back | The StrimziPodSet recreates a deleted pod; a stress container on `kubernetes` stops after `chaosDurationSec`, a disk fill removes its file then, and a drain uncordons its node, or orphan recovery does when the Kates API restarted mid-drain; Litmus gets `chaosDurationSec` as its duration |
 
 So rollback matters for two faults. For a partition, it deletes the policies the `kubernetes` provider made. On `litmus-crd`, the default, Kates creates no NetworkPolicy itself, and rollback deletes a Litmus policy only if it carries the `managed-by=kates` label. A successful `SCALE_DOWN` always fails its recovery check, because the removed broker never comes back. With `requireRecovery` and `autoRollback` on, the step gives the broker back when the recovery timeout runs out.
 

@@ -84,6 +84,62 @@ class DisruptionOrphanReconcilerTest {
         assertNotNull(get("kafka", "kates-netpol-krafter-brokers-sigma-4"));
     }
 
+    @Test
+    void uncordonsANodeADrainLeftCordonedAndLeavesTheOthers() {
+        Instant startedAt = Instant.now();
+        cordoned("node-a", startedAt.minusSeconds(120), Instant.now().plusSeconds(3600));
+        // A drain this process started.
+        cordoned("node-b", startedAt.plusSeconds(1), Instant.now().plusSeconds(3600));
+        // Past its deadline, found by a later pass.
+        cordoned("node-c", startedAt.plusSeconds(1), Instant.now().minusSeconds(1));
+        // Cordoned by someone else.
+        client.nodes()
+                .resource(new io.fabric8.kubernetes.api.model.NodeBuilder()
+                        .withNewMetadata()
+                        .withName("node-d")
+                        .endMetadata()
+                        .withNewSpec()
+                        .withUnschedulable(true)
+                        .endSpec()
+                        .build())
+                .create();
+
+        assertEquals(2, reconciler().reconcileCordons(startedAt));
+
+        assertNull(client.nodes().withName("node-a").get().getSpec().getUnschedulable());
+        assertTrue(
+                client.nodes()
+                        .withName("node-a")
+                        .get()
+                        .getMetadata()
+                        .getLabels()
+                        .isEmpty(),
+                "label taken off");
+        assertEquals(
+                Boolean.TRUE, client.nodes().withName("node-b").get().getSpec().getUnschedulable());
+        assertNull(client.nodes().withName("node-c").get().getSpec().getUnschedulable());
+        assertEquals(
+                Boolean.TRUE, client.nodes().withName("node-d").get().getSpec().getUnschedulable());
+    }
+
+    private void cordoned(String name, Instant at, Instant deadline) {
+        client.nodes()
+                .resource(new io.fabric8.kubernetes.api.model.NodeBuilder()
+                        .withNewMetadata()
+                        .withName(name)
+                        .addToLabels(com.bmscomp.kates.chaos.KubernetesChaosProvider.CORDONED_LABEL, "true")
+                        .addToAnnotations(
+                                com.bmscomp.kates.chaos.KubernetesChaosProvider.CORDONED_AT_ANNOTATION,
+                                String.valueOf(at.toEpochMilli()))
+                        .addToAnnotations(com.bmscomp.kates.chaos.FaultMarks.DEADLINE, deadline.toString())
+                        .endMetadata()
+                        .withNewSpec()
+                        .withUnschedulable(true)
+                        .endSpec()
+                        .build())
+                .create();
+    }
+
     private DisruptionOrphanReconciler reconciler() {
         DisruptionOrphanReconciler reconciler = new DisruptionOrphanReconciler();
         reconciler.kubeClient = client;
