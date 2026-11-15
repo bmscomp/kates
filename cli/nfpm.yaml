@@ -1,0 +1,25 @@
+# The .deb, .rpm and .apk of the release binary. release.yml runs
+# `nfpm package` with this file once per packager for each linux build, in
+# cli/ where the tarball step leaves kates and LICENSE.
+name: kates
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+version_schema: semver
+section: utils
+priority: optional
+maintainer: bmscomp <bmscomp@gmail.com>
+description: |
+  Benchmark, fault-test and audit Apache Kafka clusters on Kubernetes.
+  Kates deploys Strimzi Kafka, runs benchmark workloads and fault
+  injections, and grades the results against A-F SLA gates.
+vendor: bmscomp
+homepage: https://github.com/bmscomp/kates
+license: Apache-2.0
+contents:
+  - src: ./kates
+    dst: /usr/bin/kates
+    file_info:
+      mode: 0755
+  - src: ./LICENSE
+    dst: /usr/share/doc/kates/LICENSE

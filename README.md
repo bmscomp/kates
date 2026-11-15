@@ -113,7 +113,7 @@ Without Homebrew on Linux, install Docker Engine, Kind, kubectl and Helm from th
 curl -fsSL https://raw.githubusercontent.com/bmscomp/kates/main/scripts/install-kates.sh | bash
 ```
 
-Or download `kates-<os>-<arch>.tar.gz` from the [latest release](https://github.com/bmscomp/kates/releases/latest): it holds a single `kates` binary. Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) too, so `kates deploy` can check the signatures of the charts it pulls.
+Or download `kates-<os>-<arch>.tar.gz` from the [latest release](https://github.com/bmscomp/kates/releases/latest): it holds a single `kates` binary. On Debian, Ubuntu, Fedora or Alpine, the same release has `kates-linux-<arch>.deb`, `.rpm` and `.apk` packages (`sudo apt install ./kates-linux-amd64.deb`); see [Installation](docs/book/10-cli-reference.md#installation). Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) too, so `kates deploy` can check the signatures of the charts it pulls.
 
 Run a CI quality gate against a minimum grade:
 
