@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use jiff::{SignedDuration, Timestamp};
 use k8s_openapi::ByteString;
-use k8s_openapi::api::core::v1::{Pod, Secret};
+use k8s_openapi::api::core::v1::{PersistentVolumeClaim, Pod, Secret};
 use kates_client::QuorumView;
 use kates_crds::Kates;
 use kube::api::{Api, Patch, PatchParams};
@@ -40,6 +40,11 @@ const CA_LIFE: SignedDuration = SignedDuration::from_hours(24 * 3650);
 const MEMBER_LIFE: SignedDuration = SignedDuration::from_hours(24 * 365);
 /// Re-issued at two thirds of its life, so a failing renewal has months to be noticed.
 const RENEW_AFTER: SignedDuration = SignedDuration::from_hours(24 * 243);
+/// How long a member waits for its volume's node before it gets a new volume: past a node's
+/// restart, so a member is moved only when its node is gone.
+pub const LOST_AFTER: SignedDuration = SignedDuration::from_mins(2);
+/// The claim the `StatefulSet` makes for a member's term and vote.
+const CLAIM: &str = "quorum";
 
 #[must_use]
 pub fn members(name: &str, replicas: i32) -> Vec<String> {
@@ -297,6 +302,17 @@ pub struct Member {
     /// It runs an old revision, or started before its current certificate was issued.
     pub stale: bool,
     pub view: Option<QuorumView>,
+    /// Since when its pod waits for the one node its volume can be on, which is gone or refuses it.
+    pub lost_since: Option<Timestamp>,
+    /// Its pod waits, and its claim is gone or going: the pod is deleted so the `StatefulSet`
+    /// makes both again.
+    pub orphaned: bool,
+}
+
+/// The claim that holds a member's term and vote.
+#[must_use]
+pub fn claim(pod: &str) -> String {
+    format!("{CLAIM}-{pod}")
 }
 
 /// The member that says it leads, in the highest term any member reports.
@@ -347,6 +363,64 @@ pub fn next(members: &[Member]) -> Next {
         .map_or(Next::Done, |member| Next::Replace(member.pod.clone()))
 }
 
+/// A member whose volume's node has been gone for [`LOST_AFTER`] gets a new volume, one at a time
+/// and only while every other member that is not lost too is ready and follows a leader. Its log
+/// is then empty, so it is no voter until it catches up: the quorum keeps its majority only if
+/// the others have one without it. With no leader, nothing is replaced.
+#[must_use]
+pub fn lost(members: &[Member], now: Timestamp) -> Next {
+    let Some(member) = members.iter().find(|member| {
+        member
+            .lost_since
+            .is_some_and(|since| now.duration_since(since) >= LOST_AFTER)
+    }) else {
+        return Next::Done;
+    };
+    let Some(leader) = leader(members) else {
+        return Next::Wait(format!(
+            "{}'s volume is on a node that is gone, and the quorum has no leader to replace it under",
+            member.pod
+        ));
+    };
+    let unsettled = members.iter().find(|other| {
+        let caught_up = other.view.as_ref().is_some_and(|view| {
+            view.leader_id.as_deref() == Some(leader) && view.applied_index >= 0
+        });
+        other.lost_since.is_none() && (!other.ready || !caught_up)
+    });
+    if let Some(other) = unsettled {
+        return Next::Wait(format!(
+            "{}'s volume is on a node that is gone; it is replaced once {} is ready and caught up",
+            member.pod, other.pod
+        ));
+    }
+    Next::Replace(member.pod.clone())
+}
+
+/// The scheduler found no node for the pod because its volume can only be on another.
+fn volume_elsewhere(message: &str) -> bool {
+    message.contains("didn't match PersistentVolume's node affinity")
+        || message.contains("volume node affinity conflict")
+}
+
+/// When the scheduler last found no node for this pending pod because of its volume.
+fn lost_since(pod: &Pod) -> Option<Timestamp> {
+    let status = pod.status.as_ref()?;
+    if status.phase.as_deref() != Some("Pending") {
+        return None;
+    }
+    // shortcut: matched on the scheduler's VolumeBinding reason text, in its wording before and
+    // since Kubernetes 1.26; read the volume's node instead if the operator ever reads nodes.
+    status.conditions.iter().flatten().find_map(|c| {
+        (c.type_ == "PodScheduled"
+            && c.status == "False"
+            && c.message.as_deref().is_some_and(volume_elsewhere))
+        .then_some(c.last_transition_time.as_ref())
+        .flatten()
+        .and_then(|at| at.0.to_string().parse().ok())
+    })
+}
+
 /// Reads each member: its pod and its public `/api/health`.
 ///
 /// # Errors
@@ -360,6 +434,7 @@ pub async fn observe(
 ) -> Result<(Vec<Member>, BTreeMap<String, Pod>), Error> {
     let name = kates.name_any();
     let pods = Api::<Pod>::namespaced(ctx.client.clone(), namespace);
+    let claims = Api::<PersistentVolumeClaim>::namespaced(ctx.client.clone(), namespace);
     let mut members = Vec::new();
     let mut found = BTreeMap::new();
     for pod_name in self::members(&name, kates.spec.replicas) {
@@ -369,6 +444,8 @@ pub async fn observe(
                 ready: false,
                 stale: false,
                 view: None,
+                lost_since: None,
+                orphaned: false,
             });
             continue;
         };
@@ -395,11 +472,23 @@ pub async fn observe(
             Ok(client) => client.quorum().await.ok(),
             Err(_) => None,
         };
+        let pending = pod
+            .status
+            .as_ref()
+            .is_some_and(|status| status.phase.as_deref() == Some("Pending"));
+        let orphaned = pending
+            && pod.metadata.deletion_timestamp.is_none()
+            && claims
+                .get_opt(&claim(&pod_name))
+                .await?
+                .is_none_or(|claim| claim.metadata.deletion_timestamp.is_some());
         members.push(Member {
             pod: pod_name.clone(),
             ready,
             stale,
             view,
+            lost_since: lost_since(&pod),
+            orphaned,
         });
         found.insert(pod_name, pod);
     }
@@ -447,7 +536,68 @@ mod tests {
                 term: 2,
                 applied_index: 4,
             }),
+            lost_since: None,
+            orphaned: false,
         }
+    }
+
+    fn gone(pod: &str, at: Timestamp) -> Member {
+        Member {
+            ready: false,
+            view: None,
+            lost_since: Some(at),
+            ..member(pod, false, "", false)
+        }
+    }
+
+    #[test]
+    fn a_member_whose_node_is_gone_is_replaced_only_under_a_settled_leader() {
+        let now: Timestamp = "2026-11-15T12:00:00Z".parse().unwrap();
+        let long_ago = now - LOST_AFTER;
+        let healthy = [
+            member("main-0", false, "main-0", true),
+            member("main-1", false, "main-0", false),
+        ];
+        let with = |lost: Vec<Member>| [healthy.to_vec(), lost].concat();
+
+        assert_eq!(lost(&healthy, now), Next::Done);
+        // Not yet: its node may only be restarting.
+        assert_eq!(lost(&with(vec![gone("main-2", now)]), now), Next::Done);
+        assert_eq!(
+            lost(&with(vec![gone("main-2", long_ago)]), now),
+            Next::Replace("main-2".to_owned())
+        );
+        // Two of five lost: one at a time, each other lost member left out of the check.
+        let five = with(vec![
+            member("main-2", false, "main-0", false),
+            gone("main-3", long_ago),
+            gone("main-4", long_ago),
+        ]);
+        assert_eq!(lost(&five, now), Next::Replace("main-3".to_owned()));
+        // Another member is catching up: wait.
+        let mut catching_up = with(vec![gone("main-2", long_ago)]);
+        catching_up[1].view.as_mut().unwrap().applied_index = -1;
+        assert!(matches!(lost(&catching_up, now), Next::Wait(why) if why.contains("main-1")));
+        // Two of three lost: no leader, nothing done.
+        let quorum_lost = [
+            member("main-0", false, "", false),
+            gone("main-1", long_ago),
+            gone("main-2", long_ago),
+        ];
+        assert!(matches!(lost(&quorum_lost, now), Next::Wait(why) if why.contains("no leader")));
+    }
+
+    #[test]
+    fn a_volume_on_another_node_is_read_from_the_schedulers_message_old_and_new() {
+        assert!(volume_elsewhere(
+            "0/3 nodes are available: 1 node(s) had untolerated taint(s), 2 node(s) didn't match PersistentVolume's node affinity."
+        ));
+        assert!(volume_elsewhere(
+            "0/2 nodes are available: 2 node(s) had volume node affinity conflict."
+        ));
+        assert!(!volume_elsewhere(
+            "0/3 nodes are available: 3 Insufficient cpu."
+        ));
     }
 
     #[test]

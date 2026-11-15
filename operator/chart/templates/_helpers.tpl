@@ -68,6 +68,10 @@ quorum it labels the leader's pod, which the Service selects. */}}
 - apiGroups: [""]
   resources: ["pods"]
   verbs: ["get", "delete", "patch"]
+{{- /* A quorum member whose volume's node is gone gets a new claim: the StatefulSet makes it. */}}
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "delete"]
 {{- /* kates-api-key: the one key Secret it reads, to set /api/drain. */}}
 - apiGroups: [""]
   resources: ["secrets"]
