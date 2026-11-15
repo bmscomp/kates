@@ -23,8 +23,18 @@ import (
 // identity names the workflow rather than this build's tag.
 const (
 	chartSignerIdentity = `^https://github\.com/bmscomp/kates/\.github/workflows/publish-charts\.yml@refs/(heads/main|tags/v.+)$`
-	chartSignerIssuer   = "https://token.actions.githubusercontent.com"
+	// The operator's chart is released apart, by publish-operator.yml on its own tags.
+	operatorChartSignerIdentity = `^https://github\.com/bmscomp/kates/\.github/workflows/publish-operator\.yml@refs/tags/operator-v.+$`
+	chartSignerIssuer           = "https://token.actions.githubusercontent.com"
 )
+
+// chartSigner is the workflow identity that signs the chart at ref.
+func chartSigner(ref string) string {
+	if strings.HasSuffix(ref, "/kates-operator") {
+		return operatorChartSignerIdentity
+	}
+	return chartSignerIdentity
+}
 
 // cosignPathFn finds cosign; tests replace it.
 var cosignPathFn = func() (string, error) { return exec.LookPath("cosign") }
@@ -108,7 +118,7 @@ func verifyChart(ctx context.Context, ref, digest, dest string) (provenance bool
 			return false, err
 		}
 	}
-	return verifyProvenance(ctx, cosign, digest)
+	return verifyProvenance(ctx, cosign, digest, chartSigner(ref))
 }
 
 // verifySignature is cosign verify of ref@digest.
@@ -117,7 +127,7 @@ func verifySignature(ctx context.Context, cosign, ref, digest string) error {
 	vctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	args := []string{"verify", image,
-		"--certificate-identity-regexp", chartSignerIdentity,
+		"--certificate-identity-regexp", chartSigner(ref),
 		"--certificate-oidc-issuer", chartSignerIssuer}
 	if chartRegistryPlainHTTP() {
 		args = append(args, "--allow-http-registry")
@@ -191,9 +201,9 @@ func (e *chartProvenanceError) Error() string {
 }
 
 // verifyProvenance checks that one of GitHub's attestations for digest is a
-// SLSA provenance signed by publish-charts.yml whose subject is digest. It
+// SLSA provenance signed by signer's workflow whose subject is digest. It
 // returns false, with no error, when the attestations could not be read.
-func verifyProvenance(ctx context.Context, cosign, digest string) (bool, error) {
+func verifyProvenance(ctx context.Context, cosign, digest, signer string) (bool, error) {
 	bundles, err := attestationsFn(ctx, digest)
 	if errors.Is(err, errProvenanceUnavailable) {
 		provenanceUnchecked = err
@@ -218,7 +228,7 @@ func verifyProvenance(ctx context.Context, cosign, digest string) (bool, error) 
 		}
 		vctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		out, err := runExecCombinedFn(vctx, cosign, "verify-blob-attestation", "--bundle", path,
-			"--certificate-identity-regexp", chartSignerIdentity,
+			"--certificate-identity-regexp", signer,
 			"--certificate-oidc-issuer", chartSignerIssuer,
 			"--type", "slsaprovenance1",
 			"--digest", strings.TrimPrefix(digest, "sha256:"), "--digestAlg", "sha256")

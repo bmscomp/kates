@@ -25,7 +25,7 @@ func TestTableIsConsistent(t *testing.T) {
 		if c.Installs() != (c.Chart != "") || c.Installs() != (c.Icon != "") {
 			t.Errorf("%s: a release needs a chart and an icon, a step neither (release %q chart %q icon %q)", c.ID, c.Release, c.Chart, c.Icon)
 		}
-		if c.Operator && c.FixedNamespace == "" {
+		if c.Operator && c.FixedNamespace == "" && c.NamespaceKey != NSOperator {
 			t.Errorf("%s: an operator has a namespace of its own", c.ID)
 		}
 		if c.CRDGroup != "" {
@@ -78,13 +78,14 @@ func TestReleasesAndNamespaces(t *testing.T) {
 		"strimzi-operator/strimzi-operator", "cert-manager/cert-manager", "kyverno/kyverno",
 		"krafter/kafka", "monitoring/monitoring", "postgresql/database", "connect-cluster/connect",
 		"apicurio/kafka", "kates/kates", "kafka-ui/kafka", "mm2/kafka", "chaos/litmus",
+		"kates-operator/kates-operator", "kates-db/kates",
 	} {
 		if !slices.Contains(names, want) {
 			t.Errorf("Releases lacks %s: %v", want, names)
 		}
 	}
-	if len(names) != 12 {
-		t.Errorf("Releases = %v, want exactly the 12 releases", names)
+	if len(names) != 14 {
+		t.Errorf("Releases = %v, want exactly the 14 releases", names)
 	}
 	for _, n := range names {
 		if strings.HasPrefix(n, "jaeger/") {
@@ -93,7 +94,7 @@ func TestReleasesAndNamespaces(t *testing.T) {
 	}
 
 	ns := Namespaces(p)
-	want := []string{"kafka", "monitoring", "database", "connect", "kates", "litmus", "strimzi-operator", "cert-manager", "kyverno"}
+	want := []string{"kafka", "monitoring", "database", "connect", "kates", "litmus", "strimzi-operator", "cert-manager", "kyverno", "kates-operator"}
 	if !slices.Equal(ns, want) {
 		t.Errorf("Namespaces = %v, want %v", ns, want)
 	}
@@ -101,8 +102,8 @@ func TestReleasesAndNamespaces(t *testing.T) {
 
 func TestCRDGroups(t *testing.T) {
 	all := CRDs()
-	if len(all) != 39 {
-		t.Errorf("CRDs() lists %d, want 39", len(all))
+	if len(all) != 40 {
+		t.Errorf("CRDs() lists %d, want 40", len(all))
 	}
 	for _, g := range Groups() {
 		for _, crd := range g.UsedBy {

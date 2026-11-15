@@ -1554,6 +1554,10 @@ Its flags choose the shape of the stack and how much it asks:
 | `--checkout` | Install the charts of the Kates checkout in this directory instead of the published ones; `KATES_CHECKOUT` does the same for every command |
 | `--chart-bundle` | Install from the bundle that [`kates charts pull --to`](#charts-pull) wrote in this directory, with no network; `KATES_CHART_BUNDLE` does the same for every command |
 | `--adminless` | Install without cluster admin, into namespaces that exist, on a Strimzi operator a cluster admin installed; see [Deploying Without Cluster Admin](12-deployment.md#deploying-without-cluster-admin) |
+| `--kates-mode` | `standalone` (default): the `kates` chart, with its own PostgreSQL. `operator`: the Kates operator, a PostgreSQL for Kates, and a `Kates` resource the operator runs; see [Standalone or Under the Operator](12-deployment.md#standalone-or-under-the-operator) |
+| `--kates-replicas` | With `--kates-mode operator`: `1` (default), or `3` or `5` for a quorum that keeps a leader with one or two members lost. Fixed once the `Kates` resource exists |
+| `--kates-db-secret` | With `--kates-mode operator`: an existing Secret in the Kates namespace, with keys `url` (`jdbc:postgresql://…`), `username` and `password`, instead of installing PostgreSQL |
+| `--operator-ns` | Namespace of the Kates operator, under either topology (default: `kates-operator`) |
 
 `--operator-scope namespace` lets older Kafka lines run beside the primary under an operator of their own. The loopback MirrorMaker 2 of `--with-mirror-maker2` is the chart's shipped shape, enough to exercise connectors, offset syncs, checkpoints and the `kates-mm2` ACLs without a second cluster. `--adminless` installs Kafka, Kafka Connect with its PostgreSQL, MirrorMaker 2, Apicurio, Kafka UI and Kates, placed by `--topology` and the `--*-ns` flags as in a full deploy; `--topology single` takes `--namespace`, by default the kube context's.
 

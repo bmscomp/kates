@@ -255,6 +255,9 @@ func selectedDeployNamespaces(dc *deployContext) []string {
 	if deployWithKates {
 		add(dc.ns.app)
 	}
+	if componentSelected("kates-operator") {
+		add(dc.ns.operator)
+	}
 	if deployWithMonitoring {
 		add(dc.ns.jaeger)
 	}
@@ -631,6 +634,8 @@ func deployComponents(dc *deployContext) []component {
 		dc.kafkaConnectComponent(),
 		dc.kafkaConnectorComponent(),
 		dc.apicurioComponent(),
+		dc.katesOperatorComponent(),
+		dc.katesDBComponent(),
 		dc.katesComponent(),
 		dc.kafkaUIComponent(),
 		dc.mirrorMaker2Component(),
@@ -1684,9 +1689,13 @@ func (dc *deployContext) katesComponent() component {
 	kafkaNS := dc.ns.kafka
 	appNS := dc.ns.app
 	chaosNS := dc.ns.chaos
+	deps := []string{"kafka-users", "postgres", "monitoring"}
+	if katesOperatorMode() {
+		deps = append(deps, "kates-operator", "kates-db")
+	}
 	return component{
 		id: "kates", name: "Kates Backend", namespace: appNS,
-		deps: []string{"kafka-users", "postgres", "monitoring"}, timeout: 8 * time.Minute,
+		deps: deps, timeout: 10 * time.Minute,
 		enabled: func() bool { return deployWithKates },
 		// The KafkaUser was already waited on (kafka-users) — just read the Secret.
 		secrets: []secretCopy{{name: "kates-backend"}},
@@ -1698,6 +1707,9 @@ func (dc *deployContext) katesComponent() component {
 			return fmt.Sprintf("\n📦 %s Kates Backend (Namespace: %s)...", verb, appNS)
 		},
 		install: func(ctx context.Context) error {
+			if katesOperatorMode() {
+				return dc.installKatesResource(ctx)
+			}
 			// Auto-cleanup stale ClusterRole ownership from previous topology switches
 			cleanupStaleClusterResource(ctx, "clusterrole", "kates", appNS)
 			cleanupStaleClusterResource(ctx, "clusterrolebinding", "kates", appNS)
@@ -1759,6 +1771,9 @@ func (dc *deployContext) katesComponent() component {
 			return runKatesHelmUpgrade(ctx, appNS, katesArgs...)
 		},
 		wait: func(ctx context.Context) error {
+			if katesOperatorMode() {
+				return waitKatesResource(ctx, appNS)
+			}
 			return dc.waitPods(ctx, appNS, "app.kubernetes.io/instance=kates", 8*time.Minute, "")
 		},
 	}

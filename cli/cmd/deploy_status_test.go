@@ -268,7 +268,7 @@ func TestParsePodListHealth(t *testing.T) {
 // "Unknown" in every status output. Nothing failed, because nothing checked
 // that the table and the health check agreed.
 func TestEveryStatusComponentCanBeChecked(t *testing.T) {
-	for _, c := range statusComponents("kafka", "connect", "kates", "litmus", "monitoring", "database", "kafka", "kafka") {
+	for _, c := range statusComponents("kafka", "connect", "kates", "litmus", "monitoring", "database", "kafka", "kafka", "kates-operator") {
 		if !healthCheckKinds(c.Kind) {
 			t.Errorf("%s is listed with kind %q, which no health check handles — it would report a blank Unknown", c.Name, c.Kind)
 		}
