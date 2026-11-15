@@ -217,7 +217,7 @@ var mcpCaveatsCore = []mcpCaveat{
 			"measure out of its grade and lists it, with the reason, under unevaluated (with nothing measured the grade " +
 			"is \"-\"), so read a grade that has unevaluated checks as partial.",
 		Refs: []string{
-			mcpAnchoredRef("kates/src/main/resources/application.properties:329-334",
+			mcpAnchoredRef("kates/src/main/resources/application.properties:336-341",
 				"# Prometheus server (for disruption metrics capture)",
 				"kates.prometheus.url=http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090"),
 			mcpAnchoredRef("charts/kates/values.yaml:449-459",

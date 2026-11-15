@@ -458,7 +458,7 @@ var mcpCaveatsRunsActivity = []mcpCaveat{
 			mcpAnchoredRef(mcpJava+"service/RunRetention.java:82",
 				`auditService.record("DELETE", "test", id, auditDetails, actor);`),
 			mcpAnchoredRef(mcpJava+"service/TestCleanupScheduler.java:97", "Actor.SCHEDULER"),
-			mcpAnchoredRef(mcpJava+"audit/AuditResponseFilter.java:42-62",
+			mcpAnchoredRef(mcpJava+"audit/AuditResponseFilter.java:44-78",
 				"public void filter(ContainerRequestContext request", "if (actor == null)", "static String idOf("),
 			mcpAnchoredRef(mcpJava+"security/GrpcApiKeyInterceptor.java:67-70,100,156-159",
 				"static final Map<String, String> AUDITED", "audit(action, method, Status.Code.PERMISSION_DENIED",
