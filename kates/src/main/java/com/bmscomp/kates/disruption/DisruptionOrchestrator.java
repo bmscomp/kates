@@ -56,6 +56,10 @@ public class DisruptionOrchestrator {
     @Inject
     DisruptionConcurrencyGuard concurrencyGuard;
 
+    // Built without config, as the tests build it, a Quorum is alone and always leads.
+    @Inject
+    com.bmscomp.kates.quorum.Quorum quorum = new com.bmscomp.kates.quorum.Quorum();
+
     @ConfigProperty(name = "kates.chaos.kafka.namespace", defaultValue = "kafka")
     String kafkaNamespace;
 
@@ -144,8 +148,17 @@ public class DisruptionOrchestrator {
         double totalThroughputDelta = 0;
         double maxP99Spike = 0;
 
+        // A plan belongs to the term it started in: a member that lost the lead, or leads again in a
+        // later term, injects none of its remaining steps (J4 review). The next leader undoes the rest.
+        long term = quorum.term();
         try {
             for (DisruptionPlan.DisruptionStep step : plan.getSteps()) {
+                if (quorum.term() != term || !quorum.acceptsWrites()) {
+                    LOG.warnf(
+                            "Plan '%s' stopped before step '%s': this member no longer leads term %d",
+                            plan.getName(), step.name(), term);
+                    break;
+                }
                 LOG.info("Executing disruption step: " + step.name());
                 eventBus.emit(
                         disruptionId,
@@ -367,7 +380,7 @@ public class DisruptionOrchestrator {
                     recovered = safetyGuard.verifyClusterState();
                 }
 
-                if (!recovered && plan.isAutoRollback()) {
+                if (!recovered && plan.isAutoRollback() && quorum.acceptsWrites()) {
                     LOG.warn("  Recovery timeout — triggering auto-rollback for " + step.name());
                     safetyGuard.rollback(spec, outcome.engineName());
                     eventBus.emit(
@@ -423,7 +436,9 @@ public class DisruptionOrchestrator {
         } catch (Exception e) {
             LOG.error("Step '" + step.name() + "' failed", e);
 
-            if (plan.isAutoRollback()) {
+            // A member that no longer leads undoes nothing: the rollback deletes every Kates partition
+            // in the namespace, the next leader's too, and that leader undoes this one's by term.
+            if (plan.isAutoRollback() && quorum.acceptsWrites()) {
                 try {
                     LOG.warn("  Auto-rollback on exception for step " + step.name());
                     safetyGuard.rollback(step.faultSpec(), "");

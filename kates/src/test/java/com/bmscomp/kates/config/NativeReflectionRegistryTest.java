@@ -72,6 +72,8 @@ class NativeReflectionRegistryTest {
             // serialised.
             "com.bmscomp.kates.chaos.K8sPodWatcher$WatchSession",
             "com.bmscomp.kates.chaos.ProbeRegistry",
+            // The annotation names and values a fault's objects carry; a constants holder.
+            "com.bmscomp.kates.chaos.FaultMarks",
             "com.bmscomp.kates.chaos.KafkaProbes",
             // Fault-targeting helpers; a FaultSpec carries its selector as a string.
             "com.bmscomp.kates.chaos.ParsedLabelSelector",

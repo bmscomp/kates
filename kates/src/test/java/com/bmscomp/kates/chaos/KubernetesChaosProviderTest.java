@@ -343,36 +343,7 @@ public class KubernetesChaosProviderTest {
 
     @Test
     void testScaleDownSnapshotsOriginalReplicas() throws ExecutionException, InterruptedException, TimeoutException {
-        // A Kafka not run by Strimzi: pods of a StatefulSet.
-        StatefulSet ss = new StatefulSetBuilder()
-                .withNewMetadata()
-                .withName("kafka")
-                .withNamespace("default")
-                .addToLabels("app", "kafka")
-                .endMetadata()
-                .withNewSpec()
-                .withReplicas(3)
-                .endSpec()
-                .build();
-        client.apps().statefulSets().inNamespace("default").resource(ss).create();
-        for (int i = 0; i < 3; i++) {
-            client.pods()
-                    .inNamespace("default")
-                    .resource(new PodBuilder()
-                            .withNewMetadata()
-                            .withName("kafka-" + i)
-                            .withNamespace("default")
-                            .addToLabels("app", "kafka")
-                            .addNewOwnerReference()
-                            .withApiVersion("apps/v1")
-                            .withKind("StatefulSet")
-                            .withName("kafka")
-                            .withUid("sts-uid")
-                            .endOwnerReference()
-                            .endMetadata()
-                            .build())
-                    .create();
-        }
+        createKafkaStatefulSet();
 
         FaultSpec spec = FaultSpec.builder("scale-down")
                 .targetNamespace("default")
@@ -989,5 +960,167 @@ public class KubernetesChaosProviderTest {
     @Test
     void testIsAvailable() {
         assertTrue(provider.isAvailable());
+    }
+
+    /** A Kafka not run by Strimzi: three pods of the StatefulSet {@code kafka} in {@code default}. */
+    private void createKafkaStatefulSet() {
+        StatefulSet ss = new StatefulSetBuilder()
+                .withNewMetadata()
+                .withName("kafka")
+                .withNamespace("default")
+                .addToLabels("app", "kafka")
+                .endMetadata()
+                .withNewSpec()
+                .withReplicas(3)
+                .endSpec()
+                .build();
+        client.apps().statefulSets().inNamespace("default").resource(ss).create();
+        for (int i = 0; i < 3; i++) {
+            client.pods()
+                    .inNamespace("default")
+                    .resource(new PodBuilder()
+                            .withNewMetadata()
+                            .withName("kafka-" + i)
+                            .withNamespace("default")
+                            .addToLabels("app", "kafka")
+                            .addNewOwnerReference()
+                            .withApiVersion("apps/v1")
+                            .withKind("StatefulSet")
+                            .withName("kafka")
+                            .withUid("sts-uid")
+                            .endOwnerReference()
+                            .endMetadata()
+                            .build())
+                    .create();
+        }
+    }
+
+    private static com.bmscomp.kates.quorum.Quorum quorumAt(long term, boolean leads) {
+        com.bmscomp.kates.quorum.Quorum quorum = org.mockito.Mockito.mock(com.bmscomp.kates.quorum.Quorum.class);
+        org.mockito.Mockito.when(quorum.term()).thenReturn(term);
+        if (leads) {
+            org.mockito.Mockito.when(quorum.requireWrites()).thenReturn(term);
+        } else {
+            org.mockito.Mockito.doThrow(new com.bmscomp.kates.engine.NotLeaderException("m1"))
+                    .when(quorum)
+                    .requireWrites();
+        }
+        return quorum;
+    }
+
+    private static void assertMarked(java.util.Map<String, String> annotations, String term) {
+        assertEquals(term, annotations.get(FaultMarks.TERM), "the term of the leader that wrote it");
+        java.time.Instant deadline = java.time.Instant.parse(annotations.get(FaultMarks.DEADLINE));
+        java.time.Instant expected = java.time.Instant.now().plusMillis(7_200_000);
+        assertTrue(
+                Math.abs(java.time.Duration.between(expected, deadline).toSeconds()) < 5,
+                "the engine's run bound from now: " + deadline);
+    }
+
+    @Test
+    void aMemberThatDoesNotLeadInjectsNothing() throws Exception {
+        createZonedBrokers();
+        createKafkaStatefulSet();
+        provider.quorum = quorumAt(3, false);
+        requests();
+        for (DisruptionType type : List.of(
+                DisruptionType.POD_KILL,
+                DisruptionType.NETWORK_PARTITION,
+                DisruptionType.SCALE_DOWN,
+                DisruptionType.ROLLING_RESTART,
+                DisruptionType.CPU_STRESS)) {
+            FaultSpec spec = type == DisruptionType.SCALE_DOWN
+                    ? FaultSpec.builder("x")
+                            .targetNamespace("default")
+                            .targetLabel("app=kafka")
+                            .disruptionType(type)
+                            .build()
+                    : FaultSpec.builder("x")
+                            .targetPod("krafter-brokers-0")
+                            .disruptionType(type)
+                            .chaosDurationSec(1)
+                            .build();
+
+            ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+            assertFalse(outcome.isPass(), type + " went in");
+            assertTrue(outcome.failureReason().contains("does not lead"), type + ": " + outcome.failureReason());
+        }
+        List<String> writes =
+                requests().stream().filter(r -> !r.startsWith("GET ")).toList();
+        assertEquals(List.of(), writes, "a member that does not lead writes nothing");
+    }
+
+    @Test
+    void aPartitionCarriesItsTermAndDeadline() throws Exception {
+        createZonedBrokers();
+        provider.quorum = quorumAt(7, true);
+        FaultSpec spec = FaultSpec.builder("split")
+                .targetPod("krafter-brokers-0")
+                .disruptionType(DisruptionType.NETWORK_PARTITION)
+                .chaosDurationSec(30)
+                .build();
+
+        provider.triggerFault(spec);
+        var policy = await(() -> client.network()
+                .networkPolicies()
+                .inNamespace("kafka")
+                .withName("kates-netpol-krafter-brokers-0")
+                .get());
+
+        assertMarked(policy.getMetadata().getAnnotations(), "7");
+    }
+
+    @Test
+    void aScaleDownCarriesItsTermAndDeadline() throws Exception {
+        createKafkaStatefulSet();
+        provider.quorum = quorumAt(7, true);
+        FaultSpec spec = FaultSpec.builder("scale-down")
+                .targetNamespace("default")
+                .targetLabel("app=kafka")
+                .disruptionType(DisruptionType.SCALE_DOWN)
+                .build();
+
+        assertTrue(provider.triggerFault(spec).get(5, TimeUnit.SECONDS).isPass());
+
+        StatefulSet after = client.apps()
+                .statefulSets()
+                .inNamespace("default")
+                .withName("kafka")
+                .get();
+        assertMarked(after.getMetadata().getAnnotations(), "7");
+    }
+
+    private static <T> T await(java.util.function.Supplier<T> found) throws InterruptedException {
+        for (int i = 0; i < 50; i++) {
+            T value = found.get();
+            if (value != null) {
+                return value;
+            }
+            TimeUnit.MILLISECONDS.sleep(100);
+        }
+        throw new AssertionError("not within 5 s");
+    }
+
+    @Test
+    void aFaultIsMarkedWithTheTermItWasConfirmedIn() throws Exception {
+        createZonedBrokers();
+        // Confirmed in term 7; by the time the object is built the member has heard of term 8.
+        provider.quorum = quorumAt(7, true);
+        org.mockito.Mockito.when(provider.quorum.term()).thenReturn(8L);
+        FaultSpec spec = FaultSpec.builder("split")
+                .targetPod("krafter-brokers-0")
+                .disruptionType(DisruptionType.NETWORK_PARTITION)
+                .chaosDurationSec(30)
+                .build();
+
+        provider.triggerFault(spec);
+        var policy = await(() -> client.network()
+                .networkPolicies()
+                .inNamespace("kafka")
+                .withName("kates-netpol-krafter-brokers-0")
+                .get());
+
+        assertMarked(policy.getMetadata().getAnnotations(), "7");
     }
 }

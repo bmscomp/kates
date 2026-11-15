@@ -52,6 +52,9 @@ public class Quorum {
     @Inject
     Event<LeadershipAcquired> takeover;
 
+    @Inject
+    Event<LeadershipLost> lost;
+
     private volatile QuorumMember member;
     private volatile long recoveredTerm = -1;
     private QuorumMember.Settings settings;
@@ -67,7 +70,7 @@ public class Quorum {
         org.apache.ratis.util.ExitUtils.disableSystemExit();
         settings = QuorumMember.Settings.parse(
                 peers.get(), memberId(), dir.orElse(null), cert.orElse(null), key.orElse(null), ca.orElse(null));
-        member = QuorumMember.start(settings);
+        member = QuorumMember.start(settings, this::lostLead);
         LOG.infof(
                 "quorum member %s started, %d members",
                 settings.memberId(), settings.peers().size());
@@ -155,19 +158,39 @@ public class Quorum {
         LOG.warnf(
                 "quorum member %s: Ratis server %s, starting it again from its disk",
                 current.memberId(), current.state());
+        // Ratis closes a paused server without telling its state machine the lead changed.
+        if (recoveredTerm >= 0) {
+            lostLead(recoveredTerm);
+        }
         try {
             current.close();
         } catch (IOException | RuntimeException e) {
             LOG.debugf("closing the old member: %s", e);
         }
         try {
-            member = QuorumMember.start(settings);
+            member = QuorumMember.start(settings, this::lostLead);
             notServingSince = null;
             recoveredTerm = -1;
             LOG.infof("quorum member %s serves again", settings.memberId());
         } catch (IOException | RuntimeException e) {
             LOG.warnf("quorum member %s could not start again, retrying: %s", settings.memberId(), e);
         }
+    }
+
+    /** Off Ratis' thread: the observers stop this member's runs, which takes a while. */
+    private void lostLead(long term) {
+        Event<LeadershipLost> event = lost;
+        if (event == null) {
+            return;
+        }
+        LOG.warnf("Member %s no longer leads term %d", memberId(), term);
+        Thread.ofVirtual().name("quorum-lost-lead").start(() -> {
+            try {
+                event.fire(new LeadershipLost(term, Instant.now()));
+            } catch (RuntimeException e) {
+                LOG.warnf("Stopping this member's work after it lost the lead failed: %s", e);
+            }
+        });
     }
 
     /** Since when this member's Ratis server has not been running; empty while it serves, or with no quorum. */
@@ -177,6 +200,25 @@ public class Quorum {
 
     QuorumMember member() {
         return member;
+    }
+
+    /** The term this member is in, as it last heard; {@code 0} with no quorum or while it does not serve. */
+    public long term() {
+        QuorumMember current = member;
+        return current == null || !current.serving() ? 0 : current.term();
+    }
+
+    /**
+     * Throws unless this member may write now, as {@link #acceptsWrites()} decides, and returns the
+     * term it confirmed: called right before a fault goes into Kubernetes, so a member that stopped
+     * leading since its plan started injects nothing, and what it writes carries that term, not one
+     * read later.
+     */
+    public long requireWrites() {
+        if (!acceptsWrites()) {
+            throw new com.bmscomp.kates.engine.NotLeaderException(leaderId());
+        }
+        return term();
     }
 
     /** The leader this member knows of, or null with no quorum or during an election. */

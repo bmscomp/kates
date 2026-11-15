@@ -69,9 +69,12 @@ final class NodePoolScaleDown {
         REMOVED
     }
 
-    NodePoolScaleDown(KubernetesClient client, long pollIntervalMs) {
+    private final Map<String, String> marks;
+
+    NodePoolScaleDown(KubernetesClient client, long pollIntervalMs, Map<String, String> marks) {
         this.client = client;
         this.pollIntervalMs = pollIntervalMs;
+        this.marks = marks;
     }
 
     /**
@@ -176,15 +179,17 @@ final class NodePoolScaleDown {
                     throw new IllegalStateException(
                             "KafkaNodePool " + pool.name() + " changed size while SCALE_DOWN was lowering it");
                 }
+                Map<String, String> a = new HashMap<>(
+                        p.getMetadata().getAnnotations() != null
+                                ? p.getMetadata().getAnnotations()
+                                : Map.of());
+                // Every time, as for a StatefulSet: an earlier plan's snapshot carries an older term.
+                a.putAll(marks);
                 if (snapshot) {
-                    Map<String, String> a = new HashMap<>(
-                            p.getMetadata().getAnnotations() != null
-                                    ? p.getMetadata().getAnnotations()
-                                    : Map.of());
                     a.put(KubernetesChaosProvider.ORIGINAL_REPLICAS_ANNOTATION, String.valueOf(replicas));
                     a.put(KubernetesChaosProvider.SCALED_DOWN_AT_ANNOTATION, scaledDownAt);
-                    p.getMetadata().setAnnotations(a);
                 }
+                p.getMetadata().setAnnotations(a);
                 spec(p).put("replicas", replicas - 1);
                 return p;
             });

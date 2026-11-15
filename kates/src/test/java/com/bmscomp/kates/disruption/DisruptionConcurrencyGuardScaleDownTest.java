@@ -93,4 +93,16 @@ class DisruptionConcurrencyGuardScaleDownTest {
 
         assertEquals(2, get("brokers").getSpec().getReplicas());
     }
+
+    @Test
+    void aHolderThatNoLongerLeadsGivesNothingBack() {
+        String target = guard.currentTarget();
+        guard.tryAcquire(target, "plan#1");
+        scaledDown("brokers", System.currentTimeMillis());
+        guard.quorum = org.mockito.Mockito.mock(com.bmscomp.kates.quorum.Quorum.class);
+
+        guard.release(target, "plan#1");
+
+        assertEquals(2, get("brokers").getSpec().getReplicas(), "the next leader gives it back");
+    }
 }

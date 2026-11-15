@@ -76,7 +76,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Short: "A LOAD run is one producer and one consumer whatever numProducers says; only STRESS runs parallel producers.",
 		Text: "A LOAD run is one producer and one consumer, whatever numProducers and numConsumers say, " +
 			"so it cannot show how the cluster behaves under parallel clients. STRESS starts one producer per numProducers.",
-		Refs: []string{mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1796-1805", "case LOAD ->", "case STRESS ->")},
+		Refs: []string{mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1828-1837", "case LOAD ->", "case STRESS ->")},
 	},
 	{
 		ID:    mcpCaveatReaperDeadline,
@@ -99,7 +99,7 @@ var mcpCaveatsCore = []mcpCaveat{
 			"kates/src/main/resources/application.properties:336-350",
 			mcpAnchoredRef(mcpJava+"engine/TestTimeoutReaper.java:49-51,67-76,170-173,201-214",
 				"TestResult.TaskStatus.STOPPING", "kates.engine.reaper-grace-ms", "\"-submission\"", "\"Timeout: still \""),
-			mcpJava + "engine/TestOrchestrator.java:151-217,259-262,436,1251-1315,1381-1390,1445-1477",
+			mcpJava + "engine/TestOrchestrator.java:151-249,291-294,468,1283-1347,1413-1422,1477-1509",
 			mcpJava + "persistence/EntityMapper.java:161-170",
 			"kates/src/main/resources/db/migration/V24__run_planned_duration.sql:1-13",
 			mcpJava + "domain/TestRun.java:520-523",
@@ -123,10 +123,10 @@ var mcpCaveatsCore = []mcpCaveat{
 			"integrity-cg-integrity, without transactions.",
 		Refs: []string{
 			mcpJava + "domain/TestSpec.java:14-32,111-113",
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:228,251-253,301",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:260,283-285,333",
 				"applyTypeDefaults(type, request.getSpec())", ".withRequestedSpec(", "buildTasks(type, spec, run.getId())"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1171-1217", "TestSpec applyTypeDefaults(", "return merged;"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1775-1779,1870-1874",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1203-1249", "TestSpec applyTypeDefaults(", "return merged;"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1807-1811,1902-1906",
 				"Only when asked", `"-integrity-0-group")`),
 			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:792", `task.getConsumerGroup() + "-integrity"`),
 			mcpAnchoredRef(mcpJava+"persistence/EntityMapper.java:56,85-86,146-148",
@@ -177,7 +177,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Text: "A TUNE_* run executes one produce task with the spec's single configuration: it measures one setting " +
 			"and compares none.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1881-1882", "case TUNE_REPLICATION,", "-tune-0"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1913-1914", "case TUNE_REPLICATION,", "-tune-0"),
 		},
 	},
 	{
@@ -241,7 +241,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Refs: []string{
 			mcpAnchoredRef("kates/src/main/resources/application.properties:274-275",
 				"# Chaos coordination (noop | kubernetes | litmus-crd | hybrid)", "kates.chaos.provider=litmus-crd"),
-			mcpAnchoredRef(mcpJava+"chaos/LitmusChaosProvider.java:63,108",
+			mcpAnchoredRef(mcpJava+"chaos/LitmusChaosProvider.java:63,117",
 				"int resultPollIntervalMs = 5_000;", "Instant start = Instant.now();"),
 		},
 	},

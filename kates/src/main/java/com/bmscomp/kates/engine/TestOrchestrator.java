@@ -156,15 +156,47 @@ public class TestOrchestrator {
     }
 
     /**
-     * Fails, before this member takes its first write as leader, the live runs any other member
-     * created: only a leader starts runs, so they are a previous leader's, and it is gone or has
-     * lost the lead. A failure here keeps the member from taking writes, and is tried again.
+     * At takeover, fails the live runs any other member created: only a leader starts runs, so they
+     * are a previous leader's, and it is gone or has lost the lead. A failure, such as PostgreSQL
+     * down, no longer keeps the member from leading (J4 F6): the reconciler tries again each pass.
      */
     void recoverPreviousLeaders(@Observes LeadershipAcquired takeover) {
+        try {
+            recoverPreviousLeaders();
+        } catch (RuntimeException e) {
+            LOG.warnf("Term %d: the previous leader's runs are not recovered yet, retried: %s", takeover.term(), e);
+        }
+    }
+
+    /** Fails another member's live runs; with no quorum there is no other member, and nothing to do. */
+    public void recoverPreviousLeaders() {
+        if (quorum.memberId() == null) {
+            return;
+        }
         recover(
                 repository.findByStatusAndMember(ORPHAN_STATUSES, quorum.memberId(), false),
                 "when the member running it stopped leading",
-                "takeover, term " + takeover.term());
+                "takeover");
+        // Its own too, once it no longer runs them: it settled them when it lost the lead, and
+        // leads again (J4 review). A run it still runs has its handles.
+        recover(
+                repository.findByStatusAndMember(ORPHAN_STATUSES, quorum.memberId(), true).stream()
+                        .filter(run -> !activeHandles.containsKey(run.getId()))
+                        .toList(),
+                "when the member running it stopped leading",
+                "takeover");
+    }
+
+    /**
+     * Stops this member's runs once it no longer leads: their load would otherwise go on hitting
+     * Kafka, counted by no leader's permits. Only settled here; the new leader stores them FAILED.
+     */
+    void onLeadershipLost(@Observes com.bmscomp.kates.quorum.LeadershipLost lost) {
+        List<String> runs = List.copyOf(activeHandles.keySet());
+        if (!runs.isEmpty()) {
+            LOG.warnf("No longer leading term %d: stopping %d run(s)", lost.term(), runs.size());
+        }
+        runs.forEach(this::settle);
     }
 
     private void recover(List<TestRun> orphans, String when, String by) {
