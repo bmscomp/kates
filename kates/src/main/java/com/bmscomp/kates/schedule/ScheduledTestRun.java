@@ -6,6 +6,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 /**
  * JPA entity for a scheduled/recurring test configuration.
  * Stores the cron expression and the serialized CreateTestRequest.
@@ -35,6 +37,11 @@ public class ScheduledTestRun {
 
     @Column(name = "last_run_at")
     private Instant lastRunAt;
+
+    /** Written only by ScheduleFirings, in SQL, so a save of a stale copy never takes a claim back. */
+    @JsonIgnore
+    @Column(name = "last_due", insertable = false, updatable = false)
+    private Instant lastDue;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
@@ -105,5 +112,9 @@ public class ScheduledTestRun {
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public Instant getLastDue() {
+        return lastDue;
     }
 }
