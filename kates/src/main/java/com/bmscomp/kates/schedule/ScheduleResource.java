@@ -258,11 +258,12 @@ public class ScheduleResource {
                             throw new RuntimeException(e);
                         }
                     }
-                    repository.save(schedule);
                     if (passOver) {
-                        // Turning a schedule on or re-timing it passes over the due times before now.
+                        // Turning a schedule on or re-timing it passes over the due times before now,
+                        // before the save, so a tick between the two still sees it as it was.
                         firings.claim(ScheduleFirings.Kind.TESTS, id, java.time.Instant.now());
                     }
+                    repository.save(schedule);
                     return Response.ok(schedule).build();
                 })
                 .orElseGet(() -> Response.status(404)

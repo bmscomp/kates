@@ -72,7 +72,7 @@ public class TestScheduler {
 
         for (ScheduledTestRun schedule : schedules) {
             try {
-                Instant since = schedule.getLastDue() != null ? schedule.getLastDue() : schedule.getCreatedAt();
+                Instant since = DueTimes.since(schedule.getCreatedAt(), schedule.getLastDue(), schedule.getLastRunAt());
                 DueTimes.toFire(schedule.getCronExpression(), since, now)
                         .filter(due -> firings.claim(ScheduleFirings.Kind.TESTS, schedule.getId(), due))
                         .ifPresent(due -> {

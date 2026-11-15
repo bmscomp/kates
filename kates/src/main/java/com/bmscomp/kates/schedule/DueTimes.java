@@ -22,6 +22,22 @@ public final class DueTimes {
     private DueTimes() {}
 
     /**
+     * The instant a schedule's due times are counted after: the latest of its
+     * creation, its last claimed due time and its last run's start. The last
+     * run counts too, since a row from before V31 has no last_due, and a
+     * Kates API of the version before it still fires during a rolling upgrade.
+     */
+    public static Instant since(Instant createdAt, Instant lastDue, Instant lastRunAt) {
+        Instant since = createdAt;
+        for (Instant later : new Instant[] {lastDue, lastRunAt}) {
+            if (later != null && later.isAfter(since)) {
+                since = later;
+            }
+        }
+        return since;
+    }
+
+    /**
      * The latest due time {@code d} of {@code cron} (UNIX, UTC) with
      * {@code since < d <= now} and {@code d >= now - CATCH_UP}, or empty.
      * Throws IllegalArgumentException when {@code cron} does not parse.

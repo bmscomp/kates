@@ -14,6 +14,7 @@ import jakarta.inject.Inject;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
+import io.quarkus.test.junit.mockito.InjectSpy;
 import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
 import org.junit.jupiter.api.AfterEach;
@@ -44,7 +45,7 @@ class TestSchedulerFiringTest {
     @Inject
     TestScheduler scheduler;
 
-    @Inject
+    @InjectSpy
     ScheduledTestRunRepository repository;
 
     private String id;
@@ -134,6 +135,43 @@ class TestSchedulerFiringTest {
 
         scheduler.evaluate(Instant.now());
         verify(orchestrator, times(1)).executeTest(any(), anyString());
+    }
+
+    /** The version before last_due fired 10:37 and wrote lastRunAt; the first tick after the upgrade does not fire it again. */
+    @Test
+    void aDueTimeThePreviousVersionFiredDoesNotFireAgain() {
+        save(true, T0);
+        ScheduledTestRun fired = repository.findById(id).orElseThrow();
+        fired.setLastRunAt(Instant.parse("2026-11-15T10:37:01Z"));
+        repository.save(fired);
+
+        scheduler.evaluate(T0.plusSeconds(45));
+
+        verify(orchestrator, never()).executeTest(any(), anyString());
+    }
+
+    /** A tick that lands between the PUT's save and its pass-over fires nothing from before the PUT. */
+    @Test
+    void aTickDuringTheReEnablingPutFiresNothing() {
+        Instant now = Instant.now();
+        save(false, now.minus(Duration.ofMinutes(10)));
+        doAnswer(saving -> {
+                    saving.callRealMethod();
+                    scheduler.evaluate(Instant.now());
+                    return null;
+                })
+                .when(repository)
+                .save(any());
+
+        RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"enabled\":true}")
+                .when()
+                .put("/api/schedules/" + id)
+                .then()
+                .statusCode(200);
+
+        verify(orchestrator, never()).executeTest(any(), anyString());
     }
 
     private void save(boolean enabled, Instant createdAt) {

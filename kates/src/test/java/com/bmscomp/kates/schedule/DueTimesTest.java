@@ -62,6 +62,16 @@ class DueTimesTest {
         assertEquals(Optional.of(at("10:37:00")), toFire("* * * * *", "10:36:30", "10:37:01"));
     }
 
+    /** A row from before V31 has no last_due; the run the previous version started still counts. */
+    @Test
+    void sinceIsTheLatestOfCreatedLastDueAndLastRun() {
+        Instant created = at("09:00:00");
+        assertEquals(created, DueTimes.since(created, null, null));
+        assertEquals(at("10:35:02"), DueTimes.since(created, null, at("10:35:02")));
+        assertEquals(at("10:40:00"), DueTimes.since(created, at("10:40:00"), at("10:35:02")));
+        assertEquals(at("10:40:03"), DueTimes.since(created, at("10:40:00"), at("10:40:03")));
+    }
+
     // ------------------------------------------------ cron semantics, from the old matcher's tests
 
     /** Whether {@code at}'s minute is a due time: it fires with since one minute before it. */

@@ -14,8 +14,8 @@ import org.jboss.logging.Logger;
 
 /**
  * Cron-based scheduler for recurring disruption tests.
- * Evaluates enabled schedules every 60 seconds, executing matching plans
- * via DisruptionOrchestrator or from the playbook catalog.
+ * Evaluates enabled schedules every 10 seconds, and runs the plan of each due
+ * time once, via DisruptionOrchestrator or from the playbook catalog.
  */
 @ApplicationScoped
 public class DisruptionScheduler {
@@ -49,7 +49,13 @@ public class DisruptionScheduler {
     @jakarta.inject.Inject
     com.bmscomp.kates.quorum.Quorum quorum;
 
-    @Scheduled(every = "10s", identity = "kates-disruption-schedule-evaluator")
+    // SKIP: a tick runs each plan it fires to its end. A tick started meanwhile would fire a
+    // schedule due the same minute into the target the first plan holds, and spend its due time
+    // on a REJECTED report; with SKIP, the running tick fires it after its plan, as one tick did.
+    @Scheduled(
+            every = "10s",
+            identity = "kates-disruption-schedule-evaluator",
+            concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void evaluateSchedules() {
         evaluate(Instant.now());
     }
@@ -71,7 +77,8 @@ public class DisruptionScheduler {
 
         for (DisruptionScheduleEntity schedule : schedules) {
             try {
-                Instant since = schedule.getLastDue() != null ? schedule.getLastDue() : schedule.getCreatedAt();
+                Instant since = com.bmscomp.kates.schedule.DueTimes.since(
+                        schedule.getCreatedAt(), schedule.getLastDue(), schedule.getLastRunAt());
                 com.bmscomp.kates.schedule.DueTimes.toFire(schedule.getCronExpression(), since, now)
                         .filter(due -> firings.claim(
                                 com.bmscomp.kates.schedule.ScheduleFirings.Kind.DISRUPTIONS, schedule.getId(), due))
