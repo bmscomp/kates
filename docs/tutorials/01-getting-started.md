@@ -2,55 +2,54 @@
 
 This tutorial walks you through deploying the Kates stack, running your first performance test, and understanding the results.
 
-## Step 1: Deploy the Infrastructure
+## Step 1: Install the Tools and the CLI
 
-If you haven't already deployed the cluster, run:
+You need Docker, running, with about 16 GB of RAM available to it, plus Kind, kubectl, Helm and the `kates` CLI. Homebrew installs the last four on macOS and on Linux:
 
 ```bash
-make all
+brew install kind kubectl helm bmscomp/tap/kates
+kates version
 ```
 
-This creates the Kind cluster, pulls all container images, and deploys Kafka, monitoring, and LitmusChaos. This is a one-time setup step — it takes 5–10 minutes on a fresh machine.
+For Docker, use Docker Desktop, OrbStack or Colima on macOS, and Docker Engine on Linux. The `kates` formula also installs cosign, which `kates deploy` uses to check the signatures of the charts it pulls.
 
-`make all` prompts for a topology before it does anything. Choose **2, isolated namespaces** — the rest of this tutorial uses the namespaces that choice creates (`kafka`, `kates`, `monitoring`, `litmus`). Option 1 puts the whole stack in a single `kates-stack` namespace instead, which is fine for a scratch cluster but means every `-n <namespace>` below needs changing.
+Without Homebrew on Linux, install Docker Engine, Kind, kubectl and Helm from their own install pages, then the CLI with the release installer, which checks the download against the release's checksums:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bmscomp/kates/main/scripts/install-kates.sh | bash
+```
+
+You don't need a clone of the repository: a released `kates` installs the charts its release published. Building from source is for working on Kates itself; [Building from source](../../README.md#building-from-source) covers it.
+
+## Step 2: Deploy the Stack
+
+```bash
+kates deploy --topology isolated
+```
+
+With no cluster reachable, `kates deploy` offers to create [`panda`](../book/appendix-a-glossary.md#gl-panda), a three-zone Kind cluster, and switches kubectl to it. Accept, and it then installs Strimzi, Kafka, monitoring, LitmusChaos and the Kates API. On a fresh machine this takes 5–10 minutes, most of it pulling images. When a cluster is already reachable, it deploys into kubectl's current context instead, so check `kubectl config current-context` first.
+
+`--topology isolated` puts each component in its own namespace (`kafka`, `kates`, `monitoring`, `litmus`), which the rest of this tutorial uses. `--topology single` puts the whole stack in one `kates-stack` namespace instead, which is fine for a scratch cluster but means every `-n <namespace>` below needs changing.
 
 > [!TIP]
-> If `make all` fails with image pull errors, check your internet connection and Docker disk space (`docker system df`). Kind needs at least 20GB of free disk space.
+> If `kates deploy` fails with image pull errors, check your internet connection and Docker disk space (`docker system df`). Kind needs at least 20GB of free disk space. After you fix the cause, run `kates deploy` again: it skips or upgrades what is already installed.
 
 Verify everything is running:
 
 ```bash
-make status
-```
-
-Expected output: all pods across `kafka`, `monitoring`, and `litmus` namespaces should be `Running`.
-
-## Step 2: Deploy Kates
-
-```bash
-make kates
-```
-
-This builds the Kates Quarkus application, creates a Docker image, loads it into Kind, and deploys it to the `kates` namespace. The backend exposes a REST API on port 30083 that the CLI uses for all commands.
-
-Verify:
-
-```bash
+kubectl get pods -n kafka
 kubectl get pods -n kates
 ```
 
-You should see the Kates pod running.
+All pods should be `Running`. The Kates backend exposes a REST API that the CLI uses for all commands.
 
-## Step 3: Install and Configure the CLI
+## Step 3: Connect the CLI
 
 ```bash
-# Build and install
-make cli-install
-
-# Create a context
-kates ctx set local --url http://localhost:30083
-kates ctx use local
+kates ports
 ```
+
+`kates ports` forwards the Kates API to `http://localhost:8080` and the other services to their ports, in the background. It writes a CLI context named `ports`, with the URL and the API key from the `kates-api-key` Secret, and makes it current.
 
 ## Step 4: Verify Connectivity
 

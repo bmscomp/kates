@@ -1,6 +1,6 @@
 # Deployment Guide
 
-The first `make all` asks you one question — one namespace or several — and the answer decides who may read your Kafka credentials, what a chaos experiment can take down, and whether `kubectl delete namespace` is a teardown or an outage. This chapter is about that question and the two beside it: how you expose the stack and where its data lives. A deployment tuned for local experimentation buckles under production load; a production layout is needless overhead on a laptop.
+The first `kates deploy` asks you one question — one namespace or several — and the answer decides who may read your Kafka credentials, what a chaos experiment can take down, and whether `kubectl delete namespace` is a teardown or an outage. This chapter is about that question and the two beside it: how you expose the stack and where its data lives. A deployment tuned for local experimentation buckles under production load; a production layout is needless overhead on a laptop.
 
 ::: {.callout-note title="Scope"}
 This chapter deploys the Kates stack: the [Kates API](appendix-a-glossary.md#gl-kates-api), the CLI, monitoring and chaos tooling, and the layout between them. Provisioning [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test, is [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md), and its rationale is [Kafka Deployment Engineering](15-kafka-deployment.md).
@@ -11,7 +11,7 @@ After this chapter, you can:
 - Choose a topology — namespace layout, service exposure, storage durability — that fits your environment
 - Size CPU, memory, and disk per component so your tests measure Kafka, not resource contention
 - Adapt the stack to EKS, GKE, or AKS with provider-specific [values overlays](appendix-a-glossary.md#gl-values-overlay)
-- Deploy everything with `make all` and verify it with `make status` and `kates health`
+- Deploy everything with `kates deploy` and verify it with `kates health`
 
 ## Prerequisites
 
@@ -24,9 +24,17 @@ The lab needs these tools on your machine. The versions it is tested with are in
 | kubectl | Kubernetes CLI |
 | Helm | Kubernetes package manager |
 | jq | JSON processing (optional) |
-| Go | CLI compilation (if building from source) |
-| Java | Kates API compilation (if building from source) |
-| Maven | Kates API build (bundled as `mvnw`) |
+| Kates CLI | Deploys and drives the stack |
+
+On macOS, and on Linux with Homebrew, one command installs the last four:
+
+```bash
+brew install kind kubectl helm bmscomp/tap/kates
+```
+
+For Docker, use Docker Desktop, OrbStack or Colima on macOS, and Docker Engine on Linux. The `kates` formula also installs cosign, which checks the signatures of the charts `kates deploy` pulls. Without Homebrew, install Kind, kubectl and Helm from their own install pages, and the CLI as [Installation](10-cli-reference.md#installation) in CLI Reference describes.
+
+Go, a JDK and Maven are needed only to build Kates from source, to work on it; [Building from Source](#building-from-source) covers that path.
 
 ## Deployment Architecture Decisions
 
@@ -164,13 +172,27 @@ The Minimal profile (16 GB) runs everything but leaves almost no headroom. If yo
 
 ## Quick Deployment
 
-One command deploys everything:
+One command deploys everything, with the CLI that Homebrew installed and no checkout of the repository:
 
 ```bash
-make all
+kates deploy
 ```
 
-`make all` drives the deployment through the Kates CLI itself. In order, it:
+In order, it:
+
+1. Checks that kubectl and helm are installed.
+2. Uses the reachable cluster, asks which one when several are reachable, or offers to build the Kind cluster `panda` when none is.
+3. Asks whether you want a single namespace (`kates-stack`) or isolated namespaces, unless `--topology` names one.
+4. Pulls the charts its release published to `oci://ghcr.io/bmscomp/charts`, checks their signatures, and installs them.
+5. Writes the API key into the active CLI context and prints the access points.
+
+Then `kates ports` forwards the service ports and makes a CLI context named `ports` current. `--dry-run` prints the plan and installs nothing.
+
+On Kind, the Kates API runs a local [native image](appendix-a-glossary.md#gl-graalvm-native-image) when Docker or the nodes hold one, `kates:native-local` and then `kates:native`, as a source build leaves them; without one, the nodes pull the release's published native image.
+
+### Building from Source
+
+To work on Kates itself, deploy from a checkout instead. `make all` is the interactive wrapper for that path. In order, it:
 
 1. Checks that kubectl and helm are installed.
 2. Uses the reachable cluster, or builds the Kind cluster `panda` when none is reachable.
@@ -180,9 +202,7 @@ make all
 6. Runs `scripts/port-forward.sh` to expose the service ports.
 7. Prints the access points.
 
-Because `make all` sets `KATES_CHECKOUT` to the checkout, a `kates` installed from Homebrew deploys this checkout's charts rather than the ones its release published.
-
-On Kind, `kates deploy` needs a [native image](appendix-a-glossary.md#gl-graalvm-native-image) of the Kates API, `kates:native-local` or `kates:native`, in local Docker or on the node, and stops at the Kates API step without one. `make kates-native` pulls the published image or builds it and loads it into the cluster; then run `make all` again.
+Because `make all` sets `KATES_CHECKOUT` to the checkout, even a `kates` installed from Homebrew deploys this checkout's charts rather than the ones its release published. `make kates-image-native-local` compiles the working tree's backend into `kates:native-local` and loads it into the cluster, which `kates deploy` then prefers. The [Kates CLI](#kates-cli) targets build the CLI.
 
 ## Component-by-Component Deployment
 
@@ -439,7 +459,7 @@ These `emptyDir` volumes don't survive pod restarts, which is safe: `/var/run/po
 
 ### Kates CLI
 
-The CLI targets build, install and clean the `kates` binary:
+To use the CLI, install a release: `brew install bmscomp/tap/kates`, or another way from [Installation](10-cli-reference.md#installation) in CLI Reference. To work on it, the CLI targets build, install and clean the `kates` binary from a checkout:
 
 ```bash
 # Build + install locally
@@ -459,8 +479,10 @@ On macOS, `make cli-install` also strips the provenance and quarantine extended 
 After deployment, set up port forwarding:
 
 ```bash
-make ports
+kates ports
 ```
+
+From a checkout, `make ports` forwards the same services to the other port map that [Access Points](03-cluster.md#access-points) lists.
 
 For the full list of access points and URLs, see [Access Points](03-cluster.md#access-points) in The Cluster Under Test.
 
@@ -1283,13 +1305,9 @@ Pods stuck in `Pending` mean the scheduler can't satisfy zone affinity or provis
 
 ### CLI Binary Killed on macOS
 
-If `kates health` is immediately killed (exit code 137), macOS is blocking the unsigned binary:
+If `kates health` is immediately killed (exit code 137), macOS is blocking a binary copied into place by hand, from a release archive. `brew reinstall bmscomp/tap/kates` replaces it with one macOS runs. From a checkout, `make cli-install` strips the attributes and signs the binary it builds. Otherwise:
 
 ```bash
-# Fix: reinstall with codesigning
-make cli-install
-
-# Or manually
 sudo xattr -dr com.apple.provenance /usr/local/bin/kates
 sudo xattr -dr com.apple.quarantine /usr/local/bin/kates
 sudo codesign -f -s - /usr/local/bin/kates

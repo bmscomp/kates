@@ -30,7 +30,7 @@ and running a live cluster pre-flight check against `krafter`.
 
 ## Prerequisites
 
-- The `kates` CLI installed on your `PATH` (`make cli-install`)
+- The `kates` CLI installed on your `PATH` (`brew install bmscomp/tap/kates`)
 - Visual Studio Code (`1.85` or newer) with `code` on your `PATH`, and Node.js 22+
 - Optional for Step 5: the Kind lab from Tutorial 1 with `kates ports` running
 

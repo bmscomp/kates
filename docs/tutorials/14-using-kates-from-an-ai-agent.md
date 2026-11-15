@@ -31,7 +31,7 @@ show.
 
 ## Prerequisites
 
-- The stack from Tutorial 1, with the CLI installed (`make cli-install`)
+- The stack from Tutorial 1, with the CLI installed (`brew install bmscomp/tap/kates`)
 - Claude Code, with `claude` on your `PATH`
 - `jq`, to pick one field out of JSON
 

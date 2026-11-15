@@ -10,7 +10,7 @@ The three chapters go from the tool, to how it works, to the cluster it tests:
 - [Architecture & Design](02-architecture.md): where does each part of Kates run, and what happens between `kates test create` and the report? About 10 minutes.
 - [The Cluster Under Test](03-cluster.md): how do `krafter`'s replication settings and its ~2Gi page cache budget shape every latency number you measure? About 15 minutes.
 
-If you'd rather take the [Quick Start](01-introduction.md#quick-start) one step at a time, [Tutorial 1: Getting Started with Kates](../tutorials/01-getting-started.md) goes from `make all` to a first report, then exports the report and compares two runs with `kates report diff`.
+If you'd rather take the [Quick Start](01-introduction.md#quick-start) one step at a time, [Tutorial 1: Getting Started with Kates](../tutorials/01-getting-started.md) goes from `brew install` to a first report, then exports the report and compares two runs with `kates report diff`.
 
 ## The Payments Question
 
