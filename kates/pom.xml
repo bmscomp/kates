@@ -22,12 +22,22 @@
         <lz4.version>1.14.0</lz4.version>
         <!-- 2026-11-14: the BOM brings 1.5.7-16; no advisory, kept so the resolved version does not go down. -->
         <zstd.version>1.5.7-25</zstd.version>
+        <!-- 2026-11-14: Apache Ratis for the members' quorum (plans J1/J2); the BOM does not manage it. -->
+        <ratis.version>3.3.1</ratis.version>
         <spotless.version>3.11.0</spotless.version>
         <palantir-format.version>2.89.0</palantir-format.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <!-- Ratis 3.3.1 brings 1.1.0, whose shaded netty-handler 4.1.136 carries CVE-2026-75595
+                 (CRITICAL) and guava 33.6.0 CVE-2026-102554 (HIGH); 1.1.1 ships 4.1.139 and 33.7.2.
+                 Trivy's pom scan does not see inside the shaded jar: drop this once Ratis brings 1.1.1. -->
+            <dependency>
+                <groupId>org.apache.ratis</groupId>
+                <artifactId>ratis-thirdparty-misc</artifactId>
+                <version>1.1.1</version>
+            </dependency>
             <dependency>
                 <groupId>${quarkus.platform.group-id}</groupId>
                 <artifactId>${quarkus.platform.artifact-id}</artifactId>
@@ -131,6 +141,30 @@
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-grpc</artifactId>
+        </dependency>
+
+        <!-- The members' quorum (com.bmscomp.kates.quorum): Raft over Ratis' own shaded gRPC -->
+        <dependency>
+            <groupId>org.apache.ratis</groupId>
+            <artifactId>ratis-server</artifactId>
+            <version>${ratis.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.ratis</groupId>
+            <artifactId>ratis-grpc</artifactId>
+            <version>${ratis.version}</version>
+        </dependency>
+        <!-- Ratis loads its metrics implementation by name and fails at start without it -->
+        <dependency>
+            <groupId>org.apache.ratis</groupId>
+            <artifactId>ratis-metrics-default</artifactId>
+            <version>${ratis.version}</version>
+        </dependency>
+        <!-- The substitutions in quorum/RatisSubstitutions.java -->
+        <dependency>
+            <groupId>org.graalvm.sdk</groupId>
+            <artifactId>nativeimage</artifactId>
+            <scope>provided</scope>
         </dependency>
 
         <!-- Kafka Admin Client -->

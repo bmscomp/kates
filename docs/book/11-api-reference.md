@@ -237,6 +237,8 @@ curl -s "$BASE/api/health"
 
 The response also contains a `tests` object with the resolved default configuration for every test type. When Kafka is unreachable, the endpoint still returns `200 OK`, but with `"status": "DEGRADED"` and `"kafka.status": "DOWN"`.
 
+`quorum` says whether this Kates is a member of a quorum, which it is only when `kates.quorum.peers` is set. Without one it is `{"enabled": false}`, and the instance acts alone. A member also reports its `memberId`, the `leaderId` it knows of (`null` during an election), the Raft `term`, and `leader`: true once it leads and has committed an entry of its term. Members talk to each other over mutual TLS on their own port: `kates.quorum.tls.cert`, `kates.quorum.tls.key` (PKCS#8 PEM) and `kates.quorum.tls.ca` are required, and so is `kates.quorum.dir`, which keeps a member's term and vote and must outlive a restart. The quorum elects a leader and replicates nothing yet.
+
 #### GET /api/drain
 
 Reports the drain switch and the work still live. Use it before you replace the pod of the Kates API: a run or a fault that is live when the pod stops is lost. Requires the `read` scope.
