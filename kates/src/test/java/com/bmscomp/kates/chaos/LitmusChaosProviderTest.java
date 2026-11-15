@@ -187,7 +187,8 @@ class LitmusChaosProviderTest {
         ChaosEngine engine = awaitEngine();
 
         assertEquals("7", engine.getMetadata().getAnnotations().get(FaultMarks.TERM));
-        assertNotNull(java.time.Instant.parse(engine.getMetadata().getAnnotations().get(FaultMarks.DEADLINE)));
+        assertNotNull(
+                java.time.Instant.parse(engine.getMetadata().getAnnotations().get(FaultMarks.DEADLINE)));
     }
 
     @Test

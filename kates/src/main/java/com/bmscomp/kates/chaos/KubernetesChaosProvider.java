@@ -100,7 +100,9 @@ public class KubernetesChaosProvider implements ChaosProvider {
     @Inject
     com.bmscomp.kates.quorum.Quorum quorum = new com.bmscomp.kates.quorum.Quorum();
 
-    @org.eclipse.microprofile.config.inject.ConfigProperty(name = "kates.engine.max-duration-ms", defaultValue = "7200000")
+    @org.eclipse.microprofile.config.inject.ConfigProperty(
+            name = "kates.engine.max-duration-ms",
+            defaultValue = "7200000")
     long maxDurationMs = 7_200_000;
 
     /**
@@ -512,18 +514,14 @@ public class KubernetesChaosProvider implements ChaosProvider {
         // The marks are written every time: a snapshot an earlier plan left carries an older term,
         // which the reconciler would take for a dead leader's fault and undo under this one.
         String scaledDownAt = String.valueOf(System.currentTimeMillis());
-        client.apps()
-                .statefulSets()
-                .inNamespace(namespace)
-                .withName(name)
-                .edit(s -> {
-                    var metadata = new StatefulSetBuilder(s).editMetadata().addToAnnotations(marks);
-                    if (!alreadySnapshotted) {
-                        metadata.addToAnnotations(ORIGINAL_REPLICAS_ANNOTATION, String.valueOf(current))
-                                .addToAnnotations(SCALED_DOWN_AT_ANNOTATION, scaledDownAt);
-                    }
-                    return metadata.endMetadata().build();
-                });
+        client.apps().statefulSets().inNamespace(namespace).withName(name).edit(s -> {
+            var metadata = new StatefulSetBuilder(s).editMetadata().addToAnnotations(marks);
+            if (!alreadySnapshotted) {
+                metadata.addToAnnotations(ORIGINAL_REPLICAS_ANNOTATION, String.valueOf(current))
+                        .addToAnnotations(SCALED_DOWN_AT_ANNOTATION, scaledDownAt);
+            }
+            return metadata.endMetadata().build();
+        });
         LOG.info("SCALE_DOWN: StatefulSet " + name + " from " + current + " → " + (current - 1));
         client.apps().statefulSets().inNamespace(namespace).withName(name).scale(current - 1);
         return true;

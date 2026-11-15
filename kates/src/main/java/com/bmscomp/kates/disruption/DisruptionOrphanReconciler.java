@@ -23,7 +23,6 @@ import com.bmscomp.kates.chaos.FaultMarks;
 import com.bmscomp.kates.chaos.KubernetesChaosProvider;
 import com.bmscomp.kates.chaos.ScaleDownSnapshots;
 import com.bmscomp.kates.chaos.litmus.ChaosEngine;
-import com.bmscomp.kates.chaos.litmus.ChaosEngineSpec;
 
 /**
  * Cleans up faults abandoned by a previous process.
@@ -205,7 +204,8 @@ public class DisruptionOrphanReconciler {
         Long cutoff = startedAt == null ? null : cutoff(startedAt);
         List<ChaosEngine> engines;
         try {
-            engines = kubeClient.resources(ChaosEngine.class)
+            engines = kubeClient
+                    .resources(ChaosEngine.class)
                     .inAnyNamespace()
                     .withLabel("managed-by", "kates")
                     .list()
@@ -227,7 +227,8 @@ public class DisruptionOrphanReconciler {
             String namespace = engine.getMetadata().getNamespace();
             String name = engine.getMetadata().getName();
             try {
-                kubeClient.resources(ChaosEngine.class)
+                kubeClient
+                        .resources(ChaosEngine.class)
                         .inNamespace(namespace)
                         .withName(name)
                         .delete();

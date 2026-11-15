@@ -171,7 +171,8 @@ public final class QuorumMember implements AutoCloseable {
                         .setMutualTls(true)
                         .setSslProvider(SslProvider.JDK)
                         .build());
-        java.util.concurrent.atomic.AtomicReference<QuorumMember> started = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<QuorumMember> started =
+                new java.util.concurrent.atomic.AtomicReference<>();
         Confirmations confirmations = new Confirmations(
                 self.getId(),
                 () -> {

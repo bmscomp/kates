@@ -52,8 +52,7 @@ public final class ScaleDownSnapshots {
      * As {@link #restore}, in every namespace: a playbook can scale down outside Kafka's. Where the
      * backend may not list across namespaces (rbac.scope=namespace), {@code fallback} only.
      */
-    public static Restored restoreEverywhere(
-            KubernetesClient client, String fallback, Predicate<ObjectMeta> eligible) {
+    public static Restored restoreEverywhere(KubernetesClient client, String fallback, Predicate<ObjectMeta> eligible) {
         return new Restored(
                 restoreStatefulSets(client, null, fallback, eligible),
                 restoreNodePools(client, null, fallback, eligible));

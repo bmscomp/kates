@@ -181,7 +181,8 @@ class QuorumTest {
     private Event<LeadershipLost> lostRecorder(Quorum quorum) {
         Event<LeadershipLost> event = mock(Event.class);
         doAnswer(invocation -> {
-                    losses.add(quorum.memberId() + "@" + invocation.<LeadershipLost>getArgument(0).term());
+                    losses.add(quorum.memberId() + "@"
+                            + invocation.<LeadershipLost>getArgument(0).term());
                     return null;
                 })
                 .when(event)

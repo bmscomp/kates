@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -108,7 +107,8 @@ class TestOrchestratorQuorumTest {
         String live = engine.startRunning();
         String stopped = engine.storeEnded(TaskStatus.RUNNING);
         when(engine.quorum.memberId()).thenReturn("kates-1");
-        when(engine.repository.findByStatusAndMember(any(), eq("kates-1"), eq(false))).thenReturn(List.of());
+        when(engine.repository.findByStatusAndMember(any(), eq("kates-1"), eq(false)))
+                .thenReturn(List.of());
         when(engine.repository.findByStatusAndMember(any(), eq("kates-1"), eq(true)))
                 .thenReturn(List.of(engine.rows.get(live), engine.rows.get(stopped)));
 

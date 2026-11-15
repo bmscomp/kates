@@ -1,6 +1,5 @@
 package com.bmscomp.kates.disruption;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -85,7 +84,8 @@ class DisruptionOrchestratorQuorumTest {
     @Test
     void aMemberThatNoLongerLeadsDoesNotRollBack() throws Exception {
         K8sPodWatcher.WatchSession session = mock(K8sPodWatcher.WatchSession.class);
-        when(session.awaitRecovery(org.mockito.ArgumentMatchers.anyLong(), any())).thenReturn(false);
+        when(session.awaitRecovery(org.mockito.ArgumentMatchers.anyLong(), any()))
+                .thenReturn(false);
         when(orchestrator.podWatcher.startWatching(any(), any())).thenReturn(session);
         when(orchestrator.chaosCoordinator.triggerFault(any(), any())).thenAnswer(invocation -> {
             invocation.<java.util.function.LongConsumer>getArgument(1).accept(System.nanoTime());

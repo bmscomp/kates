@@ -993,7 +993,6 @@ public class KubernetesChaosProviderTest {
                             .build())
                     .create();
         }
-
     }
 
     private static com.bmscomp.kates.quorum.Quorum quorumAt(long term, boolean leads) {
@@ -1031,17 +1030,24 @@ public class KubernetesChaosProviderTest {
                 DisruptionType.ROLLING_RESTART,
                 DisruptionType.CPU_STRESS)) {
             FaultSpec spec = type == DisruptionType.SCALE_DOWN
-                    ? FaultSpec.builder("x").targetNamespace("default").targetLabel("app=kafka").disruptionType(type).build()
-                    : FaultSpec.builder("x").targetPod("krafter-brokers-0").disruptionType(type).chaosDurationSec(1).build();
+                    ? FaultSpec.builder("x")
+                            .targetNamespace("default")
+                            .targetLabel("app=kafka")
+                            .disruptionType(type)
+                            .build()
+                    : FaultSpec.builder("x")
+                            .targetPod("krafter-brokers-0")
+                            .disruptionType(type)
+                            .chaosDurationSec(1)
+                            .build();
 
             ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
 
             assertFalse(outcome.isPass(), type + " went in");
             assertTrue(outcome.failureReason().contains("does not lead"), type + ": " + outcome.failureReason());
         }
-        List<String> writes = requests().stream()
-                .filter(r -> !r.startsWith("GET "))
-                .toList();
+        List<String> writes =
+                requests().stream().filter(r -> !r.startsWith("GET ")).toList();
         assertEquals(List.of(), writes, "a member that does not lead writes nothing");
     }
 
@@ -1077,7 +1083,11 @@ public class KubernetesChaosProviderTest {
 
         assertTrue(provider.triggerFault(spec).get(5, TimeUnit.SECONDS).isPass());
 
-        StatefulSet after = client.apps().statefulSets().inNamespace("default").withName("kafka").get();
+        StatefulSet after = client.apps()
+                .statefulSets()
+                .inNamespace("default")
+                .withName("kafka")
+                .get();
         assertMarked(after.getMetadata().getAnnotations(), "7");
     }
 
