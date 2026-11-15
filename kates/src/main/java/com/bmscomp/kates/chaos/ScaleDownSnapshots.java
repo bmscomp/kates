@@ -2,6 +2,7 @@ package com.bmscomp.kates.chaos;
 
 import java.net.HttpURLConnection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Predicate;
 
@@ -43,19 +44,55 @@ public final class ScaleDownSnapshots {
      */
     public static Restored restore(KubernetesClient client, String namespace, Predicate<ObjectMeta> eligible) {
         return new Restored(
-                restoreStatefulSets(client, namespace, eligible), restoreNodePools(client, namespace, eligible));
+                restoreStatefulSets(client, namespace, null, eligible),
+                restoreNodePools(client, namespace, null, eligible));
     }
 
-    private static int restoreStatefulSets(KubernetesClient client, String namespace, Predicate<ObjectMeta> eligible) {
+    /**
+     * As {@link #restore}, in every namespace: a playbook can scale down outside Kafka's. Where the
+     * backend may not list across namespaces (rbac.scope=namespace), {@code fallback} only.
+     */
+    public static Restored restoreEverywhere(
+            KubernetesClient client, String fallback, Predicate<ObjectMeta> eligible) {
+        return new Restored(
+                restoreStatefulSets(client, null, fallback, eligible),
+                restoreNodePools(client, null, fallback, eligible));
+    }
+
+    /** Lists in {@code namespace}, or in every namespace when it is null, else {@code fallback} on a 403. */
+    private static <T> List<T> list(
+            String namespace,
+            String fallback,
+            java.util.function.Function<String, List<T>> in,
+            java.util.function.Supplier<List<T>> everywhere) {
+        if (namespace != null) {
+            return in.apply(namespace);
+        }
+        try {
+            return everywhere.get();
+        } catch (KubernetesClientException e) {
+            if (e.getCode() != 403 || fallback == null) {
+                throw e;
+            }
+            return in.apply(fallback);
+        }
+    }
+
+    private static int restoreStatefulSets(
+            KubernetesClient client, String namespace, String fallback, Predicate<ObjectMeta> eligible) {
         int restored = 0;
         try {
-            for (StatefulSet ss :
-                    client.apps().statefulSets().inNamespace(namespace).list().getItems()) {
+            for (StatefulSet ss : list(
+                    namespace,
+                    fallback,
+                    ns -> client.apps().statefulSets().inNamespace(ns).list().getItems(),
+                    () -> client.apps().statefulSets().inAnyNamespace().list().getItems())) {
                 Integer original = snapshot(ss.getMetadata());
                 if (original == null || !eligible.test(ss.getMetadata())) {
                     continue;
                 }
                 String name = ss.getMetadata().getName();
+                String namespaceOf = ss.getMetadata().getNamespace();
                 try {
                     int current =
                             ss.getSpec().getReplicas() != null ? ss.getSpec().getReplicas() : original;
@@ -63,14 +100,14 @@ public final class ScaleDownSnapshots {
                         LOG.warnf("Restoring StatefulSet %s from %d → %d", name, current, original);
                         client.apps()
                                 .statefulSets()
-                                .inNamespace(namespace)
+                                .inNamespace(namespaceOf)
                                 .withName(name)
                                 .scale(original);
                         restored++;
                     }
                     client.apps()
                             .statefulSets()
-                            .inNamespace(namespace)
+                            .inNamespace(namespaceOf)
                             .withName(name)
                             .edit(s -> new StatefulSetBuilder(s)
                                     .editMetadata()
@@ -88,24 +125,33 @@ public final class ScaleDownSnapshots {
         return restored;
     }
 
-    private static int restoreNodePools(KubernetesClient client, String namespace, Predicate<ObjectMeta> eligible) {
+    private static int restoreNodePools(
+            KubernetesClient client, String namespace, String fallback, Predicate<ObjectMeta> eligible) {
         int restored = 0;
         try {
-            for (GenericKubernetesResource pool : client.genericKubernetesResources(NodePoolScaleDown.NODE_POOLS)
-                    .inNamespace(namespace)
-                    .list()
-                    .getItems()) {
+            for (GenericKubernetesResource pool : list(
+                    namespace,
+                    fallback,
+                    ns -> client.genericKubernetesResources(NodePoolScaleDown.NODE_POOLS)
+                            .inNamespace(ns)
+                            .list()
+                            .getItems(),
+                    () -> client.genericKubernetesResources(NodePoolScaleDown.NODE_POOLS)
+                            .inAnyNamespace()
+                            .list()
+                            .getItems())) {
                 Integer original = snapshot(pool.getMetadata());
                 if (original == null || !eligible.test(pool.getMetadata())) {
                     continue;
                 }
                 String name = pool.getMetadata().getName();
+                String namespaceOf = pool.getMetadata().getNamespace();
                 int current = NodePoolScaleDown.replicas(pool);
                 try {
                     // One patch: the replicas and the snapshot go together, so a
                     // failure leaves the snapshot for the next attempt.
                     client.genericKubernetesResources(NodePoolScaleDown.NODE_POOLS)
-                            .inNamespace(namespace)
+                            .inNamespace(namespaceOf)
                             .withName(name)
                             .edit(p -> {
                                 if (current < original) {
