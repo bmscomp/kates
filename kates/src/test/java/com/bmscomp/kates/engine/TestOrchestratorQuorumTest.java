@@ -72,6 +72,37 @@ class TestOrchestratorQuorumTest {
         verify(engine.repository, never()).findByStatusAndMember(any(), anyString(), eq(true));
     }
 
+    @Test
+    @DisplayName("a takeover with the database down still lets the member lead, and the recovery is retried")
+    void aTakeoverWithTheDatabaseDownTakesWrites() {
+        String previous = engine.storeEnded(TaskStatus.RUNNING);
+        when(engine.quorum.memberId()).thenReturn("kates-1");
+        when(engine.repository.findByStatusAndMember(any(), eq("kates-1"), eq(false)))
+                .thenThrow(new IllegalStateException("PostgreSQL is down"))
+                .thenReturn(List.of(engine.rows.get(previous)));
+
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(
+                () -> orchestrator.recoverPreviousLeaders(new LeadershipAcquired(4, Instant.now())));
+        assertEquals(TaskStatus.RUNNING, engine.rows.get(previous).getStatus(), "not recovered yet");
+
+        orchestrator.recoverPreviousLeaders();
+
+        assertFailedWith(previous, "when the member running it stopped leading");
+    }
+
+    @Test
+    @DisplayName("a member that stops leading stops its own runs and gives their permits back")
+    void aDeposedMemberStopsItsRuns() {
+        String first = engine.startRunning();
+        String second = engine.startRunning();
+
+        orchestrator.onLeadershipLost(new com.bmscomp.kates.quorum.LeadershipLost(4, Instant.now()));
+
+        assertTrue(engine.backend.stopped.containsAll(InMemoryEngine.taskIds(first)), "first run's tasks stopped");
+        assertTrue(engine.backend.stopped.containsAll(InMemoryEngine.taskIds(second)), "second run's tasks stopped");
+        engine.assertEverySlotFree();
+    }
+
     private void assertFailedWith(String id, String reason) {
         TestRun run = engine.rows.get(id);
         assertEquals(TaskStatus.FAILED, run.getStatus());

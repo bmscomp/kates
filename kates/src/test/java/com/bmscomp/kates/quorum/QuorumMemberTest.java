@@ -143,6 +143,24 @@ class QuorumMemberTest {
     }
 
     @Test
+    void losingTheLeadIsToldOnceWithTheTermItHeld() {
+        List<Long> lost = new ArrayList<>();
+        long[] term = {5};
+        var self = org.apache.ratis.protocol.RaftPeerId.valueOf("m0");
+        var other = org.apache.ratis.protocol.RaftPeerId.valueOf("m1");
+        QuorumMember.Confirmations confirmations = new QuorumMember.Confirmations(self, () -> term[0], lost::add);
+
+        confirmations.notifyLeaderChanged(null, other);
+        assertEquals(List.of(), lost, "never led: nothing lost");
+        confirmations.notifyLeaderChanged(null, self);
+        term[0] = 6;
+        confirmations.notifyLeaderChanged(null, null);
+        confirmations.notifyLeaderChanged(null, other);
+
+        assertEquals(List.of(5L), lost, "told once, with the term it led");
+    }
+
+    @Test
     void aMemberWithAnotherCasCertificateCannotJoin() throws Exception {
         TestPki pki = new TestPki(tmp.resolve("pki"));
         TestPki other = new TestPki(tmp.resolve("other"));

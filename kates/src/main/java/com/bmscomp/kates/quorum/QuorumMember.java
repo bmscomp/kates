@@ -142,6 +142,11 @@ public final class QuorumMember implements AutoCloseable {
 
     /** Starts the member. Its term and vote are kept in {@code dir}, which must outlive a restart. */
     public static QuorumMember start(Settings settings) throws IOException {
+        return start(settings, lostTerm -> {});
+    }
+
+    /** As {@link #start(Settings)}, telling {@code onLost} each time this member stops leading. */
+    public static QuorumMember start(Settings settings, java.util.function.LongConsumer onLost) throws IOException {
         RaftPeer self = settings.self();
         String address = self.getAddress();
         RaftProperties properties = new RaftProperties();
@@ -166,13 +171,21 @@ public final class QuorumMember implements AutoCloseable {
                         .setMutualTls(true)
                         .setSslProvider(SslProvider.JDK)
                         .build());
+        java.util.concurrent.atomic.AtomicReference<QuorumMember> started = new java.util.concurrent.atomic.AtomicReference<>();
+        Confirmations confirmations = new Confirmations(
+                self.getId(),
+                () -> {
+                    QuorumMember member = started.get();
+                    return member == null ? 0 : member.term();
+                },
+                onLost);
         RaftGroup group = RaftGroup.valueOf(GROUP, settings.peers());
         RaftServer server = RaftServer.newBuilder()
                 .setServerId(self.getId())
                 .setGroup(group)
                 .setProperties(properties)
                 .setParameters(parameters)
-                .setStateMachine(new Confirmations())
+                .setStateMachine(confirmations)
                 .setOption(RaftStorage.StartupOption.RECOVER)
                 .build();
         try {
@@ -191,7 +204,9 @@ public final class QuorumMember implements AutoCloseable {
                 .setParameters(parameters)
                 .setRetryPolicy(RetryPolicies.noRetry())
                 .build();
-        return new QuorumMember(server, client, self.getId(), settings.memberId());
+        QuorumMember member = new QuorumMember(server, client, self.getId(), settings.memberId());
+        started.set(member);
+        return member;
     }
 
     public String memberId() {
@@ -270,11 +285,38 @@ public final class QuorumMember implements AutoCloseable {
         }
     }
 
-    /** Replicates nothing yet; answers the reads that confirm leadership. */
-    private static final class Confirmations extends BaseStateMachine {
+    /**
+     * Replicates nothing; answers the reads that confirm leadership, and tells {@code onLost} when
+     * this member stops leading, with the term it led.
+     */
+    static final class Confirmations extends BaseStateMachine {
+        private final RaftPeerId self;
+        private final java.util.function.LongSupplier term;
+        private final java.util.function.LongConsumer onLost;
+        private boolean led;
+        private long ledTerm;
+
+        Confirmations(RaftPeerId self, java.util.function.LongSupplier term, java.util.function.LongConsumer onLost) {
+            this.self = self;
+            this.term = term;
+            this.onLost = onLost;
+        }
+
         @Override
         public CompletableFuture<Message> query(Message request) {
             return CompletableFuture.completedFuture(Message.EMPTY);
+        }
+
+        @Override
+        public synchronized void notifyLeaderChanged(
+                org.apache.ratis.protocol.RaftGroupMemberId member, RaftPeerId leader) {
+            if (self.equals(leader)) {
+                led = true;
+                ledTerm = term.getAsLong();
+            } else if (led) {
+                led = false;
+                onLost.accept(ledTerm);
+            }
         }
     }
 }

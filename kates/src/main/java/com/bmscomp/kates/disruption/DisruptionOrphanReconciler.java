@@ -61,6 +61,9 @@ public class DisruptionOrphanReconciler {
     @Inject
     com.bmscomp.kates.quorum.Quorum quorum = new com.bmscomp.kates.quorum.Quorum();
 
+    @Inject
+    com.bmscomp.kates.engine.TestOrchestrator orchestrator;
+
     /** When this member took over, or this lone process started: its own faults are made after. */
     volatile Instant since;
 
@@ -137,6 +140,14 @@ public class DisruptionOrphanReconciler {
     /** One pass: with {@code startedAt}, also every Kates fault made before it, as at start or takeover. */
     private synchronized void reconcile(Instant startedAt) {
         undoFailed = false;
+        if (orchestrator != null) {
+            try {
+                // Retried here every pass: a takeover with PostgreSQL down did not get to it (J4 F6).
+                orchestrator.recoverPreviousLeaders();
+            } catch (RuntimeException e) {
+                LOG.debugf("The previous leader's runs are not recovered yet: %s", e.getMessage());
+            }
+        }
         try {
             int policies = reconcileNetworkPolicies(startedAt);
             int engines = reconcileChaosEngines(startedAt);
