@@ -54,6 +54,9 @@ public class OutboxPoller {
     OutboxCleaner cleaner;
 
     @Inject
+    com.bmscomp.kates.quorum.Quorum quorum;
+
+    @Inject
     com.bmscomp.kates.engine.KatesExecutor executor;
 
     @Channel("test-events-out")
@@ -77,6 +80,11 @@ public class OutboxPoller {
             skipExecutionIf = Scheduled.ApplicationNotRunning.class)
     @Transactional
     public void processOutbox() {
+        // In a quorum only the leader publishes: an event's row lock ends when this transaction
+        // commits, before its ack, so a second member's poll would send it again.
+        if (!quorum.acceptsWrites()) {
+            return;
+        }
         List<OutboxEventEntity> events = em.createQuery(
                         "SELECT e FROM OutboxEventEntity e ORDER BY e.createdAt ASC", OutboxEventEntity.class)
                 .setMaxResults(50)
