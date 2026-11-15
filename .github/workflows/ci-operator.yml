@@ -199,7 +199,7 @@ jobs:
       - name: A Kates resource becomes a backend that runs a test
         run: operator/e2e-kates.sh payments
 
-      - name: Three members keep a leader, recover its run and roll the leader last
+      - name: Three members keep a leader, recover its run, roll the leader last and fence a cut-off one
         run: operator/e2e-quorum.sh payments
 
       - name: Show the stack

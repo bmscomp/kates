@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # A Kates resource with three members: one leader takes the traffic, a new one is elected when it
-# dies and recovers its run, and a version change keeps a majority, the leader replaced last.
+# dies and recovers its run, a version change keeps a majority, the leader replaced last, and a
+# leader cut off from its peers takes no write once another leads.
 #
 #   KUBECONFIG=<scratch> operator/e2e-quorum.sh [namespace]
 #
@@ -156,6 +157,91 @@ check "running $next" "$next" "$("${k[@]}" get kates "$name" -o jsonpath='{.stat
 [ "$fewest" -ge 2 ] && pass "at least two members ready at every step ($fewest)" || fail "only $fewest ready at one step"
 check "every member replaced" 3 "${#order[@]}"
 check "the leader of the start replaced last (order: ${order[*]})" "$leader_at_start" "${order[${#order[@]}-1]:-}"
+
+echo "== the leader cut off from its peers takes nothing more"
+"${k[@]}" wait --for=condition=Ready "kates/$name" --timeout=5m >/dev/null
+cut=$(leader)
+cut_ip=$("${k[@]}" get pod "$cut" -o jsonpath='{.status.podIP}')
+connect
+cut_term=$(curl -s "$api/api/health" | jq '.quorum.term')
+id=$(curl -s -X POST "$api/api/tests" -H 'Content-Type: application/json' \
+  -d '{"type":"LOAD","spec":{"numRecords":60000,"throughput":1000,"recordSize":128,"replicationFactor":1,"minInsyncReplicas":1}}' \
+  | sed -nE 's/.*"id":"([^"]+)".*/\1/p')
+[ -n "$id" ] && pass "run $id started on $cut, term $cut_term" || fail "no run started on $cut"
+# Port-forwards reach each member on 8080 whatever the cut, as the operator does.
+declare -A port
+forwards=()
+n=18101
+for pod in "$name-0" "$name-1" "$name-2"; do
+  port[$pod]=$n
+  "${k[@]}" port-forward "pod/$pod" "$n:8080" >/dev/null 2>&1 &
+  forwards+=($!)
+  n=$((n + 1))
+done
+trap 'kill $forward "${forwards[@]}" 2>/dev/null' EXIT
+sleep 3
+# Every packet to or from port 9300 of the leader dropped on every node, established streams too:
+# a NetworkPolicy stops only new connections. Its database, Kafka and port 8080 stay reachable.
+# Kind's node containers, from kind://docker/<cluster>/<container>.
+nodes=$(kubectl get nodes -o jsonpath='{.items[*].spec.providerID}' | tr ' ' '\n' | sed 's|.*/||')
+partition() { # partition -I|-D
+  for node in $nodes; do
+    for dir in -s -d; do
+      docker exec "$node" iptables "$1" FORWARD "$dir" "$cut_ip" -p tcp -m multiport --ports 9300 -j DROP
+    done
+  done
+}
+health() { curl -s -m 2 "http://localhost:${port[$1]}/api/health"; }
+partition -I
+start=$(date +%s)
+claims=$(mktemp)
+elected=
+unsafe=
+second=
+for _ in $(seq 1 60); do
+  for pod in "$name-0" "$name-1" "$name-2"; do
+    view=$(health "$pod" | jq -r '"\(.quorum.leader) \(.quorum.term) \(.quorum.memberId)"')
+    read -r leads term member <<<"$view"
+    [ "$leads" = true ] && echo "$term $member" >>"$claims"
+    [ "$pod" != "$cut" ] && [ "$leads" = true ] && [ "$term" -gt "$cut_term" ] && second=$pod \
+      && elected=${elected:-$(( $(date +%s) - start ))}
+  done
+  # An empty body: the leader answers 400, a member that no longer leads 503, before validation.
+  code=$(curl -s -m 2 -o /dev/null -w '%{http_code}' -X POST "http://localhost:${port[$cut]}/api/tests" \
+    -H 'Content-Type: application/json' -d '{}')
+  [ -n "$second" ] && [ "$code" != 503 ] && unsafe="$unsafe $code"
+  [ -n "$second" ] && [ "$(labelled)" = "$second" ] && break
+  sleep 1
+done
+[ -n "$second" ] && pass "$second leads a later term $elected s after the cut, labelled after $(( $(date +%s) - start )) s" \
+  || fail "no new leader within 60 s of the cut"
+[ -z "$unsafe" ] && pass "$cut refused every write once another member led" || fail "$cut answered$unsafe with a new leader"
+connect
+for _ in $(seq 1 30); do [ "$(status_of "$id")" = FAILED ] && break; sleep 2; done
+check "the cut-off leader's run is FAILED" FAILED "$(status_of "$id")"
+# 60 s of load from its start: the cut-off member has finished it, and must not have marked it DONE.
+sleep 60
+check "and stays FAILED once the cut-off member ends it" FAILED "$(status_of "$id")"
+check "$cut still refuses a write" 503 "$(curl -s -m 2 -o /dev/null -w '%{http_code}' -X POST \
+  "http://localhost:${port[$cut]}/api/tests" -H 'Content-Type: application/json' -d '{}')"
+
+partition -D
+agreed=
+for _ in $(seq 1 60); do
+  agreed=$(for pod in "$name-0" "$name-1" "$name-2"; do health "$pod" | jq -r '.quorum.leaderId'; done | sort -u)
+  [ "$(wc -l <<<"$agreed" | tr -d ' ')" = 1 ] && [ "$agreed" != null ] && break
+  agreed=; sleep 1
+done
+[ -n "$agreed" ] && pass "healed, all three follow $agreed" || fail "the members disagree on the leader after the heal"
+check "$cut rejoined as a follower" false "$(health "$cut" | jq '.quorum.leader')"
+dup=$(sort -u "$claims" | awk '{print $1}' | uniq -d)
+[ -z "$dup" ] && pass "one leader per term in every member's health" || fail "two leaders in term(s) $dup"
+dup=$(for pod in "$name-0" "$name-1" "$name-2"; do
+  "${k[@]}" logs "$pod" | sed -nE 's/.*Member ([^ ]+) leads term ([0-9]+).*/\2 \1/p'
+done | sort -u | awk '{print $1}' | uniq -d)
+[ -z "$dup" ] && pass "one leader per term in every member's log" || fail "two members took writes in term(s) $dup"
+kill "${forwards[@]}" 2>/dev/null
+rm -f "$claims"
 
 echo "== deleting the resource removes what it made"
 "${k[@]}" delete kates "$name" --timeout=120s >/dev/null
