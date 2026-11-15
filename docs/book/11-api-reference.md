@@ -273,7 +273,7 @@ curl -s -X PUT -H "X-API-Key: $KATES_API_KEY" -H "Content-Type: application/json
 While the API is draining:
 
 - Every request that would start a test run, a disruption, a compound run or a resilience test is answered `503 Service Unavailable` with a `Retry-After: 60` header. Two answers differ: a full engine still answers `429`, and `POST /api/tests/bulk` answers `202` with every item failed.
-- Test and disruption schedules don't fire. A firing that falls inside the drain is skipped, not run later.
+- Test and disruption schedules don't fire. A due time inside the drain fires when the drain ends, if that is within 5 minutes of it, and is skipped otherwise.
 - Live runs and faults go on to their end. A resilience test admitted before the drain still starts its benchmark when it reaches it. A dry run, a cancel and every read are answered as usual.
 
 The switch is kept in memory: a restarted pod is not draining. A body without `draining` is a `400`.
@@ -1378,6 +1378,8 @@ It takes these query parameters:
 ### Scheduling
 
 A schedule stores a test request with a cron expression, and while the schedule is enabled the Kates API submits that request as a new run each time the expression fires. `kates schedule` calls every one of these endpoints except `PUT`.
+
+Each due time of a test or disruption schedule fires once, on the member that leads, within 10 seconds of it, or up to 5 minutes late after a restart, a takeover or a drain. When several were missed, only the latest starts a run. A `PUT` that turns a schedule on or changes its cron passes over the due times before it. A test run a schedule starts carries the Idempotency-Key `schedule:<id>:<due time>`, such as `schedule:b5a9a9bb:2026-11-15T10:37:00Z`, so `GET /api/tests?clientKey=` finds it by that key.
 
 #### POST /api/schedules
 
