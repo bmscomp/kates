@@ -2,6 +2,9 @@ package com.bmscomp.kates.api;
 
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadMXBean;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Optional;
 import jakarta.inject.Inject;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -19,6 +22,9 @@ import org.eclipse.microprofile.health.Liveness;
  * exactly the outage it was meant to detect, in a restart loop that got worse
  * the more load the pod carried. Genuine exhaustion still surfaces as an
  * OOMKill, which the kubelet handles on its own.
+ *
+ * <p>The second condition a restart fixes: a quorum member whose Ratis server stays closed
+ * after the member has tried to start it again for {@code kates.quorum.liveness-after}.
  */
 @Liveness
 public class KatesLivenessCheck implements HealthCheck {
@@ -28,6 +34,12 @@ public class KatesLivenessCheck implements HealthCheck {
 
     @ConfigProperty(name = "kates.health.min-free-heap-mb", defaultValue = "64")
     int minFreeHeapMb;
+
+    @Inject
+    com.bmscomp.kates.quorum.Quorum quorum;
+
+    @ConfigProperty(name = "kates.quorum.liveness-after", defaultValue = "30s")
+    Duration livenessAfter;
 
     @Override
     public HealthCheckResponse call() {
@@ -47,6 +59,12 @@ public class KatesLivenessCheck implements HealthCheck {
         } catch (Exception ignored) {
         }
 
+        Optional<Instant> notServingSince = quorum.notServingSince();
+        long notServingSec = notServingSince
+                .map(since -> Duration.between(since, Instant.now()).toSeconds())
+                .orElse(0L);
+        boolean quorumDead = notServingSince.isPresent() && notServingSec >= livenessAfter.toSeconds();
+
         var builder = HealthCheckResponse.named("kates-liveness")
                 .withData("freeHeapMb", freeHeapMb)
                 .withData("minFreeHeapMb", minFreeHeapMb)
@@ -55,9 +73,11 @@ public class KatesLivenessCheck implements HealthCheck {
                 // on it.
                 .withData("heapLow", heapLow)
                 .withData("deadlockedThreads", deadlocked != null ? deadlocked.length : 0)
-                .withData("activeTests", activeTests + "/" + maxTests);
+                .withData("activeTests", activeTests + "/" + maxTests)
+                .withData("quorumState", notServingSince.isPresent() ? "NOT_SERVING" : "SERVING")
+                .withData("quorumNotServingSec", notServingSec);
 
-        if (noDeadlocks) {
+        if (noDeadlocks && !quorumDead) {
             return builder.up().build();
         }
         return builder.down().build();
