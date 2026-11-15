@@ -357,13 +357,15 @@ public class LitmusChaosProvider implements ChaosProvider {
         // node the drain doesn't take.
         if (EXPERIMENT_MAP.get(DisruptionType.NODE_DRAIN).equals(experimentName)) {
             Optional<String> kates = katesNode != null ? katesNode.name() : Optional.empty();
-            String node = overridesTheNode(spec) ? nodeInsteadOfOverride(spec, kates) : targetNode(spec, kates);
+            String node = overridesTheNode(spec)
+                    ? nodeInsteadOfOverride(spec, kates)
+                    : DrainTargets.nodeOfPods(client, spec, kates);
             if (node != null) {
                 envVars.removeIf(e -> "TARGET_NODE".equals(e.name));
                 envVars.add(new ChaosEngineSpec.EnvVar("TARGET_NODE", node));
             }
             java.util.function.Predicate<io.fabric8.kubernetes.api.model.Node> drained =
-                    node != null ? n -> node.equals(n.getMetadata().getName()) : drainedByOverride(spec);
+                    node != null ? n -> node.equals(n.getMetadata().getName()) : DrainTargets.drainedByOverride(spec);
             if (drained != null) {
                 Map<String, String> away = litmusPodsAwayFrom(drained);
                 components.nodeSelector = away;
@@ -400,82 +402,6 @@ public class LitmusChaosProvider implements ChaosProvider {
     }
 
     /**
-     * The node a drain drains: the one the pods it picks run on
-     * ({@link PodTargets}), so it hits the pod its targetPod, targetBrokerId
-     * or selector picks, as every other fault does. node-drain, given no
-     * TARGET_NODE, drains the node of a random pod in any namespace, the
-     * control plane's among them, and Kates used to give it none. It drains
-     * one node, so the pods a targetAll drain picks must all run on the same
-     * one. It never drains {@code kates}, the node the Kates API runs on: a
-     * random pick chooses among the pods on other nodes.
-     *
-     * @throws IllegalStateException when a pod is gone or not on a node yet,
-     *     the pods run on more than one node, or their node is the Kates
-     *     API's; the fault fails before the ChaosEngine exists, so nothing is
-     *     drained
-     */
-    private String targetNode(FaultSpec spec, Optional<String> kates) {
-        List<String> pods = kates.isPresent() && PodTargets.mode(spec) == PodTargets.Mode.ONE_RANDOM
-                ? onePodAwayFrom(spec, kates.get())
-                : PodTargets.resolve(client, spec);
-        Set<String> nodes = new TreeSet<>();
-        for (String name : pods) {
-            var pod = client.pods()
-                    .inNamespace(spec.targetNamespace())
-                    .withName(name)
-                    .get();
-            if (pod == null) {
-                throw new IllegalStateException("NODE_DRAIN: pod " + name + " was not found in namespace '"
-                        + spec.targetNamespace() + "', so there is no node to drain");
-            }
-            String node = pod.getSpec() != null ? pod.getSpec().getNodeName() : null;
-            if (node == null || node.isBlank()) {
-                throw new IllegalStateException(
-                        "NODE_DRAIN: pod " + name + " is not on a node yet, so there is no node to drain");
-            }
-            nodes.add(node);
-        }
-        if (nodes.size() > 1) {
-            throw new IllegalStateException("NODE_DRAIN: the pods targetAll picks run on " + nodes.size() + " nodes ("
-                    + String.join(", ", nodes) + "), and node-drain drains one. Narrow targetLabel to the pods of"
-                    + " one node, or name the node in envOverrides.TARGET_NODE");
-        }
-        String node = nodes.iterator().next();
-        if (kates.isPresent() && node.equals(kates.get())) {
-            throw new IllegalStateException(
-                    KatesNode.refusal(KatesNode.picked(pods), node) + ". Aim the drain at a pod on another node");
-        }
-        LOG.info("NODE_DRAIN: TARGET_NODE " + node + ", the node of " + String.join(", ", pods));
-        return node;
-    }
-
-    /**
-     * The pod a random drain takes: one of those targetLabel matches that
-     * don't run on {@code kates}, the node the Kates API runs on.
-     *
-     * @throws IllegalStateException when every pod it matches runs there, or
-     *     it matches none
-     */
-    private List<String> onePodAwayFrom(FaultSpec spec, String kates) {
-        ParsedLabelSelector selector = ParsedLabelSelector.parse(spec.targetLabel());
-        var matching = client.pods()
-                .inNamespace(spec.targetNamespace())
-                .withLabelSelector(selector.toString())
-                .list()
-                .getItems();
-        if (matching.isEmpty()) {
-            return PodTargets.resolve(client, spec);
-        }
-        var elsewhere = matching.stream()
-                .filter(p -> p.getSpec() == null || !kates.equals(p.getSpec().getNodeName()))
-                .toList();
-        if (elsewhere.isEmpty()) {
-            throw new IllegalStateException(KatesNode.refusal("every pod targetLabel matches runs on", kates));
-        }
-        return PodTargets.select(spec, elsewhere);
-    }
-
-    /**
      * The node Kates names in place of an override that could drain the node
      * the Kates API runs on, or null when the override is left to pick. A
      * TARGET_NODE that names that node is refused. A NODE_LABEL that matches
@@ -500,7 +426,7 @@ public class LitmusChaosProvider implements ChaosProvider {
         if (nodeLabel == null || nodeLabel.isBlank()) {
             return null;
         }
-        var matched = drainedByOverride(spec);
+        var matched = DrainTargets.drainedByOverride(spec);
         List<String> matching = client.nodes().list().getItems().stream()
                 .filter(matched)
                 .map(n -> n.getMetadata().getName())
@@ -519,27 +445,6 @@ public class LitmusChaosProvider implements ChaosProvider {
         LOG.info("NODE_DRAIN: TARGET_NODE " + node + ", a node envOverrides.NODE_LABEL matches, not " + kates.get()
                 + ", the node the Kates API runs on");
         return node;
-    }
-
-    /**
-     * The nodes an override may have node-drain drain: the one TARGET_NODE
-     * names, or else those NODE_LABEL matches. Null when both are empty, and
-     * node-drain then drains the node of a random pod in any namespace, which
-     * no node is safe from.
-     */
-    private static java.util.function.Predicate<io.fabric8.kubernetes.api.model.Node> drainedByOverride(
-            FaultSpec spec) {
-        String targetNode = spec.envOverrides().get("TARGET_NODE");
-        if (targetNode != null && !targetNode.isBlank()) {
-            return n -> targetNode.equals(n.getMetadata().getName());
-        }
-        String nodeLabel = spec.envOverrides().get("NODE_LABEL");
-        if (nodeLabel != null && !nodeLabel.isBlank()) {
-            ParsedLabelSelector selector = ParsedLabelSelector.parse(nodeLabel);
-            return n -> selector.matches(
-                    n.getMetadata().getLabels() != null ? n.getMetadata().getLabels() : Map.of());
-        }
-        return null;
     }
 
     /** The node label Litmus's pods are pinned by, which the kubelet sets on every node. */

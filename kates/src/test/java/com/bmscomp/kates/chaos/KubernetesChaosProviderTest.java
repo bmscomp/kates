@@ -1123,4 +1123,445 @@ public class KubernetesChaosProviderTest {
 
         assertMarked(policy.getMetadata().getAnnotations(), "7");
     }
+
+    // ---- MEMORY_STRESS, DISK_FILL and NODE_DRAIN on the Kubernetes API ----
+
+    @Test
+    void memoryStressHoldsMemoryMbInAStressContainer() throws Exception {
+        Pod pod = stressTarget("broker-6", "kafka7");
+        String subresource = "/api/v1/namespaces/default/pods/broker-6/ephemeralcontainers";
+        server.expect().put().withPath(subresource).andReturn(200, pod).once();
+        FaultSpec spec = FaultSpec.builder("test-memory-stress")
+                .targetNamespace("default")
+                .targetLabel("app=kafka7")
+                .disruptionType(DisruptionType.MEMORY_STRESS)
+                .memoryMb(256)
+                .chaosDurationSec(1)
+                .build();
+
+        assertTrue(provider.triggerFault(spec).get(5, TimeUnit.SECONDS).isPass());
+
+        Pod sent = client.getKubernetesSerialization()
+                .unmarshal(server.getLastRequest().getUtf8Body(), Pod.class);
+        EphemeralContainer stress = sent.getSpec().getEphemeralContainers().get(0);
+        assertTrue(stress.getName().startsWith("chaos-memory-stress-"), stress.getName());
+        assertEquals(
+                List.of("stress", "--vm", "1", "--vm-bytes", "256M", "--vm-keep", "--timeout", "1s"),
+                stress.getCommand());
+        assertRestricted(stress, 65534L, 65534L);
+    }
+
+    private Pod broker(String name, String app, io.fabric8.kubernetes.api.model.Volume... volumes) {
+        var container = new io.fabric8.kubernetes.api.model.ContainerBuilder()
+                .withName("kafka")
+                .withImage("kafka");
+        for (var v : volumes) {
+            container
+                    .addNewVolumeMount()
+                    .withName(v.getName())
+                    .withMountPath("/var/lib/kafka/" + v.getName())
+                    .endVolumeMount();
+        }
+        Pod pod = new PodBuilder()
+                .withNewMetadata()
+                .withName(name)
+                .withNamespace("default")
+                .addToLabels("app", app)
+                .endMetadata()
+                .withNewSpec()
+                .withNewSecurityContext()
+                .withRunAsUser(1001L)
+                .withRunAsGroup(1001L)
+                .endSecurityContext()
+                .withContainers(container.build())
+                .withVolumes(volumes)
+                .endSpec()
+                .build();
+        client.pods().inNamespace("default").resource(pod).create();
+        return pod;
+    }
+
+    private static io.fabric8.kubernetes.api.model.Volume pvc(String name) {
+        return new io.fabric8.kubernetes.api.model.VolumeBuilder()
+                .withName(name)
+                .withNewPersistentVolumeClaim()
+                .withClaimName(name + "-claim")
+                .endPersistentVolumeClaim()
+                .build();
+    }
+
+    private static io.fabric8.kubernetes.api.model.Volume emptyDir(String name) {
+        return new io.fabric8.kubernetes.api.model.VolumeBuilder()
+                .withName(name)
+                .withNewEmptyDir()
+                .endEmptyDir()
+                .build();
+    }
+
+    @Test
+    void diskFillMountsTheBrokersDataVolumeAndFillsItAsTheBroker() throws Exception {
+        Pod pod = broker("broker-7", "kafka8", emptyDir("strimzi-tmp"), pvc("data-0"));
+        String subresource = "/api/v1/namespaces/default/pods/broker-7/ephemeralcontainers";
+        server.expect().put().withPath(subresource).andReturn(200, pod).once();
+        FaultSpec spec = FaultSpec.builder("test-disk-fill")
+                .targetNamespace("default")
+                .targetLabel("app=kafka8")
+                .disruptionType(DisruptionType.DISK_FILL)
+                .fillPercentage(90)
+                .chaosDurationSec(1)
+                .build();
+
+        ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        RecordedRequest write = server.takeRequest(0, TimeUnit.SECONDS);
+        while (write != null && !subresource.equals(write.getPath())) {
+            write = server.takeRequest(0, TimeUnit.SECONDS);
+        }
+        assertNotNull(write, "the fill container was added");
+        Pod sent = client.getKubernetesSerialization().unmarshal(write.getUtf8Body(), Pod.class);
+        EphemeralContainer fill = sent.getSpec().getEphemeralContainers().get(0);
+        assertTrue(fill.getName().startsWith("chaos-disk-fill-"), fill.getName());
+        assertEquals(1, fill.getVolumeMounts().size());
+        assertEquals("data-0", fill.getVolumeMounts().get(0).getName());
+        assertEquals(
+                KubernetesChaosProvider.FILL_MOUNT,
+                fill.getVolumeMounts().get(0).getMountPath());
+        assertEquals(List.of("sh", "-c"), fill.getCommand().subList(0, 2));
+        assertTrue(
+                fill.getCommand().get(2).contains("*90/100"), fill.getCommand().get(2));
+        assertRestricted(fill, 1001L, 1001L);
+    }
+
+    @Test
+    void diskFillFailsWhenTheFillContainerExitedWithAnError() throws Exception {
+        Pod pod = broker("broker-8", "kafka9", pvc("data-0"));
+        server.expect()
+                .put()
+                .withPath("/api/v1/namespaces/default/pods/broker-8/ephemeralcontainers")
+                .andReturn(200, pod)
+                .once();
+        FaultSpec spec = FaultSpec.builder("test-disk-fill-fails")
+                .targetNamespace("default")
+                .targetPod("broker-8")
+                .disruptionType(DisruptionType.DISK_FILL)
+                .chaosDurationSec(2)
+                .build();
+
+        var future = provider.triggerFault(spec);
+        // While the fault holds the volume, the container exits 1, as when it may write nowhere.
+        RecordedRequest write = null;
+        for (int i = 0; i < 50 && write == null; i++) {
+            RecordedRequest r = server.takeRequest(100, TimeUnit.MILLISECONDS);
+            if (r != null && r.getPath().endsWith("/ephemeralcontainers")) {
+                write = r;
+            }
+        }
+        assertNotNull(write);
+        String container = client.getKubernetesSerialization()
+                .unmarshal(write.getUtf8Body(), Pod.class)
+                .getSpec()
+                .getEphemeralContainers()
+                .get(0)
+                .getName();
+        client.pods()
+                .inNamespace("default")
+                .withName("broker-8")
+                .editStatus(p -> new PodBuilder(p)
+                        .withNewStatus()
+                        .addNewEphemeralContainerStatus()
+                        .withName(container)
+                        .withNewState()
+                        .withNewTerminated()
+                        .withExitCode(1)
+                        .endTerminated()
+                        .endState()
+                        .endEphemeralContainerStatus()
+                        .endStatus()
+                        .build());
+
+        ChaosOutcome outcome = future.get(10, TimeUnit.SECONDS);
+
+        assertFalse(outcome.isPass());
+        assertTrue(outcome.failureReason().contains("exited 1"), outcome.failureReason());
+    }
+
+    @Test
+    void diskFillPicksAClaimThenAVolumeNamedDataAndRefusesAPodWithNeither() {
+        assertEquals("data-1", KubernetesChaosProvider.dataVolume(podWith(emptyDir("data-0"), pvc("data-1"))));
+        assertEquals(
+                "data-0", KubernetesChaosProvider.dataVolume(podWith(emptyDir("strimzi-tmp"), emptyDir("data-0"))));
+        IllegalStateException e = assertThrows(
+                IllegalStateException.class, () -> KubernetesChaosProvider.dataVolume(podWith(emptyDir("tmp"))));
+        assertTrue(e.getMessage().contains("no data volume"), e.getMessage());
+    }
+
+    private static Pod podWith(io.fabric8.kubernetes.api.model.Volume... volumes) {
+        var container = new io.fabric8.kubernetes.api.model.ContainerBuilder().withName("kafka");
+        for (var v : volumes) {
+            container
+                    .addNewVolumeMount()
+                    .withName(v.getName())
+                    .withMountPath("/" + v.getName())
+                    .endVolumeMount();
+        }
+        return new PodBuilder()
+                .withNewMetadata()
+                .withName("broker")
+                .endMetadata()
+                .withNewSpec()
+                .withContainers(container.build())
+                .withVolumes(volumes)
+                .endSpec()
+                .build();
+    }
+
+    private void node(String name, boolean unschedulable) {
+        client.nodes()
+                .resource(new io.fabric8.kubernetes.api.model.NodeBuilder()
+                        .withNewMetadata()
+                        .withName(name)
+                        .endMetadata()
+                        .withNewSpec()
+                        .withUnschedulable(unschedulable ? true : null)
+                        .endSpec()
+                        .build())
+                .create();
+    }
+
+    private void podOn(String namespace, String name, String node, String app, String ownerKind) {
+        var meta = new io.fabric8.kubernetes.api.model.ObjectMetaBuilder()
+                .withName(name)
+                .withNamespace(namespace)
+                .addToLabels("app", app);
+        if (ownerKind != null) {
+            meta.addNewOwnerReference()
+                    .withKind(ownerKind)
+                    .withName(name + "-owner")
+                    .withApiVersion("apps/v1")
+                    .withUid(name + "-uid")
+                    .endOwnerReference();
+        }
+        client.pods()
+                .inNamespace(namespace)
+                .resource(new PodBuilder()
+                        .withMetadata(meta.build())
+                        .withNewSpec()
+                        .withNodeName(node)
+                        .addNewContainer()
+                        .withName("c")
+                        .withImage("c")
+                        .endContainer()
+                        .endSpec()
+                        .build())
+                .create();
+    }
+
+    /** The CRUD mock filters by no spec.nodeName field selector, which the API server does: answer it here. */
+    private void podsOnNodeListed(String node) {
+        var pods = client.pods().inAnyNamespace().list().getItems().stream()
+                .filter(p -> node.equals(p.getSpec().getNodeName()))
+                .toList();
+        server.expect()
+                .get()
+                .withPath("/api/v1/pods?fieldSelector=spec.nodeName%3D" + node)
+                .andReturn(
+                        200,
+                        new io.fabric8.kubernetes.api.model.PodListBuilder()
+                                .withItems(pods)
+                                .build())
+                .always();
+    }
+
+    private static String eviction(String namespace, String pod) {
+        return "/api/v1/namespaces/" + namespace + "/pods/" + pod + "/eviction";
+    }
+
+    private List<String> requestPaths() throws InterruptedException {
+        List<String> paths = new ArrayList<>();
+        RecordedRequest r;
+        while ((r = server.takeRequest(0, TimeUnit.SECONDS)) != null) {
+            paths.add(r.getMethod() + " " + r.getPath());
+        }
+        return paths;
+    }
+
+    @Test
+    void nodeDrainCordonsEvictsEveryPodButDaemonSetsAndUncordons() throws Exception {
+        node("node-a", false);
+        node("node-b", false);
+        podOn("kafka", "broker-0", "node-a", "drain1", "StrimziPodSet");
+        podOn("other", "web-0", "node-a", "web", "ReplicaSet");
+        podOn("kube-system", "proxy-a", "node-a", "proxy", "DaemonSet");
+        podOn("kafka", "broker-1", "node-b", "drain1", "StrimziPodSet");
+        podsOnNodeListed("node-a");
+        server.expect()
+                .post()
+                .withPath(eviction("kafka", "broker-0"))
+                .andReturn(201, "{}")
+                .once();
+        server.expect()
+                .post()
+                .withPath(eviction("other", "web-0"))
+                .andReturn(201, "{}")
+                .once();
+        FaultSpec spec = FaultSpec.builder("drain")
+                .targetNamespace("kafka")
+                .targetPod("broker-0")
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .chaosDurationSec(1)
+                .build();
+
+        ChaosOutcome outcome = provider.triggerFault(spec).get(10, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        List<String> paths = requestPaths();
+        assertTrue(paths.contains("POST " + eviction("kafka", "broker-0")), paths.toString());
+        assertTrue(paths.contains("POST " + eviction("other", "web-0")), paths.toString());
+        assertFalse(paths.stream().anyMatch(p -> p.contains("proxy-a/eviction")), "a DaemonSet's pod stays");
+        assertFalse(paths.stream().anyMatch(p -> p.contains("broker-1/eviction")), "another node's pod stays");
+        int cordon = paths.indexOf("PATCH /api/v1/nodes/node-a");
+        assertTrue(cordon >= 0 && cordon < paths.indexOf("POST " + eviction("kafka", "broker-0")), paths.toString());
+        var after = client.nodes().withName("node-a").get();
+        assertNull(after.getSpec().getUnschedulable(), "uncordoned");
+        assertFalse(after.getMetadata().getLabels() != null
+                && after.getMetadata().getLabels().containsKey(KubernetesChaosProvider.CORDONED_LABEL));
+    }
+
+    @Test
+    void nodeDrainTriesABudgetsRefusalAgainAndFailsWhenTheDurationEnds() throws Exception {
+        node("node-c", false);
+        podOn("kafka", "broker-2", "node-c", "drain2", "StrimziPodSet");
+        podsOnNodeListed("node-c");
+        server.expect()
+                .post()
+                .withPath(eviction("kafka", "broker-2"))
+                .andReturn(429, "{\"kind\":\"Status\",\"code\":429}")
+                .always();
+        provider.drainPollIntervalMs = 100;
+        FaultSpec spec = FaultSpec.builder("drain")
+                .targetNamespace("kafka")
+                .targetPod("broker-2")
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .chaosDurationSec(1)
+                .build();
+
+        ChaosOutcome outcome;
+        // The client retries a 429 itself, request-retry-backoff-limit times (2 in the application,
+        // 10 in the mock's): with none, each refusal comes back at once and the provider tries again.
+        try (KubernetesClient noRetry = new io.fabric8.kubernetes.client.KubernetesClientBuilder()
+                .withConfig(new io.fabric8.kubernetes.client.ConfigBuilder(client.getConfiguration())
+                        .withRequestRetryBackoffLimit(0)
+                        .build())
+                .build()) {
+            provider.client = noRetry;
+            outcome = provider.triggerFault(spec).get(10, TimeUnit.SECONDS);
+        }
+
+        assertFalse(outcome.isPass());
+        assertTrue(outcome.failureReason().contains("kafka/broker-2"), outcome.failureReason());
+        assertTrue(outcome.failureReason().contains("PodDisruptionBudget"), outcome.failureReason());
+        long tries = requestPaths().stream()
+                .filter(p -> p.equals("POST " + eviction("kafka", "broker-2")))
+                .count();
+        assertTrue(tries > 2, "tried " + tries + " times");
+        assertNull(client.nodes().withName("node-c").get().getSpec().getUnschedulable(), "uncordoned all the same");
+    }
+
+    @Test
+    void nodeDrainLeavesANodeSomeoneElseCordonedAlone() throws Exception {
+        node("node-d", true);
+        podOn("kafka", "broker-3", "node-d", "drain3", "StrimziPodSet");
+        FaultSpec spec = FaultSpec.builder("drain")
+                .targetNamespace("kafka")
+                .targetPod("broker-3")
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .chaosDurationSec(1)
+                .build();
+
+        ChaosOutcome outcome = provider.triggerFault(spec).get(10, TimeUnit.SECONDS);
+
+        assertFalse(outcome.isPass());
+        assertTrue(outcome.failureReason().contains("already cordoned"), outcome.failureReason());
+        assertEquals(
+                Boolean.TRUE, client.nodes().withName("node-d").get().getSpec().getUnschedulable());
+        assertFalse(requestPaths().stream().anyMatch(p -> p.startsWith("PATCH ")), "nothing was written");
+    }
+
+    @Test
+    void nodeDrainNeverDrainsTheKatesApisNode() throws Exception {
+        node("node-e", false);
+        provider.katesNode = new KatesNode() {
+            @Override
+            public java.util.Optional<String> name() {
+                return java.util.Optional.of("node-e");
+            }
+        };
+        FaultSpec spec = FaultSpec.builder("drain")
+                .targetNamespace("kafka")
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .envOverrides(java.util.Map.of("TARGET_NODE", "node-e"))
+                .chaosDurationSec(1)
+                .build();
+
+        ChaosOutcome outcome = provider.triggerFault(spec).get(10, TimeUnit.SECONDS);
+
+        assertFalse(outcome.isPass());
+        assertTrue(outcome.failureReason().contains("the node the Kates API runs on"), outcome.failureReason());
+        assertNull(client.nodes().withName("node-e").get().getSpec().getUnschedulable());
+    }
+
+    @Test
+    void nodeDrainByNodeLabelTakesAMatchingNodeOtherThanTheKatesApis() throws Exception {
+        for (String name : List.of("zone-a-1", "zone-a-2", "zone-b-1")) {
+            client.nodes()
+                    .resource(new io.fabric8.kubernetes.api.model.NodeBuilder()
+                            .withNewMetadata()
+                            .withName(name)
+                            .addToLabels("zone", name.substring(0, 6))
+                            .endMetadata()
+                            .build())
+                    .create();
+        }
+        provider.katesNode = new KatesNode() {
+            @Override
+            public java.util.Optional<String> name() {
+                return java.util.Optional.of("zone-a-1");
+            }
+        };
+        FaultSpec spec = FaultSpec.builder("drain")
+                .targetNamespace("kafka")
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .envOverrides(java.util.Map.of("NODE_LABEL", "zone=zone-a"))
+                .chaosDurationSec(1)
+                .build();
+
+        for (int i = 0; i < 5; i++) {
+            assertEquals("zone-a-2", DrainTargets.node(client, spec, provider.katesNode.name()));
+        }
+        assertTrue(provider.triggerFault(spec).get(10, TimeUnit.SECONDS).isPass());
+        assertTrue(requestPaths().contains("PATCH /api/v1/nodes/zone-a-2"));
+    }
+
+    @Test
+    void isEvictableSkipsWhatKubectlDrainSkips() {
+        Pod plain =
+                new PodBuilder().withNewMetadata().withName("p").endMetadata().build();
+        assertTrue(KubernetesChaosProvider.isEvictable(plain));
+        assertFalse(KubernetesChaosProvider.isEvictable(new PodBuilder(plain)
+                .editMetadata()
+                .addToAnnotations("kubernetes.io/config.mirror", "x")
+                .endMetadata()
+                .build()));
+        assertFalse(KubernetesChaosProvider.isEvictable(new PodBuilder(plain)
+                .editMetadata()
+                .withDeletionTimestamp("2026-11-15T00:00:00Z")
+                .endMetadata()
+                .build()));
+        assertFalse(KubernetesChaosProvider.isEvictable(new PodBuilder(plain)
+                .withNewStatus()
+                .withPhase("Succeeded")
+                .endStatus()
+                .build()));
+    }
 }

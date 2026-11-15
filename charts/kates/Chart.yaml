@@ -2,8 +2,8 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: with cnpg.enabled, the JDBC URL's socket timeout is 30 s, as the backend's own.
-version: 0.19.5
+# Minor: rbac.directChaos grants patch on nodes and create on pods/eviction, for NODE_DRAIN.
+version: 0.20.0
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -27,6 +27,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "rbac.directChaos also grants patch on nodes and create on pods/eviction: on the kubernetes chaos provider, NODE_DRAIN cordons a node, evicts its pods and uncordons it. MEMORY_STRESS and DISK_FILL run there too, through pods/ephemeralcontainers, which it already granted. They need a Kates image that has them; the default role is unchanged"
     - kind: changed
       description: "With cnpg.enabled, the JDBC URL's socketTimeout is 30 s instead of 60 s, the backend's own: a request against an unreachable database is answered 503 within about 30 s. Templates are otherwise unchanged."
     - kind: changed

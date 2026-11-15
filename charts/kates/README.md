@@ -156,11 +156,13 @@ With the default chaos provider, `litmus-crd`, Kates creates and watches `ChaosE
 | Resource | Verbs | Used by |
 |----------|-------|---------|
 | `apps` `statefulsets/scale` | `get`, `update` | On a Kafka that Strimzi does not manage: `SCALE_DOWN`, its rollback and orphan recovery set replicas |
-| `pods/ephemeralcontainers` | `update` | `CPU_STRESS` and `IO_STRESS` add a stress container to the target pod |
+| `pods/ephemeralcontainers` | `update` | `CPU_STRESS`, `MEMORY_STRESS` and `IO_STRESS` add a stress container to the target pod; `DISK_FILL` adds one that fills its data volume |
+| `nodes` | `patch` | `NODE_DRAIN` cordons the node and uncordons it when the duration ends; orphan recovery uncordons a node a drain left cordoned |
+| `pods/eviction` | `create` | `NODE_DRAIN` evicts the pods on the node, in every namespace, through the Eviction API |
 
 `NETWORK_PARTITION` needs none of these, on either backend: Kates creates its deny-all NetworkPolicy itself, and cleanup, rollback and startup orphan recovery delete it, so the default role grants `create`, `delete` and `deletecollection` on `networkpolicies`. `ROLLING_RESTART` needs none of them either, and neither does `SCALE_DOWN` on a Strimzi cluster. On a Strimzi cluster `ROLLING_RESTART` annotates the Kafka pods for the Strimzi Cluster Operator to roll, and on a plain StatefulSet, such as `charts/legacy-kafka`, it restarts the StatefulSet. `SCALE_DOWN` lowers `spec.replicas` of a KafkaNodePool. Both run on either backend, so the default role grants `patch` on pods, on StatefulSets and on `kafkanodepools`. On a Kafka that Strimzi does not manage, `SCALE_DOWN` also patches the StatefulSet, to record its original replica count.
 
-These rules are cluster-wide, like the rest of the role, and `pods/ephemeralcontainers` lets Kates start a container in any pod. Leave them off unless you use the direct backend. It is selected with `chaos.provider`:
+These rules are cluster-wide, like the rest of the role, `pods/ephemeralcontainers` lets Kates start a container in any pod, and `nodes` `patch` with `pods/eviction` lets it drain any node. Leave them off unless you use the direct backend. It is selected with `chaos.provider`:
 
 ```yaml
 chaos:

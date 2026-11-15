@@ -638,7 +638,7 @@ public class DisruptionSafetyGuard {
                     drainable.size() < nodes.size()
                             ? "NODE_DRAIN drains a node Kates picks among those envOverrides.NODE_LABEL '" + nodeLabel
                                     + "' matches, never " + kates.get() + ", which the Kates API runs on"
-                            : "NODE_DRAIN drains a node Litmus picks by envOverrides.NODE_LABEL '" + nodeLabel + "'");
+                            : "NODE_DRAIN drains a node envOverrides.NODE_LABEL '" + nodeLabel + "' matches");
         }
         if (overrides.containsKey(TARGET_NODE) || overrides.containsKey(NODE_LABEL)) {
             return worstOf(
