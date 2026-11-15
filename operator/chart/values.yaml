@@ -74,8 +74,9 @@ crdUpgrade:
     limits:
       memory: 64Mi
 
-# -- 2 only shortens the gap after a crash: one pod holds the Lease.
-replicas: 1
+# -- One pod holds the Lease; the second takes it over within seconds when the
+# first or its node is lost. 1 waits for a new pod to be scheduled and started.
+replicas: 2
 
 resources:
   requests:
@@ -107,4 +108,5 @@ podLabels: {}
 podAnnotations: {}
 nodeSelector: {}
 tolerations: []
+# -- Empty, with replicas above 1: the pods prefer one node each.
 affinity: {}
