@@ -105,10 +105,16 @@ var (
 	deployWithKates          bool
 	deployWithMirrorMaker2   bool
 	deployMM2NS              string
-	deployNamespaceLabels    []string
-	deployNoWriteProbes      bool
-	deployYes                bool
-	deployUpgrade            []string
+	deployOperatorNS         string
+	// Standalone (the kates chart, with its PostgreSQL) or operator (the Kates
+	// operator, a Kates resource and a PostgreSQL of its own): deploy_kates_operator.go.
+	deployKatesMode       string
+	deployKatesReplicas   int
+	deployKatesDBSecret   string
+	deployNamespaceLabels []string
+	deployNoWriteProbes   bool
+	deployYes             bool
+	deployUpgrade         []string
 
 	// Versions and scope (multi-version plan §3.1–3.3).
 	deployOperatorScope  string
@@ -133,6 +139,9 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployWithStrimzi, "with-strimzi", true, "Deploy Strimzi Operator")
 	deployCmd.Flags().BoolVar(&deployWithKafkaConnect, "with-kafka-connect", false, "Deploy Kafka Connect with PostgreSQL CDC (Debezium)")
 	deployCmd.Flags().BoolVar(&deployWithKates, "with-kates", true, "Deploy the Kates backend and its PostgreSQL database")
+	deployCmd.Flags().StringVar(&deployKatesMode, "kates-mode", katesModeStandalone, "How Kates is installed: 'standalone' (the kates chart, with its own PostgreSQL) or 'operator' (the Kates operator, a Kates resource and a PostgreSQL for it)")
+	deployCmd.Flags().IntVar(&deployKatesReplicas, "kates-replicas", 1, "Kates members with --kates-mode operator: 1, or 3 or 5 for a quorum that keeps a leader when members are lost. Fixed once the Kates resource exists")
+	deployCmd.Flags().StringVar(&deployKatesDBSecret, "kates-db-secret", "", "With --kates-mode operator: an existing Secret in the Kates namespace with keys url (jdbc:postgresql://...), username and password, instead of installing PostgreSQL")
 	deployCmd.Flags().BoolVar(&deployWithKafkaUI, "with-kafka-ui", true, "Deploy Kafka UI for browser-based cluster monitoring")
 	deployCmd.Flags().BoolVar(&deployWithMirrorMaker2, "with-mirror-maker2", false, "Deploy MirrorMaker 2 as a loopback mirror of the primary (replication lab; kates migrate for real sources)")
 	deployCmd.Flags().StringArrayVar(&deployNamespaceLabels, "namespace-label", nil, "Label to apply to the namespaces deploy ensures (key=value, repeatable; overrides KATES_NAMESPACE_LABELS, which overrides the labels file)")
@@ -450,6 +459,18 @@ func configureDeploySelection(cmd *cobra.Command, wizard bool) error {
 		}
 		if deployAdminless && deployTopology == "single" && !cmd.Flags().Changed("db-ns") {
 			deployDbNS = deployNamespace
+		}
+	}
+	if err := validateKatesMode(); err != nil {
+		return err
+	}
+	if err := checkKatesModeSwitch(context.Background(), resolveNamespaces().app); err != nil {
+		return err
+	}
+	// The charts were pulled before the wizard, which may have chosen operator mode.
+	if katesOperatorMode() && chartsPublished {
+		if err := resolveChartRoot(context.Background(), deployCheckout, false, deployChartDirs()...); err != nil {
+			return err
 		}
 	}
 	if err := checkUpgradeInDeploy(deployUpgrade, buildSharedEntries(resolveNamespaces())); err != nil {

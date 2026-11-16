@@ -222,32 +222,33 @@ public class Quorum {
     }
 
     /**
-     * Hands leadership to the member {@code 1 + attempt} after this one in
-     * {@code kates.quorum.peers}, skipping this one, so members that hand over in turn reach each in
-     * order, and a retry after a failed transfer asks another member; returns that member's id.
+     * Hands leadership to the member after this one in {@code kates.quorum.peers}, so members that
+     * hand over in turn reach each in order, or, if that one cannot take it (a member that has
+     * just come back may not have caught up), to the next; returns the member that took it.
      *
-     * @throws IOException if the transfer did not happen within {@code timeout}
-     * @throws IllegalStateException with no quorum, or no other member
+     * @throws IOException if no member took it, each within {@code timeout}
+     * @throws IllegalStateException with no quorum
      */
-    public String handOver(java.time.Duration timeout, int attempt) throws IOException {
+    public String handOver(java.time.Duration timeout) throws IOException {
         QuorumMember current = member;
         if (current == null) {
             throw new IllegalStateException("no quorum to hand over in");
         }
         List<String> ids =
                 settings.peers().stream().map(peer -> peer.getId().toString()).toList();
-        String target = target(ids, current.memberId(), attempt);
-        current.handOver(target, timeout);
-        return target;
-    }
-
-    /** The member {@code 1 + attempt} after {@code self} in {@code ids}, never {@code self}. */
-    static String target(List<String> ids, String self, int attempt) {
-        if (ids.size() < 2) {
-            throw new IllegalStateException("no other member to hand over to");
+        int self = ids.indexOf(current.memberId());
+        IOException last = null;
+        for (int i = 1; i < ids.size(); i++) {
+            String target = ids.get((self + i) % ids.size());
+            try {
+                current.handOver(target, timeout);
+                return target;
+            } catch (IOException e) {
+                LOG.warnf("Leadership not handed to %s: %s", target, e.getMessage());
+                last = e;
+            }
         }
-        int others = ids.size() - 1;
-        return ids.get((ids.indexOf(self) + 1 + Math.floorMod(attempt, others)) % ids.size());
+        throw last != null ? last : new IOException("no other member to hand leadership to");
     }
 
     /** The leader this member knows of, or null with no quorum or during an election. */

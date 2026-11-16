@@ -32,6 +32,13 @@ func runInteractiveForms() error {
 
 	applyPickedComponents(picked)
 
+	// ── Form: how Kates is installed ─────────────────────────────────────
+	if deployWithKates && !deployAdminless {
+		if err := katesModeFormFn(); err != nil {
+			return err
+		}
+	}
+
 	// ── Form: Versions and scope ─────────────────────────────────────────
 	// The Kafka options are a function of the operator chosen above them:
 	// pick 1.0.1 and the list is its window, pick 1.1.0 and it is 1.1.0's.
@@ -51,6 +58,45 @@ func runInteractiveForms() error {
 	// Everything chosen, in one screen, before a single Helm call: the
 	// versions as they will resolve, the components, the namespaces.
 	return runDeployReviewForm()
+}
+
+// katesModeFormFn asks how Kates is installed; tests replace it.
+var katesModeFormFn = runKatesModeForm
+
+// runKatesModeForm asks standalone or operator and, for operator, the
+// members, the operator's namespace and an existing database. Two forms, so
+// the second is built once the mode is known.
+func runKatesModeForm() error {
+	err := huh.NewForm(huh.NewGroup(
+		huh.NewSelect[string]().
+			Title("How should Kates be installed?").
+			Options(
+				huh.NewOption("Standalone: the kates chart, with its own PostgreSQL", katesModeStandalone),
+				huh.NewOption("Operator: the Kates operator, a Kates resource and a PostgreSQL for it", katesModeOperator),
+			).
+			Value(&deployKatesMode),
+	)).WithTheme(ThemeKates()).WithAccessible(accessibleUI()).Run()
+	if err != nil || !katesOperatorMode() {
+		return err
+	}
+	return huh.NewForm(huh.NewGroup(
+		huh.NewSelect[int]().
+			Title("Kates members").
+			Description("3 or 5 run a quorum that keeps a leader with one or two members lost. Fixed once installed").
+			Options(
+				huh.NewOption("1", 1),
+				huh.NewOption("3 (quorum)", 3),
+				huh.NewOption("5 (quorum)", 5),
+			).
+			Value(&deployKatesReplicas),
+		huh.NewInput().
+			Title("Operator Namespace").
+			Value(&deployOperatorNS),
+		huh.NewInput().
+			Title("Existing database Secret (optional)").
+			Description("A Secret in the Kates namespace with keys url, username and password. Empty: install PostgreSQL").
+			Value(&deployKatesDBSecret),
+	)).WithTheme(ThemeKates()).WithAccessible(accessibleUI()).Run()
 }
 
 // runComponentForm is Form 1: the topology, the schema registry, HA and
@@ -339,29 +385,33 @@ type resolvedNamespaces struct {
 	jaeger  string
 	kafkaUI string
 	mm2     string
+	// operator is the Kates operator's namespace, under either topology.
+	operator string
 }
 
 // resolveNamespaces resolves namespace values based on the selected topology.
 func resolveNamespaces() resolvedNamespaces {
 	if deployTopology == "single" {
 		return resolvedNamespaces{
-			kafka:   deployNamespace,
-			connect: deployNamespace,
-			app:     deployNamespace,
-			chaos:   deployNamespace,
-			jaeger:  deployNamespace,
-			kafkaUI: deployNamespace,
-			mm2:     deployNamespace,
+			kafka:    deployNamespace,
+			connect:  deployNamespace,
+			app:      deployNamespace,
+			chaos:    deployNamespace,
+			jaeger:   deployNamespace,
+			kafkaUI:  deployNamespace,
+			mm2:      deployNamespace,
+			operator: deployOperatorNS,
 		}
 	}
 	return resolvedNamespaces{
-		kafka:   deployKafkaNS,
-		connect: deployConnectNS,
-		app:     deployAppNS,
-		chaos:   deployChaosNS,
-		jaeger:  deployMonitoringNS,
-		kafkaUI: deployKafkaUINS,
-		mm2:     deployMM2NS,
+		kafka:    deployKafkaNS,
+		connect:  deployConnectNS,
+		app:      deployAppNS,
+		chaos:    deployChaosNS,
+		jaeger:   deployMonitoringNS,
+		kafkaUI:  deployKafkaUINS,
+		mm2:      deployMM2NS,
+		operator: deployOperatorNS,
 	}
 }
 
@@ -372,7 +422,7 @@ func deployPlacement(ns resolvedNamespaces) components.Placement {
 	return components.Placement{
 		Kafka: ns.kafka, Connect: ns.connect, Database: deployDbNS, App: ns.app,
 		Chaos: ns.chaos, Monitoring: ns.jaeger, KafkaUI: ns.kafkaUI, MM2: ns.mm2,
-		KafkaName: deployKafkaName,
+		Operator: ns.operator, KafkaName: deployKafkaName,
 	}
 }
 
@@ -400,6 +450,10 @@ func componentSelected(id string) bool {
 		return deployWithChaos
 	case "kates":
 		return deployWithKates
+	case "kates-operator":
+		return deployWithKates && katesOperatorMode()
+	case "kates-db":
+		return deployWithKates && katesOperatorMode() && deployKatesDBSecret == ""
 	case "kafka", "kafka-users":
 		return true
 	}

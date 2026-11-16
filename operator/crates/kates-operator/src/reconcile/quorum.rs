@@ -333,6 +333,8 @@ pub enum Next {
     /// Replacing anything now could cost the quorum its majority: wait, for this reason.
     Wait(String),
     Replace(String),
+    /// Every stale member at once: none runs a quorum, so none holds a term or vote to lose.
+    ReplaceAll(Vec<String>),
 }
 
 /// Followers first, one at a time, and the leader last. A member is replaced only while every
@@ -342,6 +344,17 @@ pub enum Next {
 pub fn next(members: &[Member]) -> Next {
     if members.iter().all(|member| !member.stale) {
         return Next::Done;
+    }
+    // No member may run a quorum: each is down (crashing on a bad image, say) or answers that it
+    // runs none (an image older than the quorum). There is no leader to keep and nothing serving,
+    // and a replaced pod keeps its volume, so every stale member goes at once; one at a time, the
+    // first back would wait for a majority the others cannot give, and the roll for it. A Ready
+    // member that does not answer may be leading: the rule below holds then.
+    let may_run_quorum =
+        |member: &Member| member.ready && member.view.as_ref().is_none_or(|view| view.enabled);
+    if !members.iter().any(may_run_quorum) {
+        let stale = members.iter().filter(|member| member.stale);
+        return Next::ReplaceAll(stale.map(|member| member.pod.clone()).collect());
     }
     let Some(leader) = leader(members) else {
         return Next::Wait("the quorum has no leader".to_owned());
@@ -672,6 +685,41 @@ mod tests {
             member.view.as_mut().unwrap().leader = false;
         }
         assert!(matches!(next(&members), Next::Wait(why) if why.contains("no leader")));
+    }
+
+    #[test]
+    fn members_that_cannot_run_a_quorum_are_replaced_together_and_only_then() {
+        let no_quorum = |pod: &str, stale: bool| Member {
+            view: Some(QuorumView::default()),
+            ..member(pod, stale, "", false)
+        };
+        let members = vec![
+            no_quorum("main-0", true),
+            no_quorum("main-1", true),
+            no_quorum("main-2", false),
+        ];
+        assert_eq!(
+            next(&members),
+            Next::ReplaceAll(vec!["main-0".to_owned(), "main-1".to_owned()])
+        );
+        // A Ready member that does not answer may be leading: the leader rule holds.
+        let mut unanswered = members.clone();
+        unanswered[2].view = None;
+        assert!(matches!(next(&unanswered), Next::Wait(why) if why.contains("no leader")));
+        // Members that crash answer nothing and are not Ready: replaced together.
+        let mut crashing = unanswered.clone();
+        for member in &mut crashing {
+            member.view = None;
+            member.ready = false;
+        }
+        assert_eq!(
+            next(&crashing),
+            Next::ReplaceAll(vec!["main-0".to_owned(), "main-1".to_owned()])
+        );
+        // One member runs a quorum: the leader rule holds.
+        let mut one_runs = members;
+        one_runs[2] = member("main-2", false, "", false);
+        assert!(matches!(next(&one_runs), Next::Wait(_)));
     }
 
     #[test]

@@ -55,6 +55,7 @@ var mirrorSets = map[string][]mirrorSet{
 	"connect-cluster": {{key: "global.imageRegistry"}},
 	"mirror-maker2":   {{key: "global.imageRegistry"}},
 	"cdc-postgresql":  {{key: "global.imageRegistry"}},
+	"kates-operator":  {{key: "global.imageRegistry"}},
 	// kube-prometheus-stack's global.imageRegistry replaces each image's
 	// registry: the second name.
 	"monitoring": {{key: "global.imageRegistry"}},

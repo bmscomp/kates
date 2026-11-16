@@ -150,6 +150,8 @@ type componentSpec struct {
 	Namespace string
 	Kind      string
 	Resource  string
+	// Managed: no Helm release of its own, the Kates operator runs it.
+	Managed bool
 }
 
 // statusComponents is what `kates deploy status` inspects, in display order.
@@ -157,21 +159,23 @@ type componentSpec struct {
 // check handles — the check used to name the Strimzi kinds it knew, and a
 // component whose kind was not on that list reported a blank "Unknown"
 // forever without anything failing.
-func statusComponents(kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS, mm2NS string) []componentSpec {
+func statusComponents(kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS, mm2NS, operatorNS string) []componentSpec {
 	return []componentSpec{
-		{"A", "🦊", "Strimzi Operator", "strimzi-operator", "strimzi-operator", "pod", "-l name=strimzi-cluster-operator"},
-		{"A", "🔐", "Cert-Manager", "cert-manager", "cert-manager", "pod", "-l app.kubernetes.io/instance=cert-manager"},
-		{"A", "🚦", "Kyverno", "kyverno", "kyverno", "pod", "-l app.kubernetes.io/instance=kyverno"},
-		{"B", "📨", "Kafka (" + deployKafkaName + ")", deployKafkaName, kafkaNS, "kafkas.kafka.strimzi.io", deployKafkaName},
-		{"B", "🐘", "PostgreSQL (CDC)", "postgresql", dbNS, "statefulset", "postgresql"},
-		{"B", "🔗", "Kafka Connect", "connect-cluster", connectNS, "kafkaconnects.kafka.strimzi.io", "connect-cluster"},
-		{"B", "📊", "Monitoring Stack", "monitoring", jaegerNS, "pod", "-l release=monitoring"},
-		{"C", "📋", "Apicurio Registry", "apicurio", kafkaNS, "pod", "-l app.kubernetes.io/instance=apicurio"},
+		{"A", "🦊", "Strimzi Operator", "strimzi-operator", "strimzi-operator", "pod", "-l name=strimzi-cluster-operator", false},
+		{"A", "🔐", "Cert-Manager", "cert-manager", "cert-manager", "pod", "-l app.kubernetes.io/instance=cert-manager", false},
+		{"A", "🚦", "Kyverno", "kyverno", "kyverno", "pod", "-l app.kubernetes.io/instance=kyverno", false},
+		{"A", "🤖", "Kates Operator", "kates-operator", operatorNS, "pod", "-l app.kubernetes.io/name=kates-operator", false},
+		{"B", "📨", "Kafka (" + deployKafkaName + ")", deployKafkaName, kafkaNS, "kafkas.kafka.strimzi.io", deployKafkaName, false},
+		{"B", "🐘", "PostgreSQL (CDC)", "postgresql", dbNS, "statefulset", "postgresql", false},
+		{"B", "🔗", "Kafka Connect", "connect-cluster", connectNS, "kafkaconnects.kafka.strimzi.io", "connect-cluster", false},
+		{"B", "📊", "Monitoring Stack", "monitoring", jaegerNS, "pod", "-l release=monitoring", false},
+		{"C", "📋", "Apicurio Registry", "apicurio", kafkaNS, "pod", "-l app.kubernetes.io/instance=apicurio", false},
+		{"C", "🐘", "PostgreSQL (Kates)", "kates-db", appNS, "statefulset", "kates-db", false},
 		// By name: the instance label also matches the chart's embedded PostgreSQL pod.
-		{"C", "📦", "Kates Backend", "kates", appNS, "deployment", "kates"},
-		{"C", "💻", "Kafka UI", "kafka-ui", kafkaUINS, "pod", "-l app.kubernetes.io/name=kafka-ui"},
-		{"C", "🔁", "MirrorMaker 2", "mm2", mm2NS, "kafkamirrormaker2s.kafka.strimzi.io", "mm2-mirror-maker2"},
-		{"C", "🧪", "Litmus Chaos", "chaos", chaosNS, "pod", "-l app.kubernetes.io/instance=chaos"},
+		{"C", "📦", "Kates Backend", "kates", appNS, "deployment", "kates", false},
+		{"C", "💻", "Kafka UI", "kafka-ui", kafkaUINS, "pod", "-l app.kubernetes.io/name=kafka-ui", false},
+		{"C", "🔁", "MirrorMaker 2", "mm2", mm2NS, "kafkamirrormaker2s.kafka.strimzi.io", "mm2-mirror-maker2", false},
+		{"C", "🧪", "Litmus Chaos", "chaos", chaosNS, "pod", "-l app.kubernetes.io/instance=chaos", false},
 	}
 }
 
@@ -194,7 +198,15 @@ func runDeployStatus(cmd *cobra.Command, args []string) error {
 
 	helmIndex := loadHelmReleaseIndex(ctx)
 
-	components := statusComponents(ns.kafka, ns.connect, ns.app, ns.chaos, ns.jaeger, dbNS, ns.kafkaUI, ns.mm2)
+	components := statusComponents(ns.kafka, ns.connect, ns.app, ns.chaos, ns.jaeger, dbNS, ns.kafkaUI, ns.mm2, ns.operator)
+	// Under the operator the backend is a Kates resource's StatefulSet.
+	if katesResourceExists(ctx, ns.app) {
+		for i := range components {
+			if components[i].Release == "kates" {
+				components[i].Kind, components[i].Managed = "statefulset", true
+			}
+		}
+	}
 
 	// Route based on flags
 	if deployStatusOutput == "json" {
@@ -239,8 +251,8 @@ func runDeployStatus(cmd *cobra.Command, args []string) error {
 				Release:   c.Release,
 				Namespace: c.Namespace,
 			}
-			st.HelmStatus, st.Namespace = getHelmStatusWithNamespace(ctx, helmIndex, c.Release, c.Namespace)
-			if st.HelmStatus == "deployed" {
+			st.HelmStatus, st.Namespace = componentHelmStatus(ctx, helmIndex, c)
+			if st.HelmStatus == "deployed" || st.HelmStatus == operatorManaged {
 				st.Health, st.Details = getHealthStatus(ctx, c.Kind, c.Resource, st.Namespace)
 			} else {
 				st.Health = "N/A"
@@ -305,6 +317,17 @@ func lookupHelmRelease(index map[string][]helm.Release, release, namespace strin
 		elsewhere = append(elsewhere, rel.Namespace)
 	}
 	return "elsewhere (" + strings.Join(elsewhere, ", ") + ")", namespace, true
+}
+
+// operatorManaged is the Helm status column of a component the Kates operator runs.
+const operatorManaged = "operator"
+
+// componentHelmStatus is a row's Helm status, or operatorManaged for one the operator runs.
+func componentHelmStatus(ctx context.Context, index map[string][]helm.Release, c componentSpec) (status, namespace string) {
+	if c.Managed {
+		return operatorManaged, c.Namespace
+	}
+	return getHelmStatusWithNamespace(ctx, index, c.Release, c.Namespace)
 }
 
 func getHelmStatusWithNamespace(ctx context.Context, index map[string][]helm.Release, release, namespace string) (status, resolvedNamespace string) {
@@ -598,8 +621,8 @@ func runJSONStatus(ctx context.Context, components []componentSpec) ([]Component
 				Release:   comp.Release,
 				Namespace: comp.Namespace,
 			}
-			st.HelmStatus, st.Namespace = getHelmStatusWithNamespace(ctx, helmIndex, comp.Release, comp.Namespace)
-			if st.HelmStatus == "deployed" {
+			st.HelmStatus, st.Namespace = componentHelmStatus(ctx, helmIndex, comp)
+			if st.HelmStatus == "deployed" || st.HelmStatus == operatorManaged {
 				st.Health, st.Details, st.RawDetails = getHealthStatusV2(ctx, comp.Kind, comp.Resource, st.Namespace)
 			} else {
 				st.Health = "N/A"
@@ -751,8 +774,8 @@ func runInteractiveStatus(ctx context.Context, components []componentSpec) ([]Co
 				Release:   comp.Release,
 				Namespace: comp.Namespace,
 			}
-			st.HelmStatus, st.Namespace = getHelmStatusWithNamespace(ctx, helmIndex, comp.Release, comp.Namespace)
-			if st.HelmStatus == "deployed" {
+			st.HelmStatus, st.Namespace = componentHelmStatus(ctx, helmIndex, comp)
+			if st.HelmStatus == "deployed" || st.HelmStatus == operatorManaged {
 				st.Health, st.Details, st.RawDetails = getHealthStatusV2(ctx, comp.Kind, comp.Resource, st.Namespace)
 			} else {
 				st.Health = "N/A"

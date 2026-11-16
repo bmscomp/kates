@@ -36,6 +36,7 @@ const (
 	NSMonitoring NamespaceKey = "monitoring"
 	NSKafkaUI    NamespaceKey = "ui"
 	NSMM2        NamespaceKey = "mm2"
+	NSOperator   NamespaceKey = "operator"
 )
 
 // Placement is where the user put each part of the stack: the --*-ns flags
@@ -43,7 +44,9 @@ const (
 // KafkaName is the primary Kafka cluster's name, which is also its release.
 type Placement struct {
 	Kafka, Connect, Database, App, Chaos, Monitoring, KafkaUI, MM2 string
-	KafkaName                                                      string
+	// Operator is the Kates operator's namespace, the same in both topologies.
+	Operator  string
+	KafkaName string
 }
 
 // DefaultPlacement is the isolated topology's defaults, the ones the deploy
@@ -52,12 +55,15 @@ func DefaultPlacement() Placement {
 	return Placement{
 		Kafka: "kafka", Connect: "connect", Database: "database", App: "kates",
 		Chaos: "litmus", Monitoring: "monitoring", KafkaUI: "kafka", MM2: "kafka",
-		KafkaName: "krafter",
+		Operator: DefaultOperatorNamespace, KafkaName: "krafter",
 	}
 }
 
 // SingleNamespace is the single topology's default namespace.
 const SingleNamespace = "kates-stack"
+
+// DefaultOperatorNamespace is where the Kates operator goes unless --operator-ns says otherwise.
+const DefaultOperatorNamespace = "kates-operator"
 
 // SinglePlacement puts every namespaced component in namespace. The database
 // is placed separately because deploy keeps it on --db-ns under both
@@ -66,7 +72,7 @@ func SinglePlacement(namespace, database, kafkaName string) Placement {
 	return Placement{
 		Kafka: namespace, Connect: namespace, Database: database, App: namespace,
 		Chaos: namespace, Monitoring: namespace, KafkaUI: namespace, MM2: namespace,
-		KafkaName: kafkaName,
+		Operator: DefaultOperatorNamespace, KafkaName: kafkaName,
 	}
 }
 
@@ -135,6 +141,8 @@ func (c Component) Namespace(p Placement) string {
 		return p.KafkaUI
 	case NSMM2:
 		return p.MM2
+	case NSOperator:
+		return p.Operator
 	}
 	return ""
 }
@@ -151,6 +159,7 @@ const (
 	CRDKyverno     = "Kyverno"
 	CRDLitmus      = "Litmus"
 	CRDPrometheus  = "Prometheus Operator"
+	CRDKates       = "Kates"
 )
 
 // table is the stack, in install order.
@@ -161,6 +170,8 @@ var table = []Component{
 		FixedNamespace: "cert-manager", Operator: true, CRDGroup: CRDCertManager, Selector: "app.kubernetes.io/instance=cert-manager"},
 	{ID: "kyverno", Name: "Kyverno", Icon: "🚦", Group: GroupOperators, Release: "kyverno", Chart: "kyverno/kyverno",
 		FixedNamespace: "kyverno", Operator: true, CRDGroup: CRDKyverno, Selector: "app.kubernetes.io/instance=kyverno"},
+	{ID: "kates-operator", Name: "Kates Operator", Icon: "🤖", Group: GroupOperators, Release: "kates-operator", Chart: "operator/chart",
+		NamespaceKey: NSOperator, Operator: true, CRDGroup: CRDKates, Selector: "app.kubernetes.io/name=kates-operator"},
 
 	{ID: "kafka", Name: "Kafka Cluster", Icon: "📨", Group: GroupCore, Release: KafkaRelease, Chart: "charts/kafka-cluster",
 		NamespaceKey: NSKafka, Selector: "strimzi.io/cluster=%s"},
@@ -175,6 +186,8 @@ var table = []Component{
 
 	{ID: "apicurio", Name: "Apicurio Registry", Icon: "📋", Group: GroupApps, Release: "apicurio", Chart: "charts/apicurio-registry",
 		NamespaceKey: NSKafka, Selector: "app.kubernetes.io/instance=apicurio"},
+	{ID: "kates-db", Name: "PostgreSQL (Kates)", Icon: "🐘", Group: GroupApps, Release: "kates-db", Chart: "charts/cdc-postgresql",
+		NamespaceKey: NSApp, Selector: "app.kubernetes.io/instance=kates-db"},
 	{ID: "kates", Name: "Kates Backend", Icon: "📦", Group: GroupApps, Release: "kates", Chart: "charts/kates",
 		NamespaceKey: NSApp, Selector: "app.kubernetes.io/instance=kates"},
 	{ID: "kafka-ui", Name: "Kafka UI", Icon: "💻", Group: GroupApps, Release: "kafka-ui", Chart: "charts/kafka-ui",
@@ -334,6 +347,8 @@ var (
 		},
 		{Name: CRDLitmus, CRDs: litmusCRDs, UsedBy: litmusCRDs, Namespaced: litmusCRDs},
 		{Name: CRDPrometheus, CRDs: prometheusCRDs, UsedBy: prometheusCRDs},
+		// No Owner: the operator's namespace is --operator-ns, not fixed.
+		{Name: CRDKates, CRDs: []string{"kates.kates.io"}, UsedBy: []string{"kates.kates.io"}, Namespaced: []string{"kates.kates.io"}},
 	}
 )
 
