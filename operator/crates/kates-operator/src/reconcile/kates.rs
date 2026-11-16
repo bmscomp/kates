@@ -456,7 +456,8 @@ async fn roll_quorum(
         }
     }
     match quorum::lost(&members, now) {
-        quorum::Next::Done => {}
+        // lost() replaces one member at a time.
+        quorum::Next::Done | quorum::Next::ReplaceAll(_) => {}
         quorum::Next::Wait(why) => {
             let conditions = &mut after.conditions;
             status::set(
@@ -494,6 +495,14 @@ async fn roll_quorum(
                 replace(ctx, &namespace, found).await?;
             }
             Ok((drain, Some(pod)))
+        }
+        quorum::Next::ReplaceAll(stale) => {
+            for pod in &stale {
+                if let Some(found) = pods.get(pod) {
+                    replace(ctx, &namespace, found).await?;
+                }
+            }
+            Ok((drain, Some(stale.join(", "))))
         }
     }
 }
