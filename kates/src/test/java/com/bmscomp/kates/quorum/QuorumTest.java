@@ -191,6 +191,19 @@ class QuorumTest {
     }
 
     @Test
+    void aHandoverPassesOverAMemberThatCannotTakeIt() throws Exception {
+        start(3, new AtomicBoolean(false));
+        Quorum leader = soleWriter(members);
+        int self = members.indexOf(leader);
+        Quorum next = members.get((self + 1) % 3);
+        Quorum after = members.get((self + 2) % 3);
+        next.member().closeServer();
+
+        assertEquals(after.memberId(), leader.handOver(java.time.Duration.ofSeconds(3)));
+        assertEquals(after, soleWriter(members));
+    }
+
+    @Test
     void aLeaderWhoseServerClosedSaysItLostTheLead() throws Exception {
         start(1, new AtomicBoolean(false));
         Quorum quorum = members.get(0);
