@@ -269,19 +269,42 @@ public final class QuorumMember implements AutoCloseable {
      * @throws IOException if the transfer did not happen within {@code timeout}
      */
     public void handOver(String target, Duration timeout) throws IOException {
+        transfer(selfId, RaftPeerId.valueOf(target), timeout);
+    }
+
+    /**
+     * Asks the leader this member knows of to step down, so that the next leader, whichever wins,
+     * starts each member's replication over from what that member reports. Ratis 3.3.1's leader
+     * goes on trusting the index a member had matched before it lost its disk, and sends it only
+     * heartbeats; a new leader sends it the whole log.
+     *
+     * @throws IOException if there is no leader, or it did not step down within {@code timeout}
+     */
+    public void askLeaderToStepDown(Duration timeout) throws IOException {
+        RaftPeerId leader = info().getLeaderId();
+        if (leader == null) {
+            throw new IOException("no leader to ask");
+        }
+        transfer(leader, null, timeout);
+    }
+
+    /** A transfer to {@code target}, or a step-down with none, asked of {@code via}, the leader. */
+    private void transfer(RaftPeerId via, RaftPeerId target, Duration timeout) throws IOException {
         RaftProperties properties = new RaftProperties();
         RaftClientConfigKeys.Rpc.setRequestTimeout(
                 properties, TimeDuration.valueOf(timeout.toMillis() + 2000, TimeUnit.MILLISECONDS));
         try (RaftClient admin = RaftClient.newBuilder()
                 .setRaftGroup(group)
-                .setLeaderId(selfId)
+                .setLeaderId(via)
                 .setProperties(properties)
                 .setParameters(parameters)
                 .setRetryPolicy(RetryPolicies.noRetry())
                 .build()) {
-            var reply = admin.admin().transferLeadership(RaftPeerId.valueOf(target), timeout.toMillis());
+            var reply = admin.admin().transferLeadership(target, timeout.toMillis());
             if (!reply.isSuccess()) {
-                throw new IOException("leadership not handed to " + target + ": " + reply.getException());
+                throw new IOException(
+                        (target == null ? via + " did not step down: " : "leadership not handed to " + target + ": ")
+                                + reply.getException());
             }
         }
     }

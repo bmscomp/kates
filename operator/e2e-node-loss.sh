@@ -72,7 +72,11 @@ start=$(date +%s)
 docker stop "$container" >/dev/null
 kubectl delete node "$node" --wait=false >/dev/null
 moved=
+changed=
 for _ in $(seq 1 240); do
+  # Sampled while the victim is not back: once back on an empty log, it has the leader step down.
+  current=$(leader)
+  [ -n "$current" ] && [ "$current" != "$lead" ] && changed=$current
   now=$(claim_uid "$victim")
   [ -n "$now" ] && [ "$now" != "$before" ] && [ -n "$(node_of "$victim")" ] && [ "$(node_of "$victim")" != "$node" ] \
     && [ "$("${k[@]}" get pod "$victim" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')" = True ] \
@@ -81,19 +85,19 @@ for _ in $(seq 1 240); do
 done
 [ -n "$moved" ] && pass "$victim runs on $(node_of "$victim") with a new volume, $(( $(date +%s) - start )) s after the loss" \
   || fail "$victim was not replaced within 8 minutes ($("${k[@]}" get pod "$victim" -o jsonpath='{.status.phase}'))"
-check_lead=$(leader)
-[ "$check_lead" = "$lead" ] && pass "$lead led throughout" || fail "the leader changed from $lead to '$check_lead'"
+[ -z "$changed" ] && pass "$lead led while $victim was gone" || fail "the leader changed from $lead to '$changed'"
 for _ in $(seq 1 60); do [ "$(ready)" = True ] && break; sleep 2; done
 [ "$(ready)" = True ] && pass "Ready with three members" \
   || fail "not Ready: $("${k[@]}" get kates "$name" -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}')"
-# Ready before caught up: the pod's readiness does not wait for the log.
-for _ in $(seq 1 30); do
+# Ready before caught up: the pod's readiness does not wait for the log. Under the same leader,
+# the member waits 15 s, then has it step down (EmptyLogCatchUp), and the next leader sends the log.
+for _ in $(seq 1 45); do
   applied=$(kubectl get --raw "/api/v1/namespaces/$ns/services/$victim:8080/proxy/api/health" | jq '.quorum.appliedIndex')
   [ "${applied:--1}" -ge 0 ] && break
   sleep 2
 done
 if [ "${applied:--1}" -ge 0 ]; then
-  pass "$victim caught up (applied index $applied)"
+  pass "$victim caught up (applied index $applied), $(leader) leads"
 else
   fail "$victim has not caught up: '$applied'"
   for pod in "$lead" "$victim"; do
