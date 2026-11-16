@@ -1,10 +1,12 @@
 package com.bmscomp.kates.quorum;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
@@ -54,5 +56,24 @@ class DatabaseHandoverTest {
         assertFalse(handover.decide(at(10), true, 0));
         assertFalse(handover.decide(at(20), false, 0));
         assertTrue(handover.decide(at(35), false, 0));
+    }
+
+    @Test
+    void aFailedTransferIsRetriedAtTheNextCheck() {
+        DatabaseHandover handover = new DatabaseHandover();
+        handover.decide(at(0), false, 0);
+        assertTrue(handover.decide(at(15), false, 0));
+        handover.transferFailed();
+        assertTrue(handover.decide(at(20), false, 0), "still leading without the database");
+    }
+
+    @Test
+    void eachRetryAsksTheNextOtherMember() {
+        List<String> ids = List.of("q-0", "q-1", "q-2");
+        assertEquals("q-1", Quorum.target(ids, "q-0", 0));
+        assertEquals("q-2", Quorum.target(ids, "q-0", 1));
+        assertEquals("q-1", Quorum.target(ids, "q-0", 2));
+        assertEquals("q-0", Quorum.target(ids, "q-2", 0));
+        assertEquals("q-1", Quorum.target(ids, "q-2", 1));
     }
 }

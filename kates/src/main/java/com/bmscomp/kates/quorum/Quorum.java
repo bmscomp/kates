@@ -222,22 +222,32 @@ public class Quorum {
     }
 
     /**
-     * Hands leadership to the member after this one in {@code kates.quorum.peers}, so members that
-     * hand over in turn reach each in order; returns that member's id.
+     * Hands leadership to the member {@code 1 + attempt} after this one in
+     * {@code kates.quorum.peers}, skipping this one, so members that hand over in turn reach each in
+     * order, and a retry after a failed transfer asks another member; returns that member's id.
      *
      * @throws IOException if the transfer did not happen within {@code timeout}
-     * @throws IllegalStateException with no quorum
+     * @throws IllegalStateException with no quorum, or no other member
      */
-    public String handOver(java.time.Duration timeout) throws IOException {
+    public String handOver(java.time.Duration timeout, int attempt) throws IOException {
         QuorumMember current = member;
         if (current == null) {
             throw new IllegalStateException("no quorum to hand over in");
         }
         List<String> ids =
                 settings.peers().stream().map(peer -> peer.getId().toString()).toList();
-        String target = ids.get((ids.indexOf(current.memberId()) + 1) % ids.size());
+        String target = target(ids, current.memberId(), attempt);
         current.handOver(target, timeout);
         return target;
+    }
+
+    /** The member {@code 1 + attempt} after {@code self} in {@code ids}, never {@code self}. */
+    static String target(List<String> ids, String self, int attempt) {
+        if (ids.size() < 2) {
+            throw new IllegalStateException("no other member to hand over to");
+        }
+        int others = ids.size() - 1;
+        return ids.get((ids.indexOf(self) + 1 + Math.floorMod(attempt, others)) % ids.size());
     }
 
     /** The leader this member knows of, or null with no quorum or during an election. */

@@ -24,9 +24,31 @@ ready() { "${k[@]}" get kates "$name" -o jsonpath='{.status.conditions[?(@.type=
 echo "== three members, one a node"
 "${k[@]}" wait --for=condition=Ready "kates/$name" --timeout=5m >/dev/null || { fail "not Ready"; exit 1; }
 members=("$name-0" "$name-1" "$name-2")
-nodes=$(for pod in "${members[@]}"; do node_of "$pod"; done | sort -u | wc -l | tr -d ' ')
-# Two on the lost node would take the majority, and nothing would be replaced: by design.
-[ "$nodes" = 3 ] && pass "spread over three nodes" || { fail "on $nodes nodes: give one a new volume first"; exit 1; }
+spread() { for pod in "${members[@]}"; do node_of "$pod"; done | sort -u | wc -l | tr -d ' '; }
+# Two on the lost node would take the majority, and nothing would be replaced: by design. The
+# anti-affinity is preferred, and a local volume pins a member to its node: on two nodes, a
+# follower sharing one gets a new volume, which the scheduler places on the third.
+if [ "$(spread)" != 3 ]; then
+  shared=
+  for pod in "${members[@]}"; do
+    [ "$pod" = "$(leader)" ] && continue
+    for other in "${members[@]}"; do
+      [ "$other" != "$pod" ] && [ "$(node_of "$other")" = "$(node_of "$pod")" ] && shared=$pod
+    done
+    [ -n "$shared" ] && break
+  done
+  if [ -n "$shared" ]; then
+    "${k[@]}" delete pvc "quorum-$shared" --wait=false >/dev/null
+    "${k[@]}" delete pod "$shared" >/dev/null
+    for _ in $(seq 1 90); do
+      [ "$(spread)" = 3 ] && [ "$(ready)" = True ] && break
+      sleep 2
+    done
+  fi
+fi
+nodes=$(spread)
+[ "$nodes" = 3 ] && pass "spread over three nodes${shared:+, $shared on a new volume}" \
+  || { fail "on $nodes nodes after giving ${shared:-no member} a new volume"; exit 1; }
 
 # A follower on a worker: the control plane's node holds the API server.
 lead=$(leader)
