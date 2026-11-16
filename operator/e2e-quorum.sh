@@ -37,6 +37,14 @@ spec:
   template:
     metadata: {labels: {app: $name-db}}
     spec:
+      # On the control plane where it can: e2e-node-loss.sh takes a worker away, and the members
+      # would all lose PostgreSQL with it.
+      tolerations: [{key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}]
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference: {matchExpressions: [{key: node-role.kubernetes.io/control-plane, operator: Exists}]}
       containers:
         - name: postgres
           image: postgres:17-alpine

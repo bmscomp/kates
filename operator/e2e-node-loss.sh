@@ -50,15 +50,18 @@ nodes=$(spread)
 [ "$nodes" = 3 ] && pass "spread over three nodes${shared:+, $shared on a new volume}" \
   || { fail "on $nodes nodes after giving ${shared:-no member} a new volume"; exit 1; }
 
-# A follower on a worker: the control plane's node holds the API server.
+# A follower on a worker: the control plane's node holds the API server. Not on the database's
+# node either: without PostgreSQL, the leader hands over by design.
 lead=$(leader)
+db_node=$("${k[@]}" get pods -l "app=$name-db" -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null)
 victim=
 for pod in "${members[@]}"; do
   node=$(node_of "$pod")
-  [ "$pod" != "$lead" ] && [[ "$(kubectl get node "$node" -o jsonpath='{.metadata.labels}')" != *control-plane* ]] \
+  [ "$pod" != "$lead" ] && [ "$node" != "$db_node" ] \
+    && [[ "$(kubectl get node "$node" -o jsonpath='{.metadata.labels}')" != *control-plane* ]] \
     && victim=$pod && break
 done
-[ -n "$victim" ] || { fail "no follower on a worker node"; exit 1; }
+[ -n "$victim" ] || { fail "no follower on a worker node without the database ($db_node)"; exit 1; }
 node=$(node_of "$victim")
 container=$(kubectl get node "$node" -o jsonpath='{.spec.providerID}' | sed 's|.*/||')
 before=$(claim_uid "$victim")
