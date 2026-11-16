@@ -7,14 +7,14 @@ A `Kates` resource installs one Kates backend, or with `replicas: 3` or `5` a qu
 ## Install
 
 ```bash
-helm install kates-operator oci://ghcr.io/bmscomp/charts/kates-operator --version 0.3.0 \
+helm install kates-operator oci://ghcr.io/bmscomp/charts/kates-operator --version 0.3.1 \
   -n kates-operator --create-namespace
 ```
 
 It needs Kubernetes 1.29 or newer and pulls `ghcr.io/bmscomp/kates-operator`, for amd64 and arm64. On a cluster that pulls from a mirror, set `global.imageRegistry` and `global.imagePullSecrets`. The image and the chart are signed with cosign:
 
 ```bash
-cosign verify ghcr.io/bmscomp/kates-operator:0.3.0 \
+cosign verify ghcr.io/bmscomp/kates-operator:0.3.1 \
   --certificate-identity-regexp 'https://github.com/bmscomp/kates/.github/workflows/publish-operator.yml@refs/tags/operator-v.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -38,7 +38,7 @@ helm install kates-operator operator/chart -n kates-operator --create-namespace 
 For the last mode a cluster admin applies the CRDs and the aggregated roles once, and the namespace admin installs with `--skip-crds`:
 
 ```bash
-helm pull oci://ghcr.io/bmscomp/charts/kates-operator --version 0.3.0 --untar
+helm pull oci://ghcr.io/bmscomp/charts/kates-operator --version 0.3.1 --untar
 kubectl apply --server-side -f kates-operator/crds/
 helm template kates-operator ./kates-operator -n team --show-only templates/aggregate-roles.yaml | kubectl apply -f -
 helm install kates-operator ./kates-operator -n team --skip-crds \
@@ -177,10 +177,10 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: run
-              image: ghcr.io/bmscomp/kates-tester:1.41.0
+              image: ghcr.io/bmscomp/kates-tester:1.41.2
               env:
                 - name: KATES_VERSION
-                  value: "1.41.0"
+                  value: "1.41.2"
                 - name: KATES_URL
                   valueFrom: {secretKeyRef: {name: kates-cli, key: url}}
                 - name: KATES_API_KEY
