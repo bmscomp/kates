@@ -89,7 +89,15 @@ for _ in $(seq 1 30); do
   [ "${applied:--1}" -ge 0 ] && break
   sleep 2
 done
-[ "${applied:--1}" -ge 0 ] && pass "$victim caught up (applied index $applied)" || fail "$victim has not caught up: '$applied'"
+if [ "${applied:--1}" -ge 0 ]; then
+  pass "$victim caught up (applied index $applied)"
+else
+  fail "$victim has not caught up: '$applied'"
+  for pod in "$lead" "$victim"; do
+    echo "--- $pod"
+    "${k[@]}" logs "$pod" --since=300s | grep -E 'ratis|Quorum' | cut -c1-800 | tail -60
+  done
+fi
 
 echo "== $node comes back"
 docker start "$container" >/dev/null
