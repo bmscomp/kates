@@ -3,12 +3,12 @@ package cmd
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -230,13 +230,43 @@ func TestTheOperatorChartIsCheckedAgainstItsOwnSigner(t *testing.T) {
 	}
 }
 
+// katesReadyAnswers stubs the Ready reads, one answer per poll, the last one
+// repeated, and counts them.
+func katesReadyAnswers(t *testing.T, timeout time.Duration, answers ...string) *int {
+	t.Helper()
+	origTimeout, origPoll := katesReadyTimeout, katesReadyPoll
+	t.Cleanup(func() { katesReadyTimeout, katesReadyPoll = origTimeout, origPoll })
+	katesReadyTimeout, katesReadyPoll = timeout, time.Millisecond
+	reads := 0
+	operatorModeCluster(t, nil)
+	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) {
+		answer := answers[min(reads, len(answers)-1)]
+		reads++
+		return []byte(answer), nil
+	}
+	return &reads
+}
+
 func TestANotReadyKatesResourceSaysWhy(t *testing.T) {
-	operatorModeCluster(t, map[string]string{"jsonpath={.status.conditions": "NoLeader: the quorum has no leader"})
-	origExec := runExecFn
-	t.Cleanup(func() { runExecFn = origExec })
-	runExecFn = func(context.Context, string, ...string) error { return errors.New("timed out") }
+	katesReadyAnswers(t, 20*time.Millisecond, "2|2|False|NoLeader|the quorum has no leader")
 	err := waitKatesResource(context.Background(), "kates")
 	if err == nil || !strings.Contains(err.Error(), "NoLeader: the quorum has no leader") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestAKatesResourceWithoutAQuorumStopsTheWaitAtOnce(t *testing.T) {
+	reads := katesReadyAnswers(t, time.Hour, "2|2|False|NoQuorum|kates-0 answers without a quorum: kates:native-local is older than the quorum")
+	err := waitKatesResource(context.Background(), "kates")
+	if err == nil || !strings.Contains(err.Error(), "kates:native-local is older than the quorum") || *reads != 1 {
+		t.Fatalf("error = %v after %d reads", err, *reads)
+	}
+}
+
+func TestOnlyTheCurrentGenerationsConditionCounts(t *testing.T) {
+	// Ready, and NoQuorum, from before the spec this deploy applied: neither ends the wait.
+	reads := katesReadyAnswers(t, time.Hour, "3|2|True||", "3|2|False|NoQuorum|old image", "3|3|True||")
+	if err := waitKatesResource(context.Background(), "kates"); err != nil || *reads != 3 {
+		t.Fatalf("error = %v after %d reads", err, *reads)
 	}
 }

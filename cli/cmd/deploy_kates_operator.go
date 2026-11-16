@@ -224,21 +224,41 @@ func (dc *deployContext) installKatesResource(ctx context.Context) error {
 	return runExecStdinFn(ctx, "kubectl", []string{"apply", "--server-side", "--field-manager", "kates-deploy", "-f", "-"}, manifest)
 }
 
+// How long, and how often, deploy reads the Kates resource's Ready condition.
+var katesReadyTimeout, katesReadyPoll = 10 * time.Minute, 5 * time.Second
+
 // waitKatesResource waits for the operator to report the backend Ready: every
-// member up and, with a quorum, a leader.
+// member up and, with a quorum, a leader. It stops at once on NoQuorum, which
+// only another image ends, rather than waiting out the timeout.
 func waitKatesResource(ctx context.Context, appNS string) error {
-	err := runExecFn(ctx, "kubectl", "wait", "--for=condition=Ready", "kates.kates.io/"+katesResourceName,
-		"-n", appNS, "--timeout=10m")
-	if err == nil {
-		return nil
+	const ready = `{.status.conditions[?(@.type=="Ready")]`
+	deadline := time.Now().Add(katesReadyTimeout)
+	why := ""
+	for {
+		out, err := runExecOutputFn(ctx, "kubectl", "get", "kates.kates.io", katesResourceName, "-n", appNS, "-o",
+			"jsonpath={.metadata.generation}|"+ready+".observedGeneration}|"+ready+".status}|"+ready+".reason}|"+ready+".message}")
+		// A condition from before the spec this deploy applied says nothing about it.
+		if fields := strings.SplitN(strings.TrimSpace(string(out)), "|", 5); err == nil && len(fields) == 5 && fields[0] == fields[1] {
+			if fields[2] == "True" {
+				return nil
+			}
+			why = fields[3] + ": " + fields[4]
+			if fields[3] == "NoQuorum" {
+				return fmt.Errorf("the Kates resource %s/%s cannot become Ready (%s)", appNS, katesResourceName, why)
+			}
+		}
+		if time.Now().After(deadline) {
+			if why == "" {
+				return fmt.Errorf("the Kates resource %s/%s is not Ready after %s", appNS, katesResourceName, katesReadyTimeout)
+			}
+			return fmt.Errorf("the Kates resource %s/%s is not Ready after %s (%s)", appNS, katesResourceName, katesReadyTimeout, why)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(katesReadyPoll):
+		}
 	}
-	// The operator says why in the condition; a bare timeout says nothing.
-	out, readErr := runExecOutputFn(ctx, "kubectl", "get", "kates.kates.io", katesResourceName, "-n", appNS,
-		"-o", `jsonpath={.status.conditions[?(@.type=="Ready")].reason}: {.status.conditions[?(@.type=="Ready")].message}`)
-	if why := strings.TrimSpace(string(out)); readErr == nil && why != "" && why != ":" {
-		return fmt.Errorf("the Kates resource %s/%s is not Ready (%s): %w", appNS, katesResourceName, why, err)
-	}
-	return err
 }
 
 // katesImage is the image the backend runs, as the chart path picks it: a
