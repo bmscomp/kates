@@ -19,7 +19,8 @@ import com.bmscomp.kates.engine.TestOrchestrator;
  * plans/j4-resilient-quorum.md): every write it takes fails, while another member may reach the
  * database. After 15 s without it, once nothing is live or after 2 minutes, since handing over
  * fails a live run. At most once per 2 minutes, so members that all lack the database do not pass
- * it back and forth.
+ * it back and forth. A transfer after which this member leads again, its target having lost the
+ * election, failed too: the next check, 5 s on, tries again.
  */
 @ApplicationScoped
 public class DatabaseHandover {
@@ -60,6 +61,14 @@ public class DatabaseHandover {
         }
         try {
             String to = quorum.handOver(TRANSFER_TIMEOUT);
+            if (quorum.isLeader()) {
+                // The target could not win its election, and this member won the next one.
+                handOverFailed();
+                LOG.warnf(
+                        "PostgreSQL unreachable since %s: handed to %s, but this member leads again",
+                        unreachableSince, to);
+                return;
+            }
             LOG.warnf("PostgreSQL unreachable since %s: leadership handed to %s", unreachableSince, to);
         } catch (java.io.IOException | RuntimeException e) {
             handOverFailed();

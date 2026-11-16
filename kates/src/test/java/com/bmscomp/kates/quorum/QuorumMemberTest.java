@@ -259,6 +259,51 @@ class QuorumMemberTest {
         assertFalse(leader.isLeader());
     }
 
+    @Test
+    void aMemberRebuiltOnAnEmptyDiskCatchesUpOnceTheLeaderStepsDown() throws Exception {
+        TestPki pki = new TestPki(tmp.resolve("pki"));
+        List<String> peers = peers(3);
+        Path[][] files = certificates(pki, 3);
+        for (int i = 0; i < 3; i++) {
+            started.add(QuorumMember.start(settings(peers, i, files[i])));
+        }
+        QuorumMember first = await(() -> soleLeader(started));
+        // A few terms, so the leader has matched more than the first entry.
+        QuorumMember other =
+                started.stream().filter(m -> m != first).findFirst().orElseThrow();
+        first.handOver(other.memberId(), Duration.ofSeconds(10));
+        await(() -> other.isLeader() ? other : null);
+        other.handOver(first.memberId(), Duration.ofSeconds(10));
+        QuorumMember leader = await(() -> first.isLeader() ? first : null);
+        QuorumMember lost = started.stream()
+                .filter(m -> m != leader && m != other)
+                .findFirst()
+                .orElseThrow();
+        await(() -> lost.appliedIndex() >= leader.appliedIndex() ? lost : null);
+        int index = Integer.parseInt(lost.memberId().substring(1));
+        lost.close();
+        started.remove(lost);
+        deleteTree(tmp.resolve("data-m" + index));
+
+        QuorumMember rebuilt = QuorumMember.start(settings(peers, index, files[index]));
+        started.add(rebuilt);
+        await(() -> leader.memberId().equals(rebuilt.leaderId()) ? rebuilt : null);
+        TimeUnit.SECONDS.sleep(3);
+        // Ratis' gap EmptyLogCatchUp works around: should it fail, Ratis catches the member up itself.
+        assertEquals(-1, rebuilt.appliedIndex(), "under the same leader, it gets heartbeats only");
+
+        rebuilt.askLeaderToStepDown(Duration.ofSeconds(10));
+        await(() -> rebuilt.appliedIndex() >= 0 ? rebuilt : null);
+    }
+
+    private static void deleteTree(Path root) throws IOException {
+        try (var paths = Files.walk(root)) {
+            for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.delete(path);
+            }
+        }
+    }
+
     private static void assertRefused(
             String message, List<String> peers, String id, String dir, String cert, String key, String ca) {
         IllegalArgumentException refused = assertThrows(
