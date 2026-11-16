@@ -345,6 +345,32 @@ func waitKafkaUsersReadySilent(ctx context.Context, namespace string, timeout ti
 	return waitCustomResourceReadySilent(ctx, "kafkauser", namespace, "strimzi.io/cluster="+deployKafkaName, timeout)
 }
 
+// waitUserSecretsSettled returns once the KafkaUser Secrets in namespace have
+// kept their resource versions for 10 s, after six tries at most. Ready is
+// not final: the User Operator's next reconcile reads the Secret from a cache
+// that can still miss it, issues a new password and overwrites the Secret, so
+// a copy taken at Ready can hold a password Kafka no longer accepts.
+func waitUserSecretsSettled(ctx context.Context, namespace string) {
+	versions := func() string {
+		out, _ := runExecOutputFn(ctx, "kubectl", "get", "secret", "-n", namespace, "-l", "strimzi.io/kind=KafkaUser",
+			"-o", "jsonpath={range .items[*]}{.metadata.name}={.metadata.resourceVersion} {end}")
+		return strings.TrimSpace(string(out))
+	}
+	seen := versions()
+	for range 6 {
+		select {
+		case <-ctx.Done():
+			return
+		case <-deployClock.After(10 * time.Second):
+		}
+		now := versions()
+		if now != "" && now == seen {
+			return
+		}
+		seen = now
+	}
+}
+
 func waitKafkaConnectReadySilent(ctx context.Context, namespace, name string, timeout time.Duration) error {
 	return waitNamedCustomResourceReadySilent(ctx, "kafkaconnect", namespace, name, timeout)
 }

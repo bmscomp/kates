@@ -241,6 +241,19 @@ kubectl wait kafka/krafter --for=condition=Ready --timeout=600s -n "${NAMESPACE}
 
 info "Waiting for user secrets..."
 kubectl wait kafkauser --all --for=condition=Ready --timeout=60s -n "${NAMESPACE}" 2>/dev/null || true
+# Ready is not final: the User Operator's next reconcile reads the Secret from a cache that can
+# still miss it, issues a new password and overwrites the Secret. A copy taken now can be stale.
+user_secrets() {
+    kubectl get secret -n "${NAMESPACE}" -l strimzi.io/kind=KafkaUser \
+        -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.resourceVersion} {end}' 2>/dev/null
+}
+seen=$(user_secrets)
+for _ in 1 2 3 4 5 6; do
+    sleep 10
+    now=$(user_secrets)
+    [ -n "$now" ] && [ "$now" = "$seen" ] && break
+    seen=$now
+done
 
 # ── Step 6: Verify ────────────────────────────────────────────────────────────
 echo ""

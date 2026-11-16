@@ -245,3 +245,42 @@ func TestWaitKafkaReady_NamesWhyPodsWait(t *testing.T) {
 		t.Errorf("err = %v, want the pods' reason", err)
 	}
 }
+
+// userSecretReads answers the settle wait's reads in turn, repeating the last.
+func userSecretReads(t *testing.T, answers ...string) *int {
+	t.Helper()
+	origOut, prevClock := runExecOutputFn, deployClock
+	t.Cleanup(func() { runExecOutputFn, deployClock = origOut, prevClock })
+	deployClock = newFakeClock()
+	reads := 0
+	runExecOutputFn = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if !strings.Contains(strings.Join(args, " "), "get secret -n kafka -l strimzi.io/kind=KafkaUser") {
+			t.Fatalf("unexpected read %v", args)
+		}
+		reads++
+		return []byte(answers[min(reads, len(answers))-1]), nil
+	}
+	return &reads
+}
+
+// A Secret the User Operator rewrites right after Ready is copied only once it holds.
+func TestUserSecretsAreCopiedOnlyOnceTheyHold(t *testing.T) {
+	reads := userSecretReads(t, "kates-backend=1 ", "kates-backend=2 ", "kates-backend=2 ")
+	start := deployClock.Now()
+	waitUserSecretsSettled(context.Background(), "kafka")
+	if *reads != 3 || deployClock.Now().Sub(start) != 20*time.Second {
+		t.Fatalf("returned after %d reads and %v, want 3 reads and 20s", *reads, deployClock.Now().Sub(start))
+	}
+}
+
+// Secrets that never hold, or none at all, do not stall the deploy past a minute.
+func TestUserSecretsThatNeverHoldStopTheWaitAfterAMinute(t *testing.T) {
+	for _, answers := range [][]string{{"a=1", "a=2", "a=3", "a=4", "a=5", "a=6", "a=7"}, {""}} {
+		reads := userSecretReads(t, answers...)
+		start := deployClock.Now()
+		waitUserSecretsSettled(context.Background(), "kafka")
+		if *reads != 7 || deployClock.Now().Sub(start) != time.Minute {
+			t.Fatalf("%v: returned after %d reads and %v, want 7 reads and 1m", answers, *reads, deployClock.Now().Sub(start))
+		}
+	}
+}
