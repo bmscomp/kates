@@ -1303,6 +1303,8 @@ func (dc *deployContext) kafkaUsersComponent() component {
 			if err := waitKafkaUsersReadySilent(ctx, kafkaNS, 8*time.Minute); err != nil {
 				dl.Printf("    %s KafkaUsers not all ready after 8m — downstream deploys will retry secret lookup\n", output.WarningStyle.Render("⚠"))
 			}
+			dl.Println("    - Waiting for the user Secrets to settle...")
+			waitUserSecretsSettled(ctx, kafkaNS)
 			return nil
 		},
 	}
