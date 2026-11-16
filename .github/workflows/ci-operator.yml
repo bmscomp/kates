@@ -203,7 +203,14 @@ jobs:
       - name: Three members keep a leader, recover its run, roll the leader last, fence a cut-off one and hand over without PostgreSQL
         env:
           KATES_E2E_NODE_LOSS: ${{ github.event_name != 'pull_request' && github.event_name != 'push' && '1' || '' }}
-        run: operator/e2e-quorum.sh payments
+        run: |
+          # Kind taints its control plane when it has workers: the node-loss test needs a member
+          # on each of the three nodes, and still takes a worker's away.
+          if [ "${KATES_E2E_NODE_LOSS}" = 1 ] \
+            && kubectl get node alpha -o jsonpath='{.spec.taints[*].key}' | grep -q node-role.kubernetes.io/control-plane; then
+            kubectl taint node alpha node-role.kubernetes.io/control-plane:NoSchedule-
+          fi
+          operator/e2e-quorum.sh payments
 
       - name: Show the stack
         if: failure()
