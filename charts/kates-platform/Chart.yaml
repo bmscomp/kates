@@ -3,8 +3,9 @@ name: kates-platform
 description: Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure
 icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/assets/charts/kates-platform.svg
 type: application
-# Minor: the umbrella packs kates 0.20.0 (rbac.directChaos grants what NODE_DRAIN needs).
-version: 0.10.0
+# Patch: the umbrella packs the subcharts the v1.41.0 release pins: kates
+# 0.20.1, kafka-cluster 1.1.4, connect-cluster 2.2.4, mirror-maker2 0.12.4.
+version: 0.10.1
 appVersion: "1.0.0"
 keywords:
   - kafka
@@ -41,6 +42,8 @@ dependencies:
     condition: connect-cluster.enabled
 annotations:
   artifacthub.io/changes: |
+    - kind: changed
+      description: "The umbrella moves with the v1.41.0 release: it packs kates 0.20.1, kafka-cluster 1.1.4, connect-cluster 2.2.4 and mirror-maker2 0.12.4 as they are at that tag."
     - kind: changed
       description: "Packs kates 0.20.0: rbac.directChaos also grants patch on nodes and create on pods/eviction, for NODE_DRAIN on the kubernetes chaos provider. The default role is unchanged."
     - kind: changed
