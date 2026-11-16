@@ -71,7 +71,8 @@ jobs:
           # reads them: the versions this release publishes, which `kates
           # deploy` pulls (cli/cmd/deploy_charts.go).
           CHART_VERSIONS=""
-          for chart in $(git -C .. ls-files ':(glob)charts/*/Chart.yaml'); do
+          # operator/chart is the kates-operator chart, which deploy --kates-mode operator pulls.
+          for chart in $(git -C .. ls-files ':(glob)charts/*/Chart.yaml' operator/chart/Chart.yaml); do
             name=$(sed -nE 's/^name:[[:space:]]*"?([^"[:space:]]+)"?.*$/\1/p' "../${chart}")
             version=$(sed -nE 's/^version:[[:space:]]*"?([^"[:space:]]+)"?.*$/\1/p' "../${chart}")
             CHART_VERSIONS="${CHART_VERSIONS:+${CHART_VERSIONS},}${name}=${version}"

@@ -240,8 +240,12 @@ class DisruptionReportPersistenceTest {
                 .extract()
                 .path("id");
         try {
-            // Two members' ticks after the next minute: the due time runs once.
-            java.time.Instant late = java.time.Instant.now().plusSeconds(61);
+            // Two members' ticks after the next minute: the due time runs once. Both inside the
+            // same minute: from now + 61 s, the second tick crossed into the minute after once
+            // now was past second 49, and that next due time rightly ran too.
+            java.time.Instant late = java.time.Instant.now()
+                    .truncatedTo(java.time.temporal.ChronoUnit.MINUTES)
+                    .plusSeconds(61);
             scheduler.evaluate(late);
             scheduler.evaluate(late.plusSeconds(10));
             verify(orchestrator, times(1)).execute(any(), any());

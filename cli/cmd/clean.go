@@ -41,6 +41,7 @@ var (
 	cleanConnectNS    string
 	cleanDbNS         string
 	cleanMM2NS        string
+	cleanOperatorNS   string
 	cleanAppNS        string
 	cleanChaosNS      string
 	cleanMonitoringNS string
@@ -58,7 +59,7 @@ func init() {
 			Topology: &cleanTopology, Namespace: &cleanNamespace,
 			KafkaNS: &cleanKafkaNS, ConnectNS: &cleanConnectNS, DbNS: &cleanDbNS,
 			AppNS: &cleanAppNS, ChaosNS: &cleanChaosNS, MonitoringNS: &cleanMonitoringNS,
-			KafkaUINS: &cleanKafkaUINS, MM2NS: &cleanMM2NS,
+			KafkaUINS: &cleanKafkaUINS, MM2NS: &cleanMM2NS, OperatorNS: &cleanOperatorNS,
 		}),
 		scopeTopologyDefault("", "Topology to clean: 'isolated' or 'single'. If empty, cleans both."))
 	rootCmd.AddCommand(cleanCmd)
@@ -69,12 +70,14 @@ func init() {
 func cleanPlacements() []components.Placement {
 	var placements []components.Placement
 	if cleanTopology == "single" || cleanTopology == "" {
-		placements = append(placements, components.SinglePlacement(cleanNamespace, cleanNamespace, deployKafkaName))
+		single := components.SinglePlacement(cleanNamespace, cleanNamespace, deployKafkaName)
+		single.Operator = cleanOperatorNS
+		placements = append(placements, single)
 	}
 	if cleanTopology == "isolated" || cleanTopology == "" {
 		placements = append(placements, components.Placement{
 			Kafka: cleanKafkaNS, Connect: cleanConnectNS, Database: cleanDbNS, App: cleanAppNS,
-			Chaos: cleanChaosNS, Monitoring: cleanMonitoringNS, KafkaUI: cleanKafkaUINS, MM2: cleanMM2NS,
+			Chaos: cleanChaosNS, Monitoring: cleanMonitoringNS, KafkaUI: cleanKafkaUINS, MM2: cleanMM2NS, Operator: cleanOperatorNS,
 			KafkaName: deployKafkaName,
 		})
 	}

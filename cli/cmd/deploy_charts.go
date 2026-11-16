@@ -67,6 +67,7 @@ var deployChartNames = map[string]string{
 	"kafka-ui":          "kafka-ui",
 	"kates":             "kates",
 	"kates-chaos":       "kates-chaos",
+	"kates-operator":    "kates-operator",
 	"kates-platform":    "kates-platform",
 	"mirror-maker2":     "mirror-maker2",
 	"monitoring":        "kates-monitoring",
@@ -363,7 +364,9 @@ func chartSource() string {
 // kates-platform umbrella, which deploy never installs but a bundle carries,
 // verified, for a helm install of it without network.
 func deployChartDirs() []string {
-	return slices.DeleteFunc(publishedChartDirs(), func(dir string) bool { return dir == "legacy-kafka" || dir == "kates-platform" })
+	return slices.DeleteFunc(publishedChartDirs(), func(dir string) bool {
+		return dir == "legacy-kafka" || dir == "kates-platform" || (dir == "kates-operator" && !katesOperatorMode())
+	})
 }
 
 // publishedChartDirs lists every chart the CLI pulls, deploy's and migrate's.

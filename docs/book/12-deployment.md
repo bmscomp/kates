@@ -131,6 +131,24 @@ kubectl scale deployment/kates --replicas=1
 
 The old PersistentVolumeClaim stays until you delete it.
 
+### Standalone or Under the Operator
+
+`kates deploy` installs the Kates API one of two ways, chosen with `--kates-mode`, or in the wizard right after the components:
+
+| | `standalone` (default) | `operator` |
+|---|---|---|
+| What runs the API | The `kates` chart: a Deployment | The Kates operator (`operator/chart`), from a `Kates` resource: a StatefulSet |
+| PostgreSQL | The chart's own | The `kates-db` release of `charts/cdc-postgresql`, open to the Kates pods alone, or your own with `--kates-db-secret` |
+| Members | One | One, or three or five with `--kates-replicas`: a quorum whose leader takes the writes |
+| Upgrades | A rollout | The operator rolls followers first and the leader last, and under `mode: Drain` waits for live runs |
+| Needs cluster admin | No (`--adminless`) | Yes: the operator brings a CRD and a ClusterRole |
+
+```bash
+kates deploy --kates-mode operator --kates-replicas 3
+```
+
+Either way the Service is `kates` in the Kates namespace, and the API key is in Secret `kates-api-key`, so `kates ports`, `kates health` and the rest work the same. Deploy refuses to install one mode over the other: uninstall first (`kates clean`), or keep the mode you have. `kates clean` removes the `Kates` resource while the operator still runs, then the operator. The operator doesn't yet support the `INTEGRATION_CDC` test.
+
 For Kafka broker storage, always use persistent volumes — even in development. Kafka's log retention depends on data being durable, and losing broker data mid-test invalidates results.
 
 ## Resource Sizing
