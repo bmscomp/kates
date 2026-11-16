@@ -19,7 +19,8 @@ import (
 // So a local deploy runs the native image built from the working tree, which
 // the chart already describes: values-native-local.yaml pins kates:native-local
 // with pullPolicy Never, sized for a laptop. This applies ONLY to kind (see
-// isKind in deploy.go); every other cluster runs the published native image.
+// isKind in deploy.go) deploying a checkout's charts; every other cluster, and
+// a release's published charts, run the published native image.
 const (
 	// localNativeImage is the tag `make kates-image-native-local` builds and
 	// loads onto the kind node, and the one values-native-local.yaml names.
@@ -73,6 +74,13 @@ func kindBackendImageArgs(ctx context.Context, kubeContext string) ([]string, er
 	// build's, which the nodes hold under the bare name only.
 	if mirror := imageRegistry(); mirror != "" {
 		dl.Printf("    - Backend image: published native image, from %s (KATES_IMAGE_REGISTRY)\n", mirror)
+		return []string{"-f", chartRootPath(publishedNativeValues)}, nil
+	}
+	// A release's charts and operator expect that release's backend: a local
+	// build is whatever the working tree was when it was made, and one older
+	// than the quorum leaves the operator's members with no leader, ever.
+	if chartsPublished {
+		dl.Println("    - Backend image: published native image, the one this release's charts name")
 		return []string{"-f", chartRootPath(publishedNativeValues)}, nil
 	}
 

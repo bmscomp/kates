@@ -116,6 +116,9 @@ pub struct QuorumView {
     /// The last entry it applied; -1 with an empty log, when it is no voter.
     #[serde(default = "no_entry")]
     pub applied_index: i64,
+    /// Its health has no `quorum` at all: the backend is older than the quorum.
+    #[serde(skip)]
+    pub predates: bool,
 }
 
 fn no_entry() -> i64 {
@@ -168,21 +171,23 @@ impl Client {
     }
 
     /// The member's view of its quorum, from the public `GET /api/health`: no key is sent. A
-    /// backend with no quorum, or one older than it, says `enabled: false`.
+    /// backend with no quorum says `enabled: false`; one older than the quorum is also `predates`.
     ///
     /// # Errors
     /// See [`Error`].
     pub async fn quorum(&self) -> Result<QuorumView, Error> {
         #[derive(Deserialize)]
         struct Health {
-            #[serde(default)]
-            quorum: QuorumView,
+            quorum: Option<QuorumView>,
         }
         let none = SecretString::from(String::new());
         let health: Health = self
             .json(Method::GET, "/api/health", "/api/health", &none, None, None)
             .await?;
-        Ok(health.quorum)
+        Ok(health.quorum.unwrap_or(QuorumView {
+            predates: true,
+            ..QuorumView::default()
+        }))
     }
 
     /// `GET /api/drain`.
@@ -394,6 +399,26 @@ mod tests {
             .mount(&server)
             .await;
         client(&server).drain(&key()).await.unwrap_err()
+    }
+
+    #[tokio::test]
+    async fn only_a_health_with_no_quorum_at_all_predates_it() {
+        let health = |body: serde_json::Value| async move {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/api/health"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(body))
+                .mount(&server)
+                .await;
+            client(&server).quorum().await.unwrap()
+        };
+        let old = health(json!({"status": "UP"})).await;
+        assert!(old.predates && !old.enabled);
+        // Configured with no peers, or not started yet: no quorum, but not an old backend.
+        let off = health(json!({"status": "UP", "quorum": {"enabled": false}})).await;
+        assert!(!off.predates && !off.enabled);
+        let on = health(json!({"quorum": {"enabled": true, "leader": true, "term": 3}})).await;
+        assert!(!on.predates && on.leader && on.term == 3);
     }
 
     #[tokio::test]

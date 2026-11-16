@@ -325,6 +325,16 @@ pub fn leader(members: &[Member]) -> Option<&str> {
         .map(|member| member.pod.as_str())
 }
 
+/// A member that runs this spec on a backend older than the quorum. It never leads, votes or
+/// catches up, so no election, and no roll that waits on it, ends; only another image does.
+#[must_use]
+pub fn without_quorum(members: &[Member]) -> Option<&str> {
+    members
+        .iter()
+        .find(|member| !member.stale && member.view.as_ref().is_some_and(|view| view.predates))
+        .map(|member| member.pod.as_str())
+}
+
 /// What the roll does next.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Next {
@@ -359,6 +369,14 @@ pub fn next(members: &[Member]) -> Next {
     let Some(leader) = leader(members) else {
         return Next::Wait("the quorum has no leader".to_owned());
     };
+    // A stale follower that runs no quorum, down or older than it, holds no vote: replacing it
+    // costs the majority nothing, while waiting for it to catch up would wait forever.
+    if let Some(member) = members
+        .iter()
+        .find(|member| member.stale && member.pod != leader && !may_run_quorum(member))
+    {
+        return Next::Replace(member.pod.clone());
+    }
     let unsettled = members.iter().find(|member| {
         let caught_up = member.view.as_ref().is_some_and(|view| {
             view.leader_id.as_deref() == Some(leader) && view.applied_index >= 0
@@ -548,6 +566,7 @@ mod tests {
                 leader_id: Some(leader_id.to_owned()),
                 term: 2,
                 applied_index: 4,
+                predates: false,
             }),
             lost_since: None,
             orphaned: false,
@@ -598,6 +617,74 @@ mod tests {
             gone("main-2", long_ago),
         ];
         assert!(matches!(lost(&quorum_lost, now), Next::Wait(why) if why.contains("no leader")));
+    }
+
+    #[test]
+    fn a_stale_follower_that_runs_no_quorum_is_replaced_first_under_a_leader() {
+        let old = Member {
+            view: Some(QuorumView {
+                predates: true,
+                ..QuorumView::default()
+            }),
+            ..member("main-0", true, "", false)
+        };
+        let crashing = Member {
+            ready: false,
+            view: None,
+            ..member("main-1", true, "", false)
+        };
+        let leader = member("main-2", false, "main-2", true);
+        // Rolled back from an image older than the quorum: it never catches up, so it goes.
+        let rollback = [
+            old.clone(),
+            member("main-1", false, "main-2", false),
+            leader.clone(),
+        ];
+        assert_eq!(next(&rollback), Next::Replace("main-0".to_owned()));
+        // Before a stale voter: replacing that one would leave no majority.
+        let mixed = [
+            member("main-0", true, "main-2", false),
+            crashing,
+            leader.clone(),
+        ];
+        assert_eq!(next(&mixed), Next::Replace("main-1".to_owned()));
+        // With no leader, nothing is replaced.
+        let leaderless = [old, member("main-1", false, "", false)];
+        assert!(matches!(next(&leaderless), Next::Wait(why) if why.contains("no leader")));
+    }
+
+    #[test]
+    fn only_a_current_member_older_than_the_quorum_is_without_one() {
+        let no_quorum = |pod: &str, stale: bool| Member {
+            view: Some(QuorumView {
+                predates: true,
+                ..QuorumView::default()
+            }),
+            ..member(pod, stale, "", false)
+        };
+        // Still electing: every member has a quorum, none leads yet.
+        let electing = [
+            member("main-0", false, "", false),
+            member("main-1", false, "", false),
+        ];
+        assert_eq!(without_quorum(&electing), None);
+        // A new backend whose quorum has not started: it will.
+        let starting = Member {
+            view: Some(QuorumView::default()),
+            ..member("main-0", false, "", false)
+        };
+        assert_eq!(without_quorum(&[starting]), None);
+        // Not answering is not the same as answering without a quorum.
+        assert_eq!(without_quorum(&[gone("main-0", Timestamp::now())]), None);
+        // An old member the roll is about to replace.
+        assert_eq!(without_quorum(&[no_quorum("main-0", true)]), None);
+        assert_eq!(
+            without_quorum(&[
+                member("main-0", false, "", false),
+                no_quorum("main-1", false)
+            ]),
+            Some("main-1")
+        );
     }
 
     #[test]

@@ -459,9 +459,8 @@ async fn roll_quorum(
         // lost() replaces one member at a time.
         quorum::Next::Done | quorum::Next::ReplaceAll(_) => {}
         quorum::Next::Wait(why) => {
-            let conditions = &mut after.conditions;
             status::set(
-                conditions,
+                &mut after.conditions,
                 "Ready",
                 "False",
                 "MemberLost",
@@ -479,6 +478,9 @@ async fn roll_quorum(
             }
             return Ok((drain, Some(pod)));
         }
+    }
+    if no_quorum(kates, &members, after, now) {
+        return Ok((drain, None));
     }
     match quorum::next(&members) {
         quorum::Next::Done => Ok((drain, None)),
@@ -505,6 +507,36 @@ async fn roll_quorum(
             Ok((drain, Some(stale.join(", "))))
         }
     }
+}
+
+/// `Ready=False`, reason `NoQuorum`, when a member runs a backend older than the quorum, and the
+/// roll stops: that member never catches up, so the roll would wait on it forever, or move the
+/// majority onto its image.
+fn no_quorum(
+    kates: &Kates,
+    members: &[quorum::Member],
+    after: &mut KatesStatus,
+    now: Timestamp,
+) -> bool {
+    let Some(pod) = quorum::without_quorum(members) else {
+        return false;
+    };
+    let message = format!(
+        "{pod} runs {}:{}, which is older than the quorum, so it can never lead or catch up; run an image that has it",
+        kates.spec.image.as_deref().unwrap_or(DEFAULT_IMAGE),
+        kates.spec.version
+    );
+    let generation = kates.metadata.generation;
+    status::set(
+        &mut after.conditions,
+        "Ready",
+        "False",
+        "NoQuorum",
+        &message,
+        generation,
+        now,
+    );
+    true
 }
 
 /// The revision a pod must run, once the `StatefulSet` has seen its latest spec.

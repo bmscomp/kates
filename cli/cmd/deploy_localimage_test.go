@@ -175,6 +175,21 @@ func TestLocalImageArgs(t *testing.T) {
 	}
 }
 
+// A release's published charts run the release's backend, even with a local
+// build on the host: one made before the quorum never elects a leader.
+func TestKindBackendImageArgsUsesThePublishedImageWithPublishedCharts(t *testing.T) {
+	loaded, setOutput := installKindExecSpies(t)
+	setOutput(hostHasImage(localNativeImage))
+	orig := chartsPublished
+	t.Cleanup(func() { chartsPublished = orig })
+	chartsPublished = true
+
+	got, err := kindBackendImageArgs(context.Background(), "kind-panda")
+	if err != nil || strings.Join(got, " ") != "-f "+chartRootPath(publishedNativeValues) || len(*loaded) != 0 {
+		t.Fatalf("args %v, %v, loads %v; want the published native image and no load", got, err, *loaded)
+	}
+}
+
 // Behind a mirror the local build is not used: global.imageRegistry would
 // rename it, and the nodes hold it under its bare name only.
 func TestKindBackendImageArgsUsesThePublishedImageBehindAMirror(t *testing.T) {
