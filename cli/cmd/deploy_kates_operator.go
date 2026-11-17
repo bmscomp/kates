@@ -388,6 +388,33 @@ func randomAlnum(n int) (string, error) {
 	return b.String(), nil
 }
 
+// adoptAPIKeySecret hands the API key Secret an operator-mode install wrote
+// to the kates chart: Helm refuses to install over an object without its
+// ownership metadata, and its lookup then keeps the key clients already hold.
+// A Secret Helm already manages is left as it is.
+func adoptAPIKeySecret(ctx context.Context, namespace string) error {
+	out, err := runExecOutputFn(ctx, "kubectl", "get", "secret", apiKeySecretName, "-n", namespace, "--ignore-not-found",
+		"-o", `jsonpath={.metadata.name}|{.metadata.labels.app\.kubernetes\.io/managed-by}`)
+	if err != nil {
+		return fmt.Errorf("secret %s in %s could not be read: %w", apiKeySecretName, namespace, err)
+	}
+	name, managedBy, _ := strings.Cut(strings.TrimSpace(string(out)), "|")
+	if name == "" || managedBy != "" {
+		return nil
+	}
+	dl.Printf("    - Handing Secret %s/%s, written for the Kates operator, to Helm release kates\n", namespace, apiKeySecretName)
+	for _, args := range [][]string{
+		{"label", "secret", apiKeySecretName, "-n", namespace, "--overwrite", "app.kubernetes.io/managed-by=Helm"},
+		{"annotate", "secret", apiKeySecretName, "-n", namespace, "--overwrite",
+			"meta.helm.sh/release-name=kates", "meta.helm.sh/release-namespace=" + namespace},
+	} {
+		if out, err := runExecCombinedFn(ctx, "kubectl", args...); err != nil {
+			return fmt.Errorf("secret %s in %s could not be handed to Helm: %w: %s", apiKeySecretName, namespace, err, bytes.TrimSpace(out))
+		}
+	}
+	return nil
+}
+
 // applySecret writes Secret name in namespace, through stdin so no value is
 // on a command line.
 func applySecret(ctx context.Context, namespace, name string, data map[string]string) error {

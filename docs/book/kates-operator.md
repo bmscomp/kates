@@ -219,7 +219,7 @@ The chart's README, [kates-operator](../../operator/chart/README.md), covers wha
 
 ## Switching Modes
 
-You switch modes by removing Kates and deploying again, because `kates deploy` refuses to install one mode over the other. `kates clean` removes either mode. Under the operator, it deletes the `Kates` resource while the operator still runs, so the operator removes what it made, then removes the operator. To leave the rest of the stack in place, remove only Kates: `helm uninstall kates -n kates` for the standalone mode, or, for the operator mode, `kubectl delete kates kates -n kates` and the Secret `kates-api-key`, which the `kates` chart then makes again with a new key.
+You switch modes by removing Kates and deploying again, because `kates deploy` refuses to install one mode over the other. `kates clean` removes either mode. Under the operator, it deletes the `Kates` resource while the operator still runs, so the operator removes what it made, then removes the operator. To leave the rest of the stack in place, remove only Kates: `helm uninstall kates -n kates` for the standalone mode, or `kubectl delete kates kates -n kates` for the operator mode. Deploying standalone after that hands the Secret `kates-api-key` to the `kates` chart, so the key your clients hold stays the same.
 
 The two modes keep their run history in different databases: the `kates` chart's own PostgreSQL, or `kates-db`. A switch therefore starts with an empty history unless you carry it over. To keep it, dump the old database before you remove it and restore the dump into the new one, as [A Database That Survives a Node](12-deployment.md#a-database-that-survives-a-node) does for a move to CloudNativePG.
 

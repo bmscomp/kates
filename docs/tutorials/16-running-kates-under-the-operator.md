@@ -256,17 +256,21 @@ replaced again.
 ## Step 7: Go Back to Standalone, or Clean Up
 
 To go back to the standalone mode, delete the `Kates` resource. The operator
-removes the members, their Services and their volumes. Also delete the API key
-Secret, which deploy made for the operator mode and which the `kates` chart
-makes again with a new key. Then deploy without the flag, and run
-`kates ports` again so the CLI context picks up the new key:
+removes the members, their Services and their volumes. Then deploy without
+the flag. Deploy hands the API key Secret it wrote for the operator mode to the
+`kates` chart, so the key, and your `ports` context, stay the same:
 
 ```bash
 kubectl delete kates kates -n kates
-kubectl delete secret kates-api-key -n kates
 kates deploy
-kates ports
 ```
+
+> [!NOTE]
+> A `kates` CLI of v1.41.2 or older doesn't hand the Secret over, and the
+> standalone install then fails with `invalid ownership metadata` on
+> `kates-api-key`. With such a CLI, run
+> `kubectl delete secret kates-api-key -n kates` before `kates deploy`, and
+> `kates ports` after it to pick up the new key.
 
 The operator and `kates-db` stay installed and unused. Remove them with
 `helm uninstall kates-operator -n kates-operator` and

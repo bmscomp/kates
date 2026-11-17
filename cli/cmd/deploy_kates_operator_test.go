@@ -270,3 +270,41 @@ func TestOnlyTheCurrentGenerationsConditionCounts(t *testing.T) {
 		t.Fatalf("error = %v after %d reads", err, *reads)
 	}
 }
+
+func TestTheOperatorModesAPIKeySecretIsHandedToTheChart(t *testing.T) {
+	origOut, origComb := runExecOutputFn, runExecCombinedFn
+	t.Cleanup(func() { runExecOutputFn, runExecCombinedFn = origOut, origComb })
+	for _, tc := range []struct {
+		name, get string
+		adopted   bool
+	}{
+		{"no Secret", "", false},
+		{"written for the operator", "kates-api-key|", true},
+		{"already the chart's", "kates-api-key|Helm", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var ran []string
+			runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) { return []byte(tc.get), nil }
+			runExecCombinedFn = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+				ran = append(ran, strings.Join(args, " "))
+				return nil, nil
+			}
+			if err := adoptAPIKeySecret(context.Background(), "kates"); err != nil {
+				t.Fatal(err)
+			}
+			if !tc.adopted {
+				if len(ran) != 0 {
+					t.Fatalf("changed a Secret it should leave alone: %q", ran)
+				}
+				return
+			}
+			all := strings.Join(ran, "\n")
+			for _, want := range []string{"app.kubernetes.io/managed-by=Helm",
+				"meta.helm.sh/release-name=kates", "meta.helm.sh/release-namespace=kates"} {
+				if !strings.Contains(all, want) {
+					t.Fatalf("lacks %q:\n%s", want, all)
+				}
+			}
+		})
+	}
+}
