@@ -2,14 +2,14 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: appVersion and the image tag move to 1.41.2, the tag the v1.41.2
+# Patch: appVersion and the image tag move to 1.41.3, the tag the v1.41.3
 # release publishes.
-version: 0.20.3
+version: 0.20.4
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
 # image.tag in values.yaml pinned to that release.
-appVersion: "1.41.2"
+appVersion: "1.41.3"
 keywords:
   - kafka
   - testing
@@ -28,6 +28,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "appVersion 1.41.3 and the image tag move to 1.41.3. The backend is unchanged since 1.41.0; the release ships the CLI's fix that hands the operator mode's API key Secret to the kates chart (#688)."
     - kind: changed
       description: "appVersion 1.41.2 and the image tag move to 1.41.2. The backend is unchanged since 1.41.0; the release ships the CLI's fix for deploys that ran a stale local backend on kind, and pins kates-operator 0.3.1, which reports NoQuorum for a backend older than the quorum (#683)."
     - kind: changed

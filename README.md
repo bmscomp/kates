@@ -193,7 +193,7 @@ This repository is also a GitHub Action, **Kates Quality Gate**. It installs the
 ```yaml
 - name: Kafka performance gate
   id: gate
-  uses: bmscomp/kates@v1.41.2
+  uses: bmscomp/kates@v1.41.3
   with:
     api-url: ${{ vars.KATES_URL }}
     api-key: ${{ secrets.KATES_API_KEY }}
@@ -208,7 +208,7 @@ Other inputs (`type`, `backend`, `timeout`, `version`) and their defaults are de
 
 Outputs: `run-id`, `grade`, and `passed` (`true` or `false`).
 
-The runner has to reach the Kates API. The default `http://localhost:8080` suits a self-hosted runner beside the cluster after `kates ports`; a GitHub-hosted runner needs the API exposed to it. The action runs on Linux and macOS runners, amd64 or arm64, and needs `curl`, `tar` and `python3`. Pin a release tag such as `v1.41.2`, or `v1` to follow the latest 1.x release: each stable release moves it.
+The runner has to reach the Kates API. The default `http://localhost:8080` suits a self-hosted runner beside the cluster after `kates ports`; a GitHub-hosted runner needs the API exposed to it. The action runs on Linux and macOS runners, amd64 or arm64, and needs `curl`, `tar` and `python3`. Pin a release tag such as `v1.41.3`, or `v1` to follow the latest 1.x release: each stable release moves it.
 
 ## Other clusters
 
