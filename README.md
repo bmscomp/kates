@@ -129,24 +129,13 @@ kates gate --min-grade C --records 100000
 - **Which cluster.** `kates deploy` installs into kubectl's current context. Before deploying, it probes every context in your kubeconfig: with none reachable it offers to create the Kind cluster `panda`, and with several it asks which one. The cluster it deploys to becomes kubectl's current context, and it prints the command that switches back. `-y` never prompts, so it fails where it would have asked.
 - **The backend image.** On Kind, `kates deploy` runs a local native image when one is in Docker or on the nodes, `kates:native-local` and then `kates:native`, which a source build leaves there. Without one, the nodes pull the published native image of the release.
 - **The API key.** Every `/api` call except `/api/health` needs the key from Secret `kates-api-key` in namespace `kates` (`kates-stack` with `--topology single`). `kates deploy` writes it into the active CLI context unless that context already holds a key kates did not put there, and `kates ports` into a context of its own, `ports`; a context you create yourself needs `--api-key`. Because `/api/health` is public, a green `kates health` does not prove the key works; `kates test list` does.
-- **`make all`**, in a checkout, is an interactive wrapper for contributors: it creates the Kind cluster if no cluster is reachable, asks for a topology, runs `kates deploy` with the checkout's charts and then the `make ports` script, which uses the second port map below.
+- **`make all`**, in a checkout, is an interactive wrapper for contributors: it creates the Kind cluster if no cluster is reachable, asks for a topology, runs `kates deploy` with the checkout's charts and then the `make ports` script, which forwards to other local ports than `kates ports`.
 
 </details>
 
 ### What `kates deploy` installs
 
-With the default isolated topology:
-
-| Component | Helm release | Namespace |
-|:--|:--|:--|
-| Strimzi operator | `strimzi-operator` | `strimzi-operator` |
-| cert-manager | `cert-manager` | `cert-manager` |
-| Kafka | `krafter` | `kafka` |
-| Prometheus and Grafana | `monitoring` | `monitoring` |
-| Apicurio Registry | `apicurio` | `kafka` |
-| Kates backend, with its PostgreSQL | `kates` | `kates` |
-| Kafka UI | `kafka-ui` | `kafka` |
-| LitmusChaos | `chaos` | `litmus` |
+Strimzi, cert-manager, Kafka, Prometheus and Grafana, Apicurio Registry, the Kates backend with its PostgreSQL, Kafka UI and LitmusChaos. Namespaces are configurable; `kates deploy --dry-run` prints the plan with every release and namespace.
 
 Kafka Connect, MirrorMaker 2, Kyverno and the secret manager are opt-in (`--with-kafka-connect`, `--with-mirror-maker2`, `--with-kyverno`, `--with-secret-manager`). `--topology single` puts everything except the operators in one namespace, `kates-stack`.
 
@@ -154,16 +143,7 @@ The table shows the default, standalone mode: the `kates` chart runs the Kates A
 
 ### Reach the services
 
-Kind publishes no NodePorts on the host, so every `localhost` address is a port-forward. There are two forwarders, with different port maps; the sign-ins are those of a Kind install.
-
-| Service | `kates ports` | `make ports` | Sign-in |
-|:--|:--|:--|:--|
-| Kates API | http://localhost:8080 | http://localhost:30083 | API key |
-| Kafka UI | http://localhost:8085 | http://localhost:30081 | `admin`, password in Secret `kafka-ui-web-password` (namespace `kafka`) |
-| Grafana | http://localhost:3000 | http://localhost:30080 ¹ | `admin` / `admin` |
-| Prometheus | http://localhost:30090 | http://localhost:30090 ¹ | none |
-
-¹ `make ports` looks for Grafana and Prometheus in namespace `kafka`. With the default isolated topology they are in `monitoring`, so run `MONITORING_NS=monitoring make ports`. With `--topology single` everything is in `kates-stack`: set `KAFKA_NS`, `KATES_NS` and `MONITORING_NS` to `kates-stack`, or use `kates ports`, which finds the services in any namespace.
+Kind publishes no NodePorts on the host, so services are reached through port-forwards: `kates ports` exposes them and prints each local URL. On Kind, Grafana signs in with `admin` / `admin`.
 
 `kates ports` first stops every `kubectl port-forward` on the machine, then forwards in the background, points the CLI context `ports` at `http://localhost:8080` with the key from the Secret, and makes `ports` the current context. It changes no other context, keeps a key you set in `ports` yourself, and says when the API rejects the key. `make ports` leaves contexts alone; the CLI switches between `localhost:8080` and `localhost:30083` when only one of them answers. Stop either set with `pkill -f kubectl.port-forward`. To read the credentials yourself:
 
@@ -224,16 +204,7 @@ This repository is also a GitHub Action, **Kates Quality Gate**. It installs the
   run: echo "Grade ${{ steps.gate.outputs.grade }}, passed ${{ steps.gate.outputs.passed }}"
 ```
 
-| Input | Default | What it sets |
-|---|---|---|
-| `api-url` | `http://localhost:8080` | The Kates API the runner calls |
-| `api-key` | none | API key, from Secret `kates-api-key` |
-| `min-grade` | `C` | Lowest passing grade, `A` to `F` |
-| `type` | `LOAD` | Workload: `LOAD`, `STRESS`, `SPIKE`, `ENDURANCE`, `VOLUME`, `CAPACITY`, `ROUND_TRIP` or `INTEGRITY` |
-| `records` | `50000` | Records to produce |
-| `backend` | the API's default | `native` or `trogdor` |
-| `timeout` | `180` | Seconds to wait for the run |
-| `version` | `latest` | CLI release to install; a `kates` already on the `PATH` is used instead |
+Other inputs (`type`, `backend`, `timeout`, `version`) and their defaults are described in [`action.yml`](action.yml).
 
 Outputs: `run-id`, `grade`, and `passed` (`true` or `false`).
 
