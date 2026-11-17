@@ -29,6 +29,8 @@ kates deploy --topology isolated
 
 With no cluster reachable, `kates deploy` offers to create [`panda`](../book/appendix-a-glossary.md#gl-panda), a three-zone Kind cluster, and switches kubectl to it. Accept, and it then installs Strimzi, Kafka, monitoring, LitmusChaos and the Kates API. On a fresh machine this takes 5–10 minutes, most of it pulling images. When a cluster is already reachable, it deploys into kubectl's current context instead, so check `kubectl config current-context` first.
 
+This installs the Kates API standalone, as one pod: the default, which every tutorial uses. To run it as a quorum that survives a lost node or an upgrade, `kates deploy --kates-mode operator --kates-replicas 3` installs it under the Kates operator instead, behind the same Service and API key; [Tutorial 16](16-running-kates-under-the-operator.md) walks through it.
+
 `--topology isolated` puts each component in its own namespace (`kafka`, `kates`, `monitoring`, `litmus`), which the rest of this tutorial uses. `--topology single` puts the whole stack in one `kates-stack` namespace instead, which is fine for a scratch cluster but means every `-n <namespace>` below needs changing.
 
 > [!TIP]

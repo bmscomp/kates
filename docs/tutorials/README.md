@@ -24,6 +24,7 @@ The table gives each tutorial's level, a rough duration, and the tutorials it bu
 | 13 | [Using the Grafana Dashboards](13-using-the-dashboards.md) | Intermediate | 45 min | Tutorial 1 |
 | 14 | [Using Kates from an AI Agent](14-using-kates-from-an-ai-agent.md) | Intermediate | 20 min | Tutorial 1 |
 | 15 | [Authoring & Debugging YAML Suites in VS Code](15-ide-authoring-and-lsp.md) | Intermediate | 20 min | Tutorial 1 |
+| 16 | [Running Kates Under the Kates Operator](16-running-kates-under-the-operator.md) | Intermediate | 30 min | Tutorial 1 |
 
 Tutorials 10–12 rehearse a migration on Kind, where nothing costs anything if
 it goes wrong. When you are ready to migrate a real cluster, the chart's own
@@ -40,7 +41,7 @@ Tutorial 1 (Getting Started)
     ├── Tutorial 5 (Observability) ──── Tutorial 13 (Grafana Dashboards)
     ├── Tutorial 6 (CI/CD) ← requires Tutorial 2
     ├── Tutorial 7 (Security)
-    ├── Tutorial 8 (Deploy & Detect)
+    ├── Tutorial 8 (Deploy & Detect) ──── Tutorial 16 (Kates operator: quorum, drain, lost node)
     ├── Tutorial 9 (Kafka Connect)
     ├── Tutorial 14 (AI agent over MCP, read-only)
     ├── Tutorial 15 (IDE authoring & kates lsp)
@@ -51,7 +52,9 @@ Tutorial 1 (Getting Started)
 - **Performance track:** Tutorials 1 → 2 → 5 — learn test types, then understand the metrics.
 - **Observability track:** Tutorials 1 → 5 → 13 — the CLI's own views of a run first, then the twelve Grafana boards that watch the cluster around it.
 - **Chaos track:** Tutorials 1 → 2 → 3 → 4 — build up to chaos engineering and data integrity.
-- **Operations track:** Tutorials 1 → 8 → 7 — deployment, security, and lifecycle management.
+- **Operations track:** Tutorials 1 → 8 → 7 → 16 — deployment, security, lifecycle management, then the Kates API as a quorum under the Kates operator.
+
+Every tutorial runs against the default standalone install. Tutorial 16 switches to the operator mode, and its last step switches back; the commands of the other tutorials are the same in both modes.
 
 ## Prerequisites
 

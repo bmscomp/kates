@@ -147,7 +147,7 @@ The old PersistentVolumeClaim stays until you delete it.
 kates deploy --kates-mode operator --kates-replicas 3
 ```
 
-Either way the Service is `kates` in the Kates namespace, and the API key is in Secret `kates-api-key`, so `kates ports`, `kates health` and the rest work the same. Deploy refuses to install one mode over the other: uninstall first (`kates clean`), or keep the mode you have. `kates clean` removes the `Kates` resource while the operator still runs, then the operator. The operator doesn't yet support the `INTEGRATION_CDC` test.
+[Running Kates Under the Kates Operator](kates-operator.md) explains the operator mode in full: the quorum, its conditions, draining before an upgrade and what stays the same in the standalone mode. Either way the Service is `kates` in the Kates namespace, and the API key is in Secret `kates-api-key`, so `kates ports`, `kates health` and the rest work the same. Deploy refuses to install one mode over the other: uninstall first (`kates clean`), or keep the mode you have. `kates clean` removes the `Kates` resource while the operator still runs, then the operator. The operator doesn't yet support the `INTEGRATION_CDC` test.
 
 For Kafka broker storage, always use persistent volumes — even in development. Kafka's log retention depends on data being durable, and losing broker data mid-test invalidates results.
 
@@ -1382,4 +1382,4 @@ This deletes the Kind cluster and all associated resources.
 - `make all` is `kates deploy` with a topology prompt; the per-component targets build the same stack piece by piece.
 - The JVM image measures with a low-pause collector; the native image starts fast but pauses, so it suits CI, not measurement.
 
-Your stack is running, so check that it is the cluster you meant to build: [Compliance Checks](compliance.md) writes that architecture down as a file and holds `krafter` to it.
+Your stack is running with the Kates API as one standalone pod. If a lost node or an upgrade must not take it down, [Running Kates Under the Kates Operator](kates-operator.md) runs it as a quorum behind the same Service.

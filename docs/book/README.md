@@ -47,6 +47,7 @@ Reading order is defined by [`_quarto.yml`](_quarto.yml) — filenames are stabl
 | [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) | Step-by-step Kafka deployment with prerequisites and verification |
 | [Kafka Deployment Engineering](15-kafka-deployment.md) | The engineering rationale: Strimzi, KRaft, broker tuning, and operations |
 | [Deployment Guide](12-deployment.md) | Deploying the Kates stack: topology decisions, sizing, and cloud guidance |
+| [Running Kates Under the Kates Operator](kates-operator.md) | The Kates API as a quorum under the operator: failover, drained upgrades, lost nodes; standalone stays the default |
 | [Compliance Checks](compliance.md) | A reference architecture as a file, and checks that hold the live cluster to it |
 | [Security & Compliance](17-security.md) | Authentication, authorization, certificates, network policies, and Kyverno |
 | [Multi-Tenancy](19-multi-tenancy.md) | Topic naming, service onboarding, quotas, and tenant isolation |
@@ -119,7 +120,8 @@ Don't read this book cover-to-cover. Pick a reading path based on what you need:
 ### 🚀 "I want to deploy Kates"
 1. [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) — full step-by-step with prerequisites (~30 min)
 2. [Deployment Guide](12-deployment.md) — architecture decisions, resource sizing, cloud deployment (~15 min)
-3. [The Cluster Under Test](03-cluster.md) — understanding what you just deployed (~10 min)
+3. [Running Kates Under the Kates Operator](kates-operator.md) — optional: the Kates API as a quorum that survives a lost node or an upgrade (~20 min)
+4. [The Cluster Under Test](03-cluster.md) — understanding what you just deployed (~10 min)
 
 ### 💥 "I want to run chaos experiments"
 1. [Chaos Engineering Theory](06-chaos-theory.md) — principles and methodology (~10 min)
