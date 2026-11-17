@@ -37,6 +37,7 @@ Performance tests work against any Kafka cluster the Kates API can reach; fault 
 - **Security audit.** `kates security audit` grades broker configuration A–F. Related commands map the checks to CIS, SOC 2 and PCI DSS, save a baseline and report drift from it.
 - **CI gates.** `kates gate --min-grade B` runs a load test and exits non-zero below the performance grade, `kates test apply -f <scenario> --wait` fails when a scenario violates its SLA gates, and `kates security gate` does the same for the security grade. Finished tests can notify webhooks (`kates webhook add`).
 - **A multi-zone lab on one machine.** A three-node Kind cluster (`panda`) whose nodes (`alpha`, `sigma`, `gamma`) sit in separate zones. On it, `kates deploy` gives each zone its own StorageClass and broker pool and turns on rack awareness, so a full zone failure can be rehearsed locally.
+- **A Kates API that survives a lost node.** The default install runs the Kates API standalone, as one pod, and keeps working as it always has. `kates deploy --kates-mode operator --kates-replicas 3` runs it under the Kates operator instead: a quorum of three or five behind the same Service and key, whose leader is replaced within seconds, and which drains live runs before an upgrade. See [Running Kates Under the Kates Operator](docs/book/kates-operator.md).
 - **Metrics and dashboards.** The Kates API exposes Prometheus metrics, the `monitoring` chart adds twelve Grafana dashboards for Kafka, Kates and chaos runs, and the charts ship Prometheus alert rules. The Kates API also exports OTLP traces, though the default install has no Jaeger to receive them; [Observability](docs/book/09-observability.md) covers the dashboards, the alerts and tracing.
 
 ## Why Kates
@@ -147,7 +148,9 @@ With the default isolated topology:
 | Kafka UI | `kafka-ui` | `kafka` |
 | LitmusChaos | `chaos` | `litmus` |
 
-Kafka Connect, MirrorMaker 2, Kyverno and the secret manager are opt-in (`--with-kafka-connect`, `--with-mirror-maker2`, `--with-kyverno`, `--with-secret-manager`). `--topology single` puts everything except the operators in one namespace, `kates-stack`. After a failure, fix the cause and run `kates deploy` again: it skips or upgrades the components already installed.
+Kafka Connect, MirrorMaker 2, Kyverno and the secret manager are opt-in (`--with-kafka-connect`, `--with-mirror-maker2`, `--with-kyverno`, `--with-secret-manager`). `--topology single` puts everything except the operators in one namespace, `kates-stack`.
+
+The table shows the default, standalone mode: the `kates` chart runs the Kates API as one pod, and every install made before the operator mode keeps working unchanged. With `--kates-mode operator --kates-replicas 3`, deploy installs the Kates operator (release `kates-operator` in `kates-operator`) and a PostgreSQL for Kates (`kates-db`) instead, and the operator runs the Kates API as a quorum of three. Its leader takes the writes, a new one is elected within seconds when it dies, a member whose node is gone is rebuilt elsewhere, and `mode: Drain` lets an upgrade wait for live runs. The Service `kates` and the Secret `kates-api-key` are the same in both modes, so every command below works with either. [Running Kates Under the Kates Operator](docs/book/kates-operator.md) explains the mode, and [Tutorial 16](docs/tutorials/16-running-kates-under-the-operator.md) walks through it. After a failure, fix the cause and run `kates deploy` again: it skips or upgrades the components already installed.
 
 ### Reach the services
 
@@ -260,11 +263,12 @@ The CLI and its full-screen views talk to the backend over REST. The backend als
 | Where | What |
 |:--|:--|
 | [The book](https://bmscomp.github.io/kates/) ([source](docs/book/README.md)) | Concepts, the CLI, the REST and gRPC APIs, deployment, security, upgrades and troubleshooting |
-| [Tutorials](docs/tutorials/README.md) | Step-by-step labs: a first test, every test type, chaos, CI integration, Kafka Connect, MirrorMaker 2 migrations, dashboards |
+| [Tutorials](docs/tutorials/README.md) | Step-by-step labs: a first test, every test type, chaos, CI integration, Kafka Connect, MirrorMaker 2 migrations, dashboards, the Kates operator |
 | [CLI reference](docs/book/10-cli-reference.md) | Commands, flags and contexts |
 | [REST API](docs/book/11-api-reference.md) · [gRPC API](docs/book/16-grpc-api.md) | Endpoints, authentication, exports |
 | [Chaos in practice](docs/book/07-chaos-practice.md) | Disruption types, providers, playbooks, guardrails and grading |
 | [Deployment](docs/book/12-deployment.md) · [Installing Kafka with Helm](docs/book/20-installation-guide.md) | Topologies, sizing, cloud overlays, chart-by-chart installs |
+| [Kates operator](docs/book/kates-operator.md) · [its chart](operator/chart/README.md) | The Kates API as a quorum: deploy, conditions, failover, drained upgrades; standalone stays the default |
 | [Troubleshooting Index](docs/book/appendix-b-troubleshooting.md) | Symptoms mapped to causes and chapters |
 | [Version matrix](docs/book/appendix-d-versions.md) | Every pinned version (Kafka, Strimzi, Quarkus, Java, Go, charts), generated and checked in CI |
 | [Local development](docs/local-development.md) | Makefile targets, image management, working behind a proxy |

@@ -304,6 +304,8 @@ The `kates` chart installs the Kates API, the service in the cluster that runs y
 
 Use this procedure to move the Kates API to a new release, after Kafka. It needs the published chart of that release, or on Kind the repository's `charts/kates`, and rights to upgrade the `kates` release in the `kates` namespace. When the new pods don't become ready, read their log with `kubectl logs deployment/kates -n kates`, and roll back with Step 4.
 
+This procedure is for the standalone mode, the default. Under the Kates operator there is no `kates` release to upgrade: you change the `Kates` resource's version, and under `mode: Drain` no live run is lost, as [Upgrading Without Losing a Run](kates-operator.md#upgrading-without-losing-a-run) shows.
+
 ### Step 1 — Find the Chart for the New Version
 
 A chart version and the Kates API version it ships differ, so read the pair from the chart itself. The [Version & Compatibility Matrix](appendix-d-versions.md) lists the pair for this release:

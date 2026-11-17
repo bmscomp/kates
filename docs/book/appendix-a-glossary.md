@@ -342,6 +342,10 @@ The Kafka Advanced Testing & Engineering Suite, in two halves: the `kates` CLI o
 
 The Kates server: the Quarkus application that serves the REST and gRPC APIs, runs benchmark backends and faults, and stores results. The `kates` chart deploys it as the `kates` Deployment and Service, serving REST and gRPC on port 8080, in the `kates` namespace under the isolated topology; `make ports` forwards it to `localhost:30083`. See [Architecture & Design](02-architecture.md#high-level-architecture).
 
+### Kates Operator {#gl-kates-operator}
+
+A Kubernetes operator: a controller that runs an application from a custom resource describing it. In Kates, it runs the Kates API from a `Kates` resource, as one member or as a quorum of three or five whose leader takes the writes, and drains live runs before an upgrade; `kates deploy --kates-mode operator` installs it, and the standalone `kates` chart stays the default. See [Running Kates Under the Kates Operator](kates-operator.md).
+
 ### Kind {#gl-kind}
 
 Kubernetes IN Docker: a tool that runs a Kubernetes cluster in Docker containers, one container per node. `make cluster` creates the `panda` cluster with it. See [Deployment Guide](12-deployment.md#kubernetes-cluster).

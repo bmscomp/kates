@@ -224,3 +224,4 @@ kates clean --yes
 - [Tutorial 1 — Getting Started](01-getting-started.md) — Run your first performance test
 - [Tutorial 3 — Chaos Engineering](03-chaos-engineering.md) — Inject faults during tests
 - [Tutorial 6 — CI/CD Integration](06-cicd-integration.md) — Add quality gates to your pipeline
+- [Tutorial 16 — Running Kates Under the Kates Operator](16-running-kates-under-the-operator.md) — Answer **How should Kates be installed?** with Operator, and run the Kates API as a quorum
