@@ -1715,6 +1715,9 @@ func (dc *deployContext) katesComponent() component {
 			// Auto-cleanup stale ClusterRole ownership from previous topology switches
 			cleanupStaleClusterResource(ctx, "clusterrole", "kates", appNS)
 			cleanupStaleClusterResource(ctx, "clusterrolebinding", "kates", appNS)
+			if err := adoptAPIKeySecret(ctx, appNS); err != nil {
+				return err
+			}
 
 			// Ends at .svc: the pod's search path adds the cluster domain, so a wrong detection cannot break it.
 			katesBootstrap := fmt.Sprintf("%s-kafka-bootstrap.%s.svc:9092", dc.primary.Name, dc.primary.Namespace)
