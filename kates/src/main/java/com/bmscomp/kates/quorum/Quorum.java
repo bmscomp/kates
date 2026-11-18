@@ -257,6 +257,12 @@ public class Quorum {
         return current == null || !current.serving() ? null : current.leaderId();
     }
 
+    /** Every member as it reports itself; empty with no quorum. */
+    public List<QuorumMember.View> members() {
+        QuorumMember current = member;
+        return current == null ? List.of() : current.views();
+    }
+
     /** What {@code /api/health} shows. */
     public Map<String, Object> health() {
         QuorumMember current = member;

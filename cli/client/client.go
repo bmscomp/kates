@@ -333,6 +333,10 @@ func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
 	return get[*HealthResponse](c, ctx, "/api/health")
 }
 
+func (c *Client) Quorum(ctx context.Context) (*QuorumStatus, error) {
+	return get[*QuorumStatus](c, ctx, "/api/quorum")
+}
+
 func (c *Client) ClusterInfo(ctx context.Context) (*ClusterInfo, error) {
 	return get[*ClusterInfo](c, ctx, "/api/cluster/info")
 }

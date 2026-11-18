@@ -10,6 +10,31 @@ type HealthResponse struct {
 	Tests  map[string]TestConfig `json:"tests,omitempty"`
 }
 
+// QuorumStatus is GET /api/quorum: every member of the Kates quorum as it
+// reports itself. Indexes are -1 where a member has none; a member that did
+// not answer has only ID, Address and Error.
+type QuorumStatus struct {
+	Enabled    bool           `json:"enabled"`
+	AnsweredBy string         `json:"answeredBy"`
+	Members    []QuorumMember `json:"members"`
+}
+
+type QuorumMember struct {
+	ID             string `json:"id"`
+	Address        string `json:"address"`
+	Role           string `json:"role"`
+	Term           *int64 `json:"term"`
+	LeaderID       string `json:"leaderId"`
+	RoleElapsedMs  *int64 `json:"roleElapsedMs"`
+	CommitIndex    *int64 `json:"commitIndex"`
+	AppliedIndex   *int64 `json:"appliedIndex"`
+	LastIndex      *int64 `json:"lastIndex"`
+	SnapshotIndex  *int64 `json:"snapshotIndex"`
+	StorageHealthy *bool  `json:"storageHealthy"`
+	LastContactMs  *int64 `json:"lastContactMs"`
+	Error          string `json:"error"`
+}
+
 type EngineInfo struct {
 	ActiveBackend     string   `json:"activeBackend"`
 	AvailableBackends []string `json:"availableBackends"`
