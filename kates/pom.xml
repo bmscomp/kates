@@ -21,7 +21,7 @@
              fixes up to GHSA-mcr4-qmvw-px4g (CVE-2026-106451) need 1.11.4 or later. -->
         <lz4.version>1.14.0</lz4.version>
         <!-- 2026-11-14: the BOM brings 1.5.7-16; no advisory, kept so the resolved version does not go down. -->
-        <zstd.version>1.5.7-25</zstd.version>
+        <zstd.version>1.5.7-28</zstd.version>
         <!-- 2026-11-14: Apache Ratis for the members' quorum (plans J1/J2); the BOM does not manage it. -->
         <ratis.version>3.3.1</ratis.version>
         <spotless.version>3.11.0</spotless.version>
