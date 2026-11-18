@@ -30,7 +30,7 @@ kube.workspace = true
 opentelemetry = { version = "0.33", default-features = false, features = ["trace"] }
 opentelemetry-otlp = { version = "0.33", default-features = false, features = ["grpc-tonic", "tls-aws-lc", "trace"], optional = true }
 opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace"] }
-prometheus-client = "0.25"
+prometheus-client = "0.26"
 rustls = "0.23"
 tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1"
