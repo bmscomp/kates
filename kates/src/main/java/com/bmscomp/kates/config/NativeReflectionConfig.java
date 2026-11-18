@@ -33,6 +33,8 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
             com.bmscomp.kates.domain.PruneResponse.class,
             com.bmscomp.kates.api.WhoAmIResource.WhoAmI.class,
             com.bmscomp.kates.api.DrainResource.DrainRequest.class,
-            com.bmscomp.kates.api.DrainResource.DrainStatus.class
+            com.bmscomp.kates.api.DrainResource.DrainStatus.class,
+            com.bmscomp.kates.api.QuorumResource.QuorumStatus.class,
+            com.bmscomp.kates.quorum.QuorumMember.View.class
         })
 public class NativeReflectionConfig {}
