@@ -294,12 +294,21 @@ curl -s -H "X-API-Key: $KATES_API_KEY" "$BASE/api/quorum"
   "enabled": true,
   "answeredBy": "kates-1",
   "members": [
-    {"id": "kates-0", "address": "kates-0.kates-members:9300", "role": "LEADER", "term": 7,
-     "leaderId": "kates-0", "roleElapsedMs": 11520000, "commitIndex": 1042, "appliedIndex": 1042,
-     "lastIndex": 1042, "snapshotIndex": -1, "storageHealthy": true, "lastContactMs": null, "error": null},
-    {"id": "kates-1", "address": "kates-1.kates-members:9300", "role": "FOLLOWER", "term": 7,
-     "leaderId": "kates-0", "roleElapsedMs": 11519000, "commitIndex": 1042, "appliedIndex": 1041,
-     "lastIndex": 1042, "snapshotIndex": -1, "storageHealthy": true, "lastContactMs": 40, "error": null}
+    {
+      "id": "kates-1",
+      "address": "kates-1.kates-members:9300",
+      "role": "FOLLOWER",
+      "term": 7,
+      "leaderId": "kates-0",
+      "roleElapsedMs": 11519000,
+      "commitIndex": 1042,
+      "appliedIndex": 1041,
+      "lastIndex": 1042,
+      "snapshotIndex": -1,
+      "storageHealthy": true,
+      "lastContactMs": 40,
+      "error": null
+    }
   ]
 }
 ```
