@@ -15,7 +15,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.40.1.1</quarkus.platform.version>
+        <quarkus.platform.version>3.40.1.2</quarkus.platform.version>
         <surefire-plugin.version>3.6.1</surefire-plugin.version>
         <!-- 2026-11-14: the BOM does not manage at.yawk.lz4 and kafka-clients 4.2.1 brings 1.10.1;
              fixes up to GHSA-mcr4-qmvw-px4g (CVE-2026-106451) need 1.11.4 or later. -->
