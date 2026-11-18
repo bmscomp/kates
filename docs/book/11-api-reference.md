@@ -40,6 +40,7 @@ Find the call you need here, by family, and follow its link to the entry:
 | [GET /api/health](#get-apihealth) | Reports whether the Kates API is up and reaches Kafka; public |
 | [GET /api/drain](#get-apidrain) | Reports whether the Kates API is draining and what work is still live |
 | [PUT /api/drain](#put-apidrain) | Starts or lifts a drain: no new run or fault while live ones finish |
+| [GET /api/quorum](#get-apiquorum) | Reports every quorum member's Raft role, term, indexes and last contact |
 | [POST /api/tests](#post-apitests) | Creates and starts a test run |
 | [GET /api/tests](#get-apitests) | Lists test runs, by type or status |
 | [GET /api/tests/types](#get-apiteststypes) | Lists the test types the Kates API accepts |
@@ -277,6 +278,33 @@ While the API is draining:
 - Live runs and faults go on to their end. A resilience test admitted before the drain still starts its benchmark when it reaches it. A dry run, a cancel and every read are answered as usual.
 
 The switch is kept in memory: a restarted pod is not draining. A body without `draining` is a `400`.
+
+#### GET /api/quorum
+
+Reports every member of the quorum as that member reports itself. Any member answers: it asks each member, itself included, for its Ratis group info over the members' mutual TLS port, one after the other. `kates raft ps` prints this. Requires the `read` scope.
+
+```bash
+curl -s -H "X-API-Key: $KATES_API_KEY" "$BASE/api/quorum"
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "enabled": true,
+  "answeredBy": "kates-1",
+  "members": [
+    {"id": "kates-0", "address": "kates-0.kates-members:9300", "role": "LEADER", "term": 7,
+     "leaderId": "kates-0", "roleElapsedMs": 11520000, "commitIndex": 1042, "appliedIndex": 1042,
+     "lastIndex": 1042, "snapshotIndex": -1, "storageHealthy": true, "lastContactMs": null, "error": null},
+    {"id": "kates-1", "address": "kates-1.kates-members:9300", "role": "FOLLOWER", "term": 7,
+     "leaderId": "kates-0", "roleElapsedMs": 11519000, "commitIndex": 1042, "appliedIndex": 1041,
+     "lastIndex": 1042, "snapshotIndex": -1, "storageHealthy": true, "lastContactMs": 40, "error": null}
+  ]
+}
+```
+
+`role` is `LEADER`, `FOLLOWER`, `CANDIDATE` or `LISTENER`, and `roleElapsedMs` how long the member has held it. `term` is the leader's current term on the leader, and elsewhere the term of the member's last entry, which is the current term once the leader has committed its first entry. Indexes are `-1` where the member has none. `lastContactMs` is how long ago the leader last heard from the member: `null` on the leader itself, and when the leader did not answer. A member that does not answer within 800 ms has only `id`, `address` and `error`. On a Kates that runs alone, `enabled` is false and `members` is empty.
 
 ### Test Management
 

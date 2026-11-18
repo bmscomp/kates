@@ -97,6 +97,47 @@ class QuorumMemberTest {
     }
 
     @Test
+    void anyMemberReportsEveryMemberAndOneThatDoesNotAnswer() throws Exception {
+        TestPki pki = new TestPki(tmp.resolve("pki"));
+        List<String> peers = peers(3);
+        Path[][] files = certificates(pki, 3);
+        for (int i = 0; i < 3; i++) {
+            started.add(QuorumMember.start(settings(peers, i, files[i])));
+        }
+        QuorumMember leader = await(() -> soleLeader(started));
+        QuorumMember follower =
+                started.stream().filter(m -> m != leader).findFirst().orElseThrow();
+        long applied = leader.appliedIndex();
+        await(() -> started.stream().allMatch(m -> m.appliedIndex() >= applied) ? leader : null);
+
+        List<QuorumMember.View> views = follower.views();
+
+        assertEquals(
+                List.of("m0", "m1", "m2"),
+                views.stream().map(QuorumMember.View::id).toList());
+        for (QuorumMember.View view : views) {
+            assertNull(view.error(), view.toString());
+            assertEquals(leader.memberId(), view.leaderId(), view.toString());
+            assertEquals(leader.term(), view.term(), view.toString());
+            assertTrue(view.commitIndex() >= applied, view.toString());
+            assertEquals(view.id().equals(leader.memberId()) ? "LEADER" : "FOLLOWER", view.role());
+            assertEquals(view.id().equals(leader.memberId()), view.lastContactMs() == null, view.toString());
+        }
+
+        QuorumMember other = started.stream()
+                .filter(m -> m != leader && m != follower)
+                .findFirst()
+                .orElseThrow();
+        other.close();
+        started.remove(other);
+        QuorumMember.View gone = follower.views().stream()
+                .filter(v -> v.id().equals(other.memberId()))
+                .findFirst()
+                .orElseThrow();
+        assertTrue(gone.error() != null && gone.role() == null, gone.toString());
+    }
+
+    @Test
     void aClosedServerSaysSo() throws Exception {
         TestPki pki = new TestPki(tmp.resolve("pki"));
         List<String> peers = peers(1);

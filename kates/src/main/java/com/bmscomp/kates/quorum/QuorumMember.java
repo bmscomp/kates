@@ -6,8 +6,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -19,6 +22,9 @@ import org.apache.ratis.conf.Parameters;
 import org.apache.ratis.conf.RaftProperties;
 import org.apache.ratis.grpc.GrpcConfigKeys;
 import org.apache.ratis.grpc.GrpcTlsConfig;
+import org.apache.ratis.proto.RaftProtos.LogInfoProto;
+import org.apache.ratis.proto.RaftProtos.RoleInfoProto;
+import org.apache.ratis.protocol.GroupInfoReply;
 import org.apache.ratis.protocol.Message;
 import org.apache.ratis.protocol.RaftGroup;
 import org.apache.ratis.protocol.RaftGroupId;
@@ -326,6 +332,97 @@ public final class QuorumMember implements AutoCloseable {
      */
     public long appliedIndex() {
         return info().getLastAppliedIndex();
+    }
+
+    /**
+     * One member as it reports itself over Ratis' group-info RPC. Indexes are -1 where the member
+     * has none. {@code term} is the leader's current term on the leader, and elsewhere the term of
+     * the member's last entry, which is the current term once the leader has committed its first
+     * entry. {@code lastContactMs} is how long ago the leader last heard from this member: null on
+     * the leader, or when no leader answered. A member that did not answer has only its id, its
+     * address and {@code error}.
+     */
+    public record View(
+            String id,
+            String address,
+            String role,
+            Long term,
+            String leaderId,
+            Long roleElapsedMs,
+            Long commitIndex,
+            Long appliedIndex,
+            Long lastIndex,
+            Long snapshotIndex,
+            Boolean storageHealthy,
+            Long lastContactMs,
+            String error) {}
+
+    /** Every member's view, asked of each in turn on this member's client: one 800 ms timeout each at worst. */
+    public List<View> views() {
+        Map<RaftPeer, Object> answers = new LinkedHashMap<>();
+        Map<String, Long> lastContact = new HashMap<>();
+        for (RaftPeer peer : group.getPeers()) {
+            try {
+                GroupInfoReply reply =
+                        client.getGroupManagementApi(peer.getId()).info(GROUP);
+                answers.put(peer, reply);
+                if (reply.getRoleInfoProto().hasLeaderInfo()) {
+                    for (var follower : reply.getRoleInfoProto().getLeaderInfo().getFollowerInfoList()) {
+                        lastContact.put(follower.getId().getId().toStringUtf8(), follower.getLastRpcElapsedTimeMs());
+                    }
+                }
+            } catch (IOException | RuntimeException e) {
+                answers.put(peer, e);
+            }
+        }
+        List<View> views = new ArrayList<>();
+        answers.forEach((peer, answer) -> views.add(view(peer, answer, lastContact)));
+        return views;
+    }
+
+    private static View view(RaftPeer peer, Object answer, Map<String, Long> lastContact) {
+        String id = peer.getId().toString();
+        if (!(answer instanceof GroupInfoReply reply)) {
+            Exception e = (Exception) answer;
+            return new View(
+                    id,
+                    peer.getAddress(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+        RoleInfoProto role = reply.getRoleInfoProto();
+        LogInfoProto log = reply.getLogInfoProto();
+        String leader = null;
+        Long term = log.hasLastEntry() ? log.getLastEntry().getTerm() : null;
+        if (role.hasLeaderInfo()) {
+            leader = id;
+            term = role.getLeaderInfo().getTerm();
+        } else if (role.hasFollowerInfo()) {
+            leader = role.getFollowerInfo().getLeaderInfo().getId().getId().toStringUtf8();
+        }
+        return new View(
+                id,
+                peer.getAddress(),
+                role.getRole().name(),
+                term,
+                leader == null || leader.isEmpty() ? null : leader,
+                role.getRoleElapsedTimeMs(),
+                log.hasCommitted() ? log.getCommitted().getIndex() : -1,
+                log.hasApplied() ? log.getApplied().getIndex() : -1,
+                log.hasLastEntry() ? log.getLastEntry().getIndex() : -1,
+                log.hasLastSnapshot() ? log.getLastSnapshot().getIndex() : -1,
+                reply.isRaftStorageHealthy(),
+                lastContact.get(id),
+                null);
     }
 
     private DivisionInfo info() {

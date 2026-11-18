@@ -63,6 +63,7 @@ var commandProfiles = map[string][]string{
 	"plugin":        nil,
 	"ports":         nil,
 	"profile":       {"performance"},
+	"raft":          nil,
 	"replay":        {"performance", "integrity"},
 	"report":        {"performance", "integrity", "chaos"},
 	"resilience":    {"chaos"},
