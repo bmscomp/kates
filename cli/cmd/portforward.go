@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -852,16 +853,26 @@ func portForwardArgs(spec portForwardSpec) []string {
 
 const localAPIRepairWait = 3 * time.Second
 
-func repairLocalAPIPortForward(ctx context.Context, _ error) (bool, error) {
+// localAPIPort is the local port of the forward kates ports made for the
+// API, when the command talks to the API through it.
+func localAPIPort() (int, bool) {
 	if apiClient == nil || activeContext != portsContextName || apiURLOverridden {
-		return false, nil
+		return 0, false
 	}
 	u, err := url.Parse(apiClient.BaseURL)
 	if err != nil || !strings.EqualFold(u.Scheme, "http") || !isLoopbackHost(u.Hostname()) {
-		return false, nil
+		return 0, false
 	}
 	port, err := strconv.Atoi(u.Port())
 	if err != nil || port <= 0 {
+		return 0, false
+	}
+	return port, true
+}
+
+func repairLocalAPIPortForward(ctx context.Context, _ error) (bool, error) {
+	port, ok := localAPIPort()
+	if !ok {
 		return false, nil
 	}
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
@@ -884,6 +895,69 @@ func repairLocalAPIPortForward(ctx context.Context, _ error) (bool, error) {
 			spec.Resource, spec.Local, spec.Remote, spec.Namespace)
 	}
 	return true, nil
+}
+
+// followLeaderPortForward replaces the API forward with one to the member
+// that now leads the quorum. kubectl port-forward resolves service/kates to a
+// pod once, when it starts; the Service selects the leader, so a new forward
+// reaches the member the old one no longer does.
+func followLeaderPortForward(ctx context.Context) error {
+	port, ok := localAPIPort()
+	if !ok {
+		return errors.New("the API is not reached through a kates ports forward")
+	}
+	if stopPortForwardsOnPort(port) == 0 {
+		return fmt.Errorf("no kubectl port-forward of this cluster listens on port %d", port)
+	}
+
+	followCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	spec, err := findKatesAPIPortForwardSpec(followCtx, port)
+	if err != nil {
+		return err
+	}
+	// The stopped forward's port takes a moment to come free.
+	for localPortTaken(port) {
+		select {
+		case <-followCtx.Done():
+			return fmt.Errorf("port %d did not come free", port)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	if err := startPortForwardFn(spec); err != nil {
+		return err
+	}
+	if !waitForLocalPort(followCtx, port, localAPIRepairWait) {
+		return fmt.Errorf("port-forward %s %d:%d in namespace %s did not become reachable",
+			spec.Resource, spec.Local, spec.Remote, spec.Namespace)
+	}
+	fmt.Fprintf(os.Stderr, "  %s The Kates leader moved: forwarded port %d to it again\n", output.WarningStyle.Render("⚠"), port)
+	return nil
+}
+
+// stopPortForwardsOnPort stops the kubectl port-forwards into the cluster
+// kates ports forwards from that listen on local port, and returns how many
+// it stopped.
+func stopPortForwardsOnPort(port int) int {
+	procs, err := listProcessesFn()
+	if err != nil {
+		return 0
+	}
+	mapping := strconv.Itoa(port) + ":"
+	stopped := 0
+	for pid, cmdLine := range procs {
+		p, ok := parsePortForward(cmdLine)
+		if !ok || pid == os.Getpid() || (p.Context != "" && p.Context != portsKubeContext) {
+			continue
+		}
+		if !slices.ContainsFunc(strings.Fields(cmdLine), func(f string) bool { return strings.HasPrefix(f, mapping) }) {
+			continue
+		}
+		if stopProcessFn(pid) == nil {
+			stopped++
+		}
+	}
+	return stopped
 }
 
 func findKatesAPIPortForwardSpec(ctx context.Context, localPort int) (portForwardSpec, error) {
