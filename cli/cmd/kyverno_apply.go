@@ -55,6 +55,9 @@ several are.`,
 		if err != nil {
 			return err
 		}
+		if err := refuseOperatorKates(ctx, appNS); err != nil {
+			return err
+		}
 
 		// 1. Detect and build Helm args
 		helmArgs := []string{"upgrade", "--install", "kates", chartRootPath("charts/kates"),
@@ -238,6 +241,17 @@ func kyvernoReleaseNamespace(ctx context.Context, flagNS string, scoped bool) (s
 		namespaces[i] = r.Namespace
 	}
 	return "", cmdErr("kates is installed in " + strings.Join(namespaces, " and ") + ": pass --app-ns (or --topology single --namespace) to say which release gets the policies")
+}
+
+// refuseOperatorKates stops kyverno apply where the Kates operator runs Kates:
+// there is no kates release to carry the policies, and upgrade --install would
+// install a standalone Kates over the operator's objects.
+func refuseOperatorKates(ctx context.Context, appNS string) error {
+	if isHelmReleaseDeployedFn(ctx, "kates", appNS) || !katesResourceExists(ctx, appNS) {
+		return nil
+	}
+	return cmdErr("kates in " + appNS + " is run by the Kates operator (Kates resource " + katesResourceName +
+		"), not the Helm release kates the policies are values of: kyverno apply would install a second Kates beside it, so it does not run in --kates-mode operator")
 }
 
 // countRenderedKinds counts the objects in helm's rendered manifest.

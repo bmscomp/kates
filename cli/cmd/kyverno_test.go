@@ -334,3 +334,34 @@ func TestKyvernoApplyPassesPolicies(t *testing.T) {
 		t.Errorf("helm must get .policies' pod labels: calls %q, values %q", *calls, values)
 	}
 }
+
+// Under the Kates operator there is no kates release: kyverno apply refuses
+// rather than install a standalone Kates over the operator's objects.
+func TestRefuseOperatorKates(t *testing.T) {
+	origOut, origDeployed := runExecOutputFn, isHelmReleaseDeployedFn
+	t.Cleanup(func() { runExecOutputFn, isHelmReleaseDeployedFn = origOut, origDeployed })
+	for _, tt := range []struct {
+		name              string
+		release, resource bool
+		wantErr           bool
+	}{
+		{"operator", false, true, true},
+		{"standalone", true, false, false},
+		{"nothing installed", false, false, false},
+	} {
+		isHelmReleaseDeployedFn = func(context.Context, string, string) bool { return tt.release }
+		runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) {
+			if tt.resource {
+				return []byte("kates.kates.io/kates\n"), nil
+			}
+			return nil, nil
+		}
+		err := refuseOperatorKates(context.Background(), "kates")
+		if (err != nil) != tt.wantErr {
+			t.Errorf("%s: err %v", tt.name, err)
+		}
+		if err != nil && !strings.Contains(err.Error(), "Kates operator") {
+			t.Errorf("%s: message %q", tt.name, err)
+		}
+	}
+}
