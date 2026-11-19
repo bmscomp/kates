@@ -23,6 +23,13 @@ type Client struct {
 	MaxRetries int
 	APIKey     string
 
+	// OnNotLeader, when set, is called once when a Kates member refuses a
+	// request because another member leads its quorum, to point BaseURL's
+	// route at the leader; the request is then sent once more. kubectl
+	// port-forward pins one pod when it starts, so a forward to service/kates
+	// keeps reaching a former leader after leadership moves.
+	OnNotLeader func(ctx context.Context) error
+
 	// setupErr, when set, is what every request returns instead of being
 	// sent (Failing).
 	setupErr error
@@ -200,6 +207,7 @@ func (c *Client) doRequestWith(ctx context.Context, hc *http.Client, req *http.R
 	}
 
 	var lastErr error
+	followedLeader := false
 	for i := 0; i < attempts; i++ {
 		if i > 0 {
 			backoff := time.Duration(math.Pow(2, float64(i-1))) * 500 * time.Millisecond
@@ -224,6 +232,18 @@ func (c *Client) doRequestWith(ctx context.Context, hc *http.Client, req *http.R
 			continue
 		}
 
+		// The refusal comes before the member does any work, so sending the
+		// request again cannot do it twice.
+		if !followedLeader && c.OnNotLeader != nil && namesOtherLeader(resp, body) {
+			followedLeader = true
+			if err := c.OnNotLeader(ctx); err == nil && rewind(req) == nil {
+				// A pooled connection still leads to the route just replaced.
+				hc.CloseIdleConnections()
+				i--
+				continue
+			}
+		}
+
 		if resp.StatusCode >= 500 && retryable && i < attempts-1 {
 			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 			continue
@@ -236,6 +256,43 @@ func (c *Client) doRequestWith(ctx context.Context, hc *http.Client, req *http.R
 		return body, nil
 	}
 	return nil, lastErr
+}
+
+// notLeaderPrefix starts the message of a member that does not lead its
+// quorum (NotLeaderException.message); notLeaderUnknown ends it when no
+// member leads, which following cannot fix.
+const (
+	notLeaderPrefix  = "This Kates member does not lead its quorum: "
+	notLeaderUnknown = "no leader is known yet: retry later"
+)
+
+// namesOtherLeader reports whether resp is a member's refusal that names
+// another member as the leader.
+func namesOtherLeader(resp *http.Response, body []byte) bool {
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		return false
+	}
+	var apiErr APIError
+	if json.Unmarshal(body, &apiErr) != nil {
+		return false
+	}
+	return strings.HasPrefix(apiErr.Message, notLeaderPrefix) && !strings.HasSuffix(apiErr.Message, notLeaderUnknown)
+}
+
+// rewind gives req a fresh body so it can be sent again.
+func rewind(req *http.Request) error {
+	if req.Body == nil || req.Body == http.NoBody {
+		return nil
+	}
+	if req.GetBody == nil {
+		return errors.New("request body cannot be sent twice")
+	}
+	body, err := req.GetBody()
+	if err != nil {
+		return err
+	}
+	req.Body = body
+	return nil
 }
 
 // setAuth puts the API key on req, the one way every request carries it.

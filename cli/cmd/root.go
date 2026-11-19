@@ -590,6 +590,7 @@ var rootCmd = &cobra.Command{
 			Insecure: ctx.Insecure,
 		}
 		apiClient = client.NewWithOptions(opts)
+		apiClient.OnNotLeader = followLeaderPortForward
 		contextErr = ctxErr
 		if ctxErr != nil {
 			// Commands that never call the API, kates ctx set among them,
