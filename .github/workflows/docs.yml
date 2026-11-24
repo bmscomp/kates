@@ -103,7 +103,7 @@ jobs:
 
   gate:
     name: Gate · Docs
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [changes, readme-chart-table, mermaid, link-check]
     runs-on: ubuntu-latest
     timeout-minutes: 5

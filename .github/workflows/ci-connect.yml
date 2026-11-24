@@ -99,7 +99,7 @@ jobs:
 
   gate:
     name: Gate · Connect
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [changes, build-validation]
     runs-on: ubuntu-latest
     timeout-minutes: 5

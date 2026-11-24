@@ -253,7 +253,7 @@ jobs:
 
   gate:
     name: Gate · Lint
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [changes, workflows, scripts, dockerfiles, yaml, go, java, makefile, chart-versions, agents]
     runs-on: ubuntu-latest
     timeout-minutes: 5

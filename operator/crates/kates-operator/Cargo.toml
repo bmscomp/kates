@@ -33,7 +33,7 @@ opentelemetry_sdk = { version = "0.33", default-features = false, features = ["t
 prometheus-client = "0.25"
 rustls = "0.23"
 tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
-tracing = "0.1"
+tracing.workspace = true
 tracing-opentelemetry = { version = "0.34", default-features = false }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 

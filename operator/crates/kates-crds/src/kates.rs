@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
     namespaced,
     status = "KatesStatus",
     doc = "One Kates backend. crd-version: 2",
-    cel,
     // The name becomes a Service's, and the pods' with a suffix.
     validation = Rule::new("self.metadata.name.matches('^[a-z]([-a-z0-9]{0,50}[a-z0-9])?$')")
         .message("name must start with a letter and hold at most 52 lower-case letters, digits and -: it names the Service and the pods"),

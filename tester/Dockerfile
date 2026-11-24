@@ -81,7 +81,8 @@ RUN set -eu; \
       fi; \
       rm "/opt/kafka/libs/${old}"; \
       new="/opt/kafka/libs/${path##*/}"; \
-      fetch -o "${new}" "${MAVEN_REPO}/${path}"; \
+      fetch -o "${new}" "${MAVEN_REPO}/${path}" \
+        || fetch -o "${new}" "https://maven-central.storage-download.googleapis.com/maven2/${path}"; \
       printf '%s  %s\n' "${sum}" "${new}" > jar.sha256; \
       sha256sum -c jar.sha256; \
     done < overrides; \

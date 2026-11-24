@@ -1542,7 +1542,7 @@ jobs:
 
   gate:
     name: Gate · MirrorMaker 2
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [changes, chart, metrics-live]
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -124,7 +124,7 @@ jobs:
 
   gate:
     name: Gate · Tester
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [changes, build]
     runs-on: ubuntu-latest
     timeout-minutes: 5

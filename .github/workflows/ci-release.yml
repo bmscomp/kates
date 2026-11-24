@@ -80,7 +80,7 @@ jobs:
 
   gate:
     name: Gate · Release scan
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [scan]
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -258,7 +258,7 @@ jobs:
 
   gate:
     name: Gate · Integration
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [changes, integration]
     runs-on: ubuntu-latest
     timeout-minutes: 5
