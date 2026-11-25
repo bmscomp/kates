@@ -13,7 +13,7 @@ kates-client = { path = "../kates-client" }
 kates-crds = { path = "../kates-crds" }
 futures = "0.3"
 http = "1"
-jiff = "0.2"
+jiff = "1.0"
 json-patch = "4"
 # The members' quorum CA and certificates, on the aws-lc-rs backend rustls already uses.
 rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
