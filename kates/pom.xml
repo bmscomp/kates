@@ -19,7 +19,7 @@
         <surefire-plugin.version>3.6.1</surefire-plugin.version>
         <!-- 2026-11-14: the BOM does not manage at.yawk.lz4 and kafka-clients 4.2.1 brings 1.10.1;
              fixes up to GHSA-mcr4-qmvw-px4g (CVE-2026-106451) need 1.11.4 or later. -->
-        <lz4.version>1.14.0</lz4.version>
+        <lz4.version>1.14.1</lz4.version>
         <!-- 2026-11-14: the BOM brings 1.5.7-16; no advisory, kept so the resolved version does not go down. -->
         <zstd.version>1.5.7-28</zstd.version>
         <!-- 2026-11-14: Apache Ratis for the members' quorum (plans J1/J2); the BOM does not manage it. -->
